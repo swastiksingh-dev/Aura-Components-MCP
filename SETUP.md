@@ -78,6 +78,25 @@ node ./dist/server.js
 
 as a stdio MCP entry (command `node`, args `dist/server.js`), or run `npm run verify` first to watch all 18 live checks pass before wiring it in.
 
+## OpenCode
+
+Add to `opencode.json` (or `opencode.jsonc`) in your project root or `~/.config/opencode/` (see [opencode.ai/docs/mcp-servers](https://opencode.ai/docs/mcp-servers)):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "aura-components": {
+      "type": "local",
+      "command": ["node", "/absolute/path/to/aura-components-mcp/dist/server.js"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Restart OpenCode (or run `/mcp` to reload). The 15 `aura_*` tools show up in the TUI. Same first prompt as Claude Code above. A copy-paste file lives at `examples/opencode.json`.
+
 ## Any other MCP client
 
 Transport is stdio, no auth. Command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. The handshake is standard MCP (`initialize`, `tools/list`, `tools/call`). If the client asks for env, leave it empty; tuning vars are optional (see README).

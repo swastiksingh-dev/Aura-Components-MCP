@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "aura-components": {
+      "type": "local",
+      "command": ["node", "/absolute/path/to/aura-components-mcp/dist/server.js"],
+      "enabled": true
+    }
+  }
+}

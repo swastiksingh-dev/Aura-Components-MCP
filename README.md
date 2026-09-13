@@ -36,7 +36,7 @@ cd aura-components-mcp
 npm run build
 ```
 
-Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md): Claude Code, Cursor, Codex, Windsurf, Cline, Roo Code, DeepSeek Harness, generic stdio. Launch site with animated explainer: open `flow/index.html` in a browser.
+Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md): Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio. Launch site with animated explainer: open `flow/index.html` in a browser.
 
 ```bash
 # Claude Code
@@ -46,6 +46,11 @@ claude mcp add aura-components -- node ./dist/server.js
 ```json
 // Cursor, Windsurf, and most others (~/.cursor/mcp.json or equivalent)
 { "mcpServers": { "aura-components": { "command": "node", "args": ["./dist/server.js"] } } }
+```
+
+```json
+// OpenCode (opencode.json) — see https://opencode.ai/docs/mcp-servers
+{ "$schema": "https://opencode.ai/config.json", "mcp": { "aura-components": { "type": "local", "command": ["node", "./dist/server.js"], "enabled": true } } }
 ```
 
 ## The 15 tools
