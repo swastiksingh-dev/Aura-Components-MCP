@@ -1,7 +1,7 @@
 // catalog.test.mjs — hermetic tests for query building, shaping, caching.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl } from "../src/catalog.mjs";
+import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso } from "../src/catalog.mjs";
 import { installGuide, tokenHints, detectNeeds } from "../src/guide.mjs";
 
 const cfg = { supabaseUrl: "https://x.supabase.co", anonKey: "k", timeoutMs: 1000, retries: 0, cacheTtlMs: 60000, defaultLimit: 10, maxLimit: 25, codeChars: 100, contentChars: 100, freeOnlyDefault: false, userAgent: "t" };
@@ -65,6 +65,36 @@ test("concurrent identical searches coalesce to one fetch", async () => {
   const cat = createCatalog({ fetcher: stub, config: cfg });
   await Promise.all([cat.searchCatalog("skills", { query: "x" }), cat.searchCatalog("skills", { query: "x" }), cat.searchCatalog("skills", { query: "x" })]);
   assert.equal(calls, 1);
+});
+
+test("queryTokens strips stop-words, keeps significant terms", () => {
+  assert.deepEqual(queryTokens("dark cinematic portfolio"), ["cinematic", "portfolio"]);
+  assert.deepEqual(queryTokens("hero"), ["hero"]);
+  assert.deepEqual(queryTokens("a"), []);
+});
+
+test("design_systems search covers title + description", () => {
+  const { ors } = buildSearchParams("design_systems", { query: "portfolio", sort: "popular", limit: 5, offset: 0 });
+  assert.ok(ors.join(",").includes("description.ilike"));
+});
+
+test("trending window is 90 days (7d seed is empty)", () => {
+  const { filters } = buildSearchParams("design_systems", { sort: "trending", limit: 5, offset: 0 });
+  const f = filters.find((x) => x.startsWith("created_at=gte."));
+  assert.ok(f);
+  const days = (Date.now() - Date.parse(f.slice("created_at=gte.".length))) / 86400000;
+  assert.ok(days > 80 && days < 100);
+  assert.ok(trendingIso().length > 10);
+});
+
+test("empty AND-phrase falls back to OR tokens", async () => {
+  const calls = [];
+  const stub = { getJson: async (url) => { calls.push(url); if (calls.length === 1) return { rows: [], total: 0 }; return { rows: [{ id: 1, title: "t", slug: "S", created_by: null }], total: 9 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "dark cinematic portfolio", limit: 5 });
+  assert.equal(r.items.length, 1);
+  assert.ok((r.fallback || "").startsWith("or-tokens:"));
+  assert.equal(calls.length, 2);
 });
 
 test("guide: component install detects tailwind + keyframes", () => {

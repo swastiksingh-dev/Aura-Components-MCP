@@ -15,7 +15,7 @@ const LIST_COLS = {
   components: "id,title,description,tags,premium,views,forks,slug,created_by,created_at,updated_at",
   skills: "id,title,description,source_url,views,forks,featured,created_by,created_at,updated_at",
   assets: "id,title,description,keywords,media_type,premium,views,forks,image_800w,video_url,created_by,created_at",
-  design_systems: "id,slug,title,views,forks,featured,created_by,created_at,updated_at",
+  design_systems: "id,slug,title,description,views,forks,featured,created_by,created_at,updated_at",
 };
 
 const DETAIL_COLS = {
@@ -28,11 +28,19 @@ const DETAIL_COLS = {
 const esc = (s) => String(s).replaceAll('"', '""');
 const ilike = (v) => "*" + String(v).replaceAll("*", "").replaceAll(",", " ").trim() + "*";
 
-function weekAgoIso() {
+// Split a goal sentence into significant tokens for OR fallback (stop-word filtered).
+const STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,free,dark,also,that,this,from,into,plus,vs,top,best,up".split(","));
+export function queryTokens(q, max = 4) {
+  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t)).slice(0, max);
+}
+
+function windowAgoIso(days) {
   const d = new Date();
-  d.setDate(d.getDate() - 7);
+  d.setDate(d.getDate() - days);
   return d.toISOString();
 }
+function weekAgoIso() { return windowAgoIso(7); }
+export function trendingIso() { return windowAgoIso(90); } // 7d window is empty: newest DS row is ~12 weeks old; 90d keeps "trending" meaningful
 
 export function buildSearchParams(kind, q = {}) {
   const p = new URLSearchParams();
@@ -58,9 +66,9 @@ export function buildSearchParams(kind, q = {}) {
     if (kind === "components") ors.push("title.ilike." + v + ",description.ilike." + v);
     else if (kind === "skills") ors.push("title.ilike." + v + ",description.ilike." + v);
     else if (kind === "assets") ors.push("title.ilike." + v + ",description.ilike." + v);
-    else ors.push("title.ilike." + v);
+    else ors.push("title.ilike." + v + ",description.ilike." + v);
   }
-  if (q.sort === "trending") filters.push("created_at=gte." + weekAgoIso());
+  if (q.sort === "trending") filters.push("created_at=gte." + trendingIso());
   return { params: p, filters, ors };
 }
 
@@ -138,11 +146,35 @@ export function createCatalog({ fetcher, config, now = () => Date.now() }) {
     if (hit) return { ...hit, cached: true };
     if (inflight.has(key)) return inflight.get(key);
     const p = (async () => {
-      const { params, filters, ors } = buildSearchParams(kind, { ...q, limit, offset, sort, freeOnly });
-      const url = buildUrl(base, kind, params, filters, ors);
-      const { rows, total } = await fetcher.getJson(url, headers);
+      const runOnce = async (qq) => {
+        const { params, filters, ors } = buildSearchParams(kind, { ...qq, limit, offset, sort, freeOnly });
+        const url = buildUrl(base, kind, params, filters, ors);
+        return fetcher.getJson(url, headers);
+      };
+      let { rows, total } = await runOnce(q);
+      let fallback = null;
+      // AND-phrase queries like "dark cinematic portfolio" match nothing literally:
+      // retry as OR over significant tokens so aggregators degrade instead of emptying.
+      if ((!rows || !rows.length) && q.query && q.query.trim() && !q.tag) {
+        const toks = queryTokens(q.query);
+        if (toks.length > 1) {
+          const orParts = [];
+          for (const t of toks) {
+            const v = ilike(t);
+            if (kind === "design_systems") orParts.push("title.ilike." + v + ",description.ilike." + v);
+            else orParts.push("title.ilike." + v + ",description.ilike." + v);
+          }
+          const { params, filters } = buildSearchParams(kind, { ...q, query: "", limit, offset, sort, freeOnly });
+          const url = buildUrl(base, kind, params, filters, orParts);
+          try {
+            const fb = await fetcher.getJson(url, headers);
+            if (fb.rows && fb.rows.length) { rows = fb.rows; total = fb.total; fallback = "or-tokens:" + toks.join(","); }
+          } catch { /* keep original empty result */ }
+        }
+      }
       const enriched = await enrichAuthors(rows);
       const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config)), cached: false };
+      if (fallback) out.fallback = fallback;
       cacheSet(key, out);
       return out;
     })();
