@@ -18,6 +18,34 @@ export function detectNeeds(code, tags) {
   return { needsTailwind, needsIcons, needsKeyframes, fonts: [...fonts].slice(0, 6) };
 };
 
+// Facets: cheap derived signals so search lists answer "dark? heavy? pro?" without a get.
+// theme: dark|light|mixed|unknown from background field + code palette probes.
+// weight: code_chars bucket (s/m/l) so agents can prefer light embeds.
+export function facets(kind, row) {
+  const f = {};
+  if (kind === 'components') {
+    const bg = String(row.background || '').toLowerCase();
+    const code = String(row.code || '').toLowerCase();
+    const darkHits = (code.match(/#0{3,6}\b|#1[0-9a-f]{5}\b|bg-black|bg-neutral-9|bg-zinc-9|bg-slate-9|text-white|slate-300/g) || []).length;
+    const lightHits = (code.match(/bg-white|bg-neutral-50|bg-slate-50|bg-gray-50|text-black|text-neutral-9/g) || []).length;
+    f.theme = bg.includes('000') || bg.includes('000000') ? 'dark' : (bg.includes('fff') ? 'light' : (darkHits > lightHits * 2 ? 'dark' : (lightHits > darkHits * 2 ? 'light' : (darkHits || lightHits ? 'mixed' : 'unknown'))));
+    const n = String(row.code || '').length;
+    f.weight = n > 20000 ? 'l' : (n > 8000 ? 'm' : 's');
+    f.code_chars = n;
+    const needs = detectNeeds(row.code || '', row.tags || []);
+    f.needsTailwind = needs.needsTailwind;
+    f.needsIcons = needs.needsIcons;
+    f.fonts = needs.fonts;
+  }
+  if (kind === 'assets' || row.image_800w || row.image_original || row.video_url) {
+    f.license = 'unknown — check aura.build asset page before commercial use';
+    f.download = row.image_original || row.image_1600w || row.image_800w || row.video_url || null;
+    f.preview = row.image_800w || row.video_poster_url || null;
+  }
+  if (kind === 'design_systems') f.has_preview = Boolean(row.preview_html);
+  return f;
+}
+
 export function installGuide(kind, row) {
   const steps = [];
   const files = [];

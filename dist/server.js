@@ -102,16 +102,16 @@ const CATALOG_SORTS = {
 };
 
 const LIST_COLS = {
-  components: "id,title,description,tags,premium,views,forks,slug,created_by,created_at,updated_at",
+  components: "id,title,description,tags,code,background,premium,views,forks,slug,created_by,created_at,updated_at",
   skills: "id,title,description,source_url,views,forks,featured,created_by,created_at,updated_at",
-  assets: "id,title,description,keywords,media_type,premium,views,forks,image_800w,video_url,created_by,created_at",
+  assets: "id,title,description,keywords,resolution,colors,media_type,premium,views,forks,image_320w,image_800w,image_1600w,image_3840w,image_original,image_url,video_url,video_poster_url,video_duration,slug,created_by,created_at,updated_at",
   design_systems: "id,slug,title,description,views,forks,featured,created_by,created_at,updated_at",
 };
 
 const DETAIL_COLS = {
   components: "id,title,description,tags,code,premium,views,forks,slug,image_url,background,credit_name,credit_url,created_by,created_at,updated_at",
   skills: "id,title,description,content,source_url,views,forks,featured,created_by,created_at,updated_at",
-  assets: "id,title,description,keywords,resolution,colors,media_type,image_320w,image_800w,image_1600w,image_url,video_url,video_poster_url,premium,views,forks,slug,created_by,created_at,updated_at",
+  assets: "id,title,description,keywords,resolution,colors,media_type,premium,views,forks,image_320w,image_800w,image_1600w,image_3840w,image_original,image_url,video_url,video_poster_url,video_duration,slug,created_by,created_at,updated_at",
   design_systems: "id,slug,title,description,content,preview_html,thumbnail_url,source_name,views,forks,featured,created_by,created_at,updated_at",
 };
 
@@ -178,19 +178,20 @@ function pageUrl(kind, row) {
   return SITE + "/design-systems/" + (row.slug ?? row.id);
 }
 
-function shapeRow(kind, row, cfg) {
+function shapeRow(kind, row, cfg, withFacets) {
   const base = { ...row };
-  if (kind === "components" && typeof base.code === "string") base.code = trunc(base.code, cfg.codeChars);
+  if (kind === "components" && typeof base.code === "string") { base.code_chars = base.code.length; base.code = trunc(base.code, cfg.codeChars); }
   if (kind === "skills" && typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
   if (kind === "design_systems") {
     if (typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
     if (typeof base.preview_html === "string") base.preview_html = trunc(base.preview_html, cfg.codeChars);
   }
   base.page_url = pageUrl(kind, row);
+  if (withFacets) { try { base.facets = withFacets(kind, base); } catch { /* facets never break rows */ } }
   return base;
 }
 
-function createCatalog({ fetcher, config, now = () => Date.now() }) {
+function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = null }) {
   const base = config.supabaseUrl.replace(/\/$/, "");
   const headers = { apikey: config.anonKey, Authorization: "Bearer " + config.anonKey, Prefer: "count=exact" };
   const cache = new Map();
@@ -244,27 +245,46 @@ function createCatalog({ fetcher, config, now = () => Date.now() }) {
       let { rows, total } = await runOnce(q);
       let fallback = null;
       // AND-phrase queries like "dark cinematic portfolio" match nothing literally:
-      // retry as OR over significant tokens so aggregators degrade instead of emptying.
-      if ((!rows || !rows.length) && q.query && q.query.trim() && !q.tag) {
-        const toks = queryTokens(q.query);
-        if (toks.length > 1) {
-          const orParts = [];
-          for (const t of toks) {
-            const v = ilike(t);
-            if (kind === "design_systems") orParts.push("title.ilike." + v + ",description.ilike." + v);
-            else orParts.push("title.ilike." + v + ",description.ilike." + v);
-          }
-          const { params, filters } = buildSearchParams(kind, { ...q, query: "", limit, offset, sort, freeOnly });
-          const url = buildUrl(base, kind, params, filters, orParts);
+      // retry as OR over significant tokens so every surface degrades instead of emptying.
+      // Single-token queries that miss also retry bare (drops tag/media filters) + suggest queries.
+      const toks = (q.query && q.query.trim() && !q.tag) ? queryTokens(q.query) : [];
+      const suggest = (t) => {
+        const s = [];
+        if (t.length > 1) s.push(t.slice(0, Math.min(3, t.length)).join(" "));
+        for (const x of t.slice(0, 3)) s.push(x);
+        return [...new Set(s)].slice(0, 4);
+      };
+      if ((!rows || !rows.length) && toks.length) {
+        // Pass 1: OR over tokens, same filters (drops the AND-phrase requirement).
+        const orParts = [];
+        for (const t of toks) {
+          const v = ilike(t);
+          orParts.push("title.ilike." + v + ",description.ilike." + v);
+        }
+        const b1 = buildSearchParams(kind, { ...q, query: "", limit, offset, sort, freeOnly });
+        try {
+          const fb = await fetcher.getJson(buildUrl(base, kind, b1.params, b1.filters, orParts), headers);
+          if (fb.rows && fb.rows.length) { rows = fb.rows; total = fb.total; fallback = "or-tokens:" + toks.join(","); }
+        } catch { /* try pass 2 */ }
+        // Pass 2: still empty (e.g. trending window + rare tokens): drop sort window,
+        // keep OR tokens, rank by views. Guarantees aggregators return something useful.
+        if ((!rows || !rows.length)) {
+          const b2 = buildSearchParams(kind, { ...q, query: "", limit, offset, sort: "popular", freeOnly });
           try {
-            const fb = await fetcher.getJson(url, headers);
-            if (fb.rows && fb.rows.length) { rows = fb.rows; total = fb.total; fallback = "or-tokens:" + toks.join(","); }
+            const fb2 = await fetcher.getJson(buildUrl(base, kind, b2.params, b2.filters, orParts), headers);
+            if (fb2.rows && fb2.rows.length) { rows = fb2.rows; total = fb2.total; fallback = "or-tokens-unwindowed:" + toks.join(","); }
           } catch { /* keep original empty result */ }
         }
       }
       const enriched = await enrichAuthors(rows);
-      const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config)), cached: false };
+      const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      // Post-filter: theme (dark|light) is derived, not a column — filter shaped rows.
+      if (q.theme && (kind === "components")) {
+        const want = String(q.theme).toLowerCase();
+        out.items = out.items.filter((it) => (it.facets && it.facets.theme) === want);
+      }
       if (fallback) out.fallback = fallback;
+      else if ((!rows || !rows.length) && toks.length) out.suggested_queries = suggest(toks);
       cacheSet(key, out);
       return out;
     })();
@@ -289,7 +309,7 @@ function createCatalog({ fetcher, config, now = () => Date.now() }) {
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
     const enriched = await enrichAuthors(rows);
-    const out = { kind, item: shapeRow(kind, enriched[0], config), cached: false };
+    const out = { kind, item: shapeRow(kind, enriched[0], config, facetsFn), cached: false };
     cacheSet(key, out);
     return out;
   }
@@ -331,7 +351,37 @@ function createCatalog({ fetcher, config, now = () => Date.now() }) {
     return out;
   }
 
-  return { searchCatalog, getItem, getStatus, categoryCounts };
+  // Bulk fetch: N details in one parallel round (backs aura_bundle + aura_scaffold_page).
+  // Per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
+  async function bundleItems(kind, ids, max = 5) {
+    const list = [...new Set((ids || []).map(String))].slice(0, Math.max(1, Math.min(max, 8)));
+    const out = await Promise.all(list.map(async (id) => {
+      try { const got = await getItem(kind, id); return { ok: true, id, item: got.item }; }
+      catch (e) { return { ok: false, id, error: (e && e.code === "NOT_FOUND") ? "not found" : String((e && e.message) || e).slice(0, 160) }; }
+    }));
+    return out;
+  }
+
+  // Related: same-tag / same-text overlap, views-ranked, excluding self.
+  async function relatedItems(kind, idOrSlug, limit = 3) {
+    const got = await getItem(kind, idOrSlug);
+    const item = got.item;
+    const toks = queryTokens(item.title + " " + (item.description || "")).slice(0, 3);
+    const orParts = toks.map((t) => { const v = ilike(t); return "title.ilike." + v + ",description.ilike." + v; });
+    const tagF = (kind === "components" && item.tags && item.tags.length) ? "&tags=cs.{" + String(item.tags[0]).toLowerCase() + "}" : "";
+    const lim = Math.max(1, Math.min(limit || 3, 8));
+    const sel = LIST_COLS[kind];
+    const idCol = (kind === "components") ? "id" : "id";
+    const selfId = encodeURIComponent(String(item.id));
+    const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&private=eq.false" + (kind === "components" || kind === "assets" ? "" : "") + tagF + "&" + idCol + "=neq." + selfId + (orParts.length ? "&or=(" + orParts.join(",") + ")" : "") + "&order=views.desc&limit=" + lim;
+    try {
+      const { rows } = await fetcher.getJson(url, headers);
+      const enriched = await enrichAuthors(rows);
+      return { item: shapeRow(kind, item, config), related: enriched.map((r) => shapeRow(kind, r, config)) };
+    } catch { return { item: shapeRow(kind, item, config), related: [] }; }
+  }
+
+  return { searchCatalog, getItem, getStatus, categoryCounts, bundleItems, relatedItems };
 }
 
 // ---- protocol.mjs ----
@@ -422,6 +472,34 @@ function detectNeeds(code, tags) {
   return { needsTailwind, needsIcons, needsKeyframes, fonts: [...fonts].slice(0, 6) };
 };
 
+// Facets: cheap derived signals so search lists answer "dark? heavy? pro?" without a get.
+// theme: dark|light|mixed|unknown from background field + code palette probes.
+// weight: code_chars bucket (s/m/l) so agents can prefer light embeds.
+function facets(kind, row) {
+  const f = {};
+  if (kind === 'components') {
+    const bg = String(row.background || '').toLowerCase();
+    const code = String(row.code || '').toLowerCase();
+    const darkHits = (code.match(/#0{3,6}\b|#1[0-9a-f]{5}\b|bg-black|bg-neutral-9|bg-zinc-9|bg-slate-9|text-white|slate-300/g) || []).length;
+    const lightHits = (code.match(/bg-white|bg-neutral-50|bg-slate-50|bg-gray-50|text-black|text-neutral-9/g) || []).length;
+    f.theme = bg.includes('000') || bg.includes('000000') ? 'dark' : (bg.includes('fff') ? 'light' : (darkHits > lightHits * 2 ? 'dark' : (lightHits > darkHits * 2 ? 'light' : (darkHits || lightHits ? 'mixed' : 'unknown'))));
+    const n = String(row.code || '').length;
+    f.weight = n > 20000 ? 'l' : (n > 8000 ? 'm' : 's');
+    f.code_chars = n;
+    const needs = detectNeeds(row.code || '', row.tags || []);
+    f.needsTailwind = needs.needsTailwind;
+    f.needsIcons = needs.needsIcons;
+    f.fonts = needs.fonts;
+  }
+  if (kind === 'assets' || row.image_800w || row.image_original || row.video_url) {
+    f.license = 'unknown — check aura.build asset page before commercial use';
+    f.download = row.image_original || row.image_1600w || row.image_800w || row.video_url || null;
+    f.preview = row.image_800w || row.video_poster_url || null;
+  }
+  if (kind === 'design_systems') f.has_preview = Boolean(row.preview_html);
+  return f;
+}
+
 function installGuide(kind, row) {
   const steps = [];
   const files = [];
@@ -498,11 +576,13 @@ function toolFn_str(v, name) { if (v !== undefined && typeof v !== 'string') too
 function toolFn_num(v, name) { if (v !== undefined && typeof v !== 'number') toolFn_bad(name + ' must be a number'); return v; }
 function toolFn_bool(v, name) { if (v !== undefined && typeof v !== 'boolean') toolFn_bad(name + ' must be a boolean'); return v; }
 function toolFn_sort(v) { if (v !== undefined && !TOOL_SORTS.includes(v)) toolFn_bad('sort must be one of ' + TOOL_SORTS.join('|')); return v; }
+function theme(v) { if (v !== undefined && v !== 'dark' && v !== 'light') toolFn_bad('theme must be dark|light'); return v; }
+function idList(v, name) { if (v === undefined) return v; if (!Array.isArray(v) || !v.length || v.length > 8 || v.some((x) => typeof x !== 'string' && typeof x !== 'number')) toolFn_bad(name + ' must be an array of 1-8 ids'); return v; }
 function toolFn_cat(v) { if (v !== undefined && !TOOL_CATS.includes(v)) toolFn_bad('category must be one of ' + TOOL_CATS.join('|')); return v; }
 
 const TOOL_DEFS = [
   { name: 'aura_status', description: 'Catalogue health plus free counts (components, skills, assets, design systems). Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, sorts.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
+  { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, theme dark|light filter, sorts. Items carry facets (theme/weight/needs).', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' } }, additionalProperties: false } },
   { name: 'aura_search_skills', description: 'Search free Aura agent skills (187). Metadata only; use aura_get_skill for the full SKILL.md content.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_get_skill', description: 'Full free agent-skill content (SKILL.md body) plus source_url and page URL. Skill id.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false } },
@@ -515,6 +595,10 @@ const TOOL_DEFS = [
   { name: 'aura_install_skill', description: 'Save-and-load plan for a free skill: where to put SKILL.md per client plus upstream source.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_use_design_system', description: 'Apply a free DESIGN.md system: token starter CSS plus copy order (tokens first, then markup).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' } }, additionalProperties: false } },
   { name: 'aura_trending', description: 'What is new and popular across the free catalogue: top components, skills, assets, design systems in one call.', inputSchema: { type: 'object', properties: { limit: { type: 'number' } }, additionalProperties: false } },
+  { name: 'aura_bundle', description: 'Bulk-fetch 2-8 component details in one call (ids or slugs). Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { ids: { type: 'array', items: {} }, slugs: { type: 'array', items: { type: 'string' } } }, additionalProperties: false } },
+  { name: 'aura_scaffold_page', description: 'One ordered page build: DESIGN.md tokens.css + system preview + component markup in dependency order, combined deps + files[]. Merges install_* + use_* in a single turn.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, system: { type: 'string' }, components: { type: 'array', items: {} } }, required: ['goal'], additionalProperties: false } },
+  { name: 'aura_related', description: 'More-like-this: 3 related items for a component/skill/design-system by tag + text overlap. Discovery never dead-ends.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'skills', 'design_systems'] }, id: {} }, required: ['kind', 'id'], additionalProperties: false } },
+  { name: 'aura_install_asset', description: 'Legal drop-in plan for an asset: direct download URL, preview URL, license status (unknown = check page), suggested file path.', inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_categories', description: 'The 13 component categories with live free counts. Pick one, then search within it.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
 ];
 
@@ -523,7 +607,7 @@ function createHandlers(catalog) {
   return {
     aura_status: async () => textResult(await catalog.getStatus()),
     aura_search_components: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('components', {
-      query: toolFn_str(a.query, 'query'), tag: toolFn_cat(a.category), freeOnly: true,
+      query: toolFn_str(a.query, 'query'), tag: toolFn_cat(a.category), freeOnly: true, theme: theme(a.theme),
       sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'),
     })); },
     aura_get_component: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
@@ -586,6 +670,33 @@ function createHandlers(catalog) {
       ]);
       return textResult({ window: 'last 7 days by views', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
     aura_categories: async () => textResult({ categories: await catalog.categoryCounts() }),
+    aura_bundle: async (a) => { a = a || {}; const ids = idList(a.ids, 'ids') || idList(a.slugs, 'slugs');
+      if (!ids || !ids.length) toolFn_bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');
+      return textResult({ kind: 'components', results: await catalog.bundleItems('components', ids) }); },
+    aura_related: async (a) => { a = a || {}; const k = a.kind;
+      if (k !== 'components' && k !== 'skills' && k !== 'design_systems') toolFn_bad('kind must be components|skills|design_systems');
+      const id = a.id; if (typeof id !== 'string' && typeof id !== 'number') toolFn_bad('id is required');
+      return textResult(await catalog.relatedItems(k, id, 3)); },
+    aura_install_asset: async (a) => { a = a || {}; if (typeof a.id !== 'number') toolFn_bad('id (number) is required');
+      const got = await catalog.getItem('assets', a.id);
+      const it = got.item; const fx = (it.facets || {});
+      return textResult({ item: it, install: { kind: 'assets', title: it.title, page_url: it.page_url, license: fx.license || 'unknown', download: fx.download || null, preview: fx.preview || null, files: [{ path: 'assets/' + it.id + '-' + String(it.title || 'asset').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) + '.jpg', contains: 'downloaded original' }], steps: ['Check the license on the Aura asset page before commercial use — this server reports unknown, never assumes free-to-sell.', 'Download the download URL into the suggested path.', 'Use the preview URL for <img> srcset while drafting.'] } }); },
+    aura_scaffold_page: async (a) => { a = a || {}; if (typeof a.goal !== 'string' || !a.goal.trim()) toolFn_bad('goal (string) is required');
+      const sysRef = (typeof a.system === 'string' && a.system) ? a.system : null;
+      const compRefs = idList(a.components, 'components') || [];
+      const [sys, comps] = await Promise.all([
+        sysRef ? catalog.getItem('design_systems', sysRef).catch(() => null) : catalog.searchCatalog('design_systems', { query: a.goal, limit: 1 }).then((r) => (r.items[0] ? { item: r.items[0] } : null)),
+        compRefs.length ? catalog.bundleItems('components', compRefs).then((rs) => rs.filter((x) => x.ok).map((x) => x.item)) : catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 3 }).then((r) => r.items),
+      ]);
+      const sysItem = sys && sys.item ? sys.item : null;
+      const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
+      const guides = (comps || []).map((c) => installGuide('components', c));
+      const deps = []; const seen = new Set();
+      for (const g of guides) for (const d of (g.deps || [])) if (!seen.has(d.name)) { seen.add(d.name); deps.push(d); }
+      const files = [{ path: 'styles/tokens.css', contains: 'tokens.css from use_design_system' }];
+      if (sysItem) files.push({ path: 'DESIGN.md', contains: 'system rules' });
+      for (const g of guides) for (const f of (g.files || [])) files.push(f);
+      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: comps || [], guides, combined_deps: deps, files }); },
   };
 };
 
@@ -598,9 +709,10 @@ function createHandlers(catalog) {
 
 
 
+
 const config = loadConfig();
 const fetcher = createFetcher({ fetchImpl: globalThis.fetch, timeoutMs: config.timeoutMs, retries: config.retries, userAgent: config.userAgent });
-const catalog = createCatalog({ fetcher, config });
+const catalog = createCatalog({ fetcher, config, facetsFn: facets });
 const handlers = createHandlers(catalog);
 
 let buffer = "";

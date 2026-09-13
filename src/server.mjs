@@ -7,10 +7,11 @@ import { createFetcher } from "./http.mjs";
 import { createCatalog } from "./catalog.mjs";
 import { createSession, SERVER_INFO } from "./protocol.mjs";
 import { TOOL_DEFS, createHandlers } from "./tools.mjs";
+import { facets } from "./guide.mjs";
 
 const config = loadConfig();
 const fetcher = createFetcher({ fetchImpl: globalThis.fetch, timeoutMs: config.timeoutMs, retries: config.retries, userAgent: config.userAgent });
-const catalog = createCatalog({ fetcher, config });
+const catalog = createCatalog({ fetcher, config, facetsFn: facets });
 const handlers = createHandlers(catalog);
 
 let buffer = "";

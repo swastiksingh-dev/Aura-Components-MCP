@@ -97,6 +97,29 @@ test("empty AND-phrase falls back to OR tokens", async () => {
   assert.equal(calls.length, 2);
 });
 
+test("facets ride on search + get (theme/weight/download)", async () => {
+  const stub = { getJson: async (url) => (url.includes("assets") ? { rows: [{ id: 9, title: "t", image_800w: "u800", image_original: "uorig", created_by: null }], total: 1 } : { rows: [{ id: 1, title: "t", slug: "S", code: "<div class=x bg-black></div>", background: "000000", created_by: null }], total: 1 }) };
+  const { facets } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const s = await cat.searchCatalog("components", { query: "x", limit: 2 });
+  assert.equal(s.items[0].facets.theme, "dark");
+  const g = await cat.getItem("assets", 9);
+  assert.equal(g.item.facets.download, "uorig");
+});
+
+test("bundle captures per-id errors, related excludes self", async () => {
+  const stub = { getJson: async (url) => {
+    if (url.includes("id=eq.1")) return { rows: [{ id: 1, title: "one two three", description: "four five", tags: ["hero"], code: "x", background: "fff", created_by: null }], total: 1 };
+    if (url.includes("id=eq.2")) return { rows: [], total: 0 };
+    return { rows: [{ id: 3, title: "one two", description: "three", tags: ["hero"], code: "x", background: "fff", created_by: null }], total: 1 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const b = await cat.bundleItems("components", [1, 2]);
+  assert.equal(b[0].ok, true); assert.equal(b[1].ok, false);
+  const rel = await cat.relatedItems("components", 1, 3);
+  assert.ok(rel.related.every((r) => r.id !== 1));
+});
+
 test("guide: component install detects tailwind + keyframes", () => {
   const g = installGuide("components", { title: "T", slug: "S", premium: false, code: '<div class="x"></div><style>@keyframes a{}</style>', tags: ["hero"], page_url: "u" });
   assert.ok(g.steps.length >= 3);
