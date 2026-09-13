@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# build output (dist/) IS committed on purpose so users can run without building
+# local overrides stay out
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+.playwright-mcp/
+*.tmp
+flow/*.tmp
+coverage/
+.nyc_output/
