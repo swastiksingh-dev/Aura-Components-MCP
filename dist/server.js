@@ -102,9 +102,11 @@ const CATALOG_SORTS = {
 };
 
 const LIST_COLS = {
-  components: "id,title,description,tags,code,background,premium,views,forks,slug,created_by,created_at,updated_at",
+  // Lists exclude code (13KB/row): theme falls back to background + tags heuristics.
+  // Full code loads only on get/bundle, where facets recompute exactly.
+  components: "id,title,description,tags,premium,views,forks,slug,background,created_by,created_at,updated_at",
   skills: "id,title,description,source_url,views,forks,featured,created_by,created_at,updated_at",
-  assets: "id,title,description,keywords,resolution,colors,media_type,premium,views,forks,image_320w,image_800w,image_1600w,image_3840w,image_original,image_url,video_url,video_poster_url,video_duration,slug,created_by,created_at,updated_at",
+  assets: "id,title,description,keywords,media_type,premium,views,forks,image_800w,video_url,video_poster_url,created_by,created_at",
   design_systems: "id,slug,title,description,views,forks,featured,created_by,created_at,updated_at",
 };
 
@@ -479,10 +481,15 @@ function facets(kind, row) {
   const f = {};
   if (kind === 'components') {
     const bg = String(row.background || '').toLowerCase();
+    const tags = (row.tags || []).map((x) => String(x).toLowerCase());
     const code = String(row.code || '').toLowerCase();
+    const tagDark = tags.includes('dark');
+    const tagLight = tags.includes('light');
     const darkHits = (code.match(/#0{3,6}\b|#1[0-9a-f]{5}\b|bg-black|bg-neutral-9|bg-zinc-9|bg-slate-9|text-white|slate-300/g) || []).length;
     const lightHits = (code.match(/bg-white|bg-neutral-50|bg-slate-50|bg-gray-50|text-black|text-neutral-9/g) || []).length;
-    f.theme = bg.includes('000') || bg.includes('000000') ? 'dark' : (bg.includes('fff') ? 'light' : (darkHits > lightHits * 2 ? 'dark' : (lightHits > darkHits * 2 ? 'light' : (darkHits || lightHits ? 'mixed' : 'unknown'))));
+    const bgDark = bg.includes('000') && !bg.includes('fff');
+    const bgLight = bg.includes('fff') && !bg.includes('000');
+    f.theme = bgDark || tagDark ? 'dark' : (bgLight || tagLight ? 'light' : (code ? (darkHits > lightHits * 2 ? 'dark' : (lightHits > darkHits * 2 ? 'light' : (darkHits || lightHits ? 'mixed' : 'unknown'))) : (tags.includes('saas') || tags.includes('minimal') ? 'light' : 'unknown')));
     const n = String(row.code || '').length;
     f.weight = n > 20000 ? 'l' : (n > 8000 ? 'm' : 's');
     f.code_chars = n;
@@ -492,7 +499,10 @@ function facets(kind, row) {
     f.fonts = needs.fonts;
   }
   if (kind === 'assets' || row.image_800w || row.image_original || row.video_url) {
-    f.license = 'unknown — check aura.build asset page before commercial use';
+    // Resolved 2026-09-13 from primary source https://www.aura.build/terms §4-5:
+    // catalogue content is the exclusive property of DESIGNCODE IO PTE. LTD.;
+    // no per-asset license column exists, so commercial reuse needs Aura's permission.
+    f.license = 'all-rights-reserved (Aura Terms §4: DESIGNCODE IO PTE. LTD.) — personal/preview use via page_url; commercial reuse needs Aura permission (support@designcode.io)';
     f.download = row.image_original || row.image_1600w || row.image_800w || row.video_url || null;
     f.preview = row.image_800w || row.video_poster_url || null;
   }
@@ -598,7 +608,8 @@ const TOOL_DEFS = [
   { name: 'aura_bundle', description: 'Bulk-fetch 2-8 component details in one call (ids or slugs). Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { ids: { type: 'array', items: {} }, slugs: { type: 'array', items: { type: 'string' } } }, additionalProperties: false } },
   { name: 'aura_scaffold_page', description: 'One ordered page build: DESIGN.md tokens.css + system preview + component markup in dependency order, combined deps + files[]. Merges install_* + use_* in a single turn.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, system: { type: 'string' }, components: { type: 'array', items: {} } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_related', description: 'More-like-this: 3 related items for a component/skill/design-system by tag + text overlap. Discovery never dead-ends.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'skills', 'design_systems'] }, id: {} }, required: ['kind', 'id'], additionalProperties: false } },
-  { name: 'aura_install_asset', description: 'Legal drop-in plan for an asset: direct download URL, preview URL, license status (unknown = check page), suggested file path.', inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'], additionalProperties: false } },
+  { name: 'aura_bulk_fetch', description: 'Bulk-fetch 2-8 details in one call for components, design_systems, or assets. Alias-friendly name for aura_bundle. Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'design_systems', 'assets'] }, ids: { type: 'array', items: {} } }, required: ['kind', 'ids'], additionalProperties: false } },
+  { name: 'aura_install_asset', description: 'Legal drop-in plan for an asset: direct download URL, preview URL, license (all-rights-reserved per Aura Terms §4 — check page before commercial use), suggested file path.', inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_categories', description: 'The 13 component categories with live free counts. Pick one, then search within it.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
 ];
 
@@ -668,7 +679,7 @@ function createHandlers(catalog) {
         catalog.searchCatalog('assets', { freeOnly: true, sort: 'trending', limit }),
         catalog.searchCatalog('design_systems', { sort: 'trending', limit }),
       ]);
-      return textResult({ window: 'last 7 days by views', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
+      return textResult({ window: 'last 90 days by views (7-day seed is empty: newest catalogue rows are months old)', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
     aura_categories: async () => textResult({ categories: await catalog.categoryCounts() }),
     aura_bundle: async (a) => { a = a || {}; const ids = idList(a.ids, 'ids') || idList(a.slugs, 'slugs');
       if (!ids || !ids.length) toolFn_bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');
@@ -680,7 +691,12 @@ function createHandlers(catalog) {
     aura_install_asset: async (a) => { a = a || {}; if (typeof a.id !== 'number') toolFn_bad('id (number) is required');
       const got = await catalog.getItem('assets', a.id);
       const it = got.item; const fx = (it.facets || {});
-      return textResult({ item: it, install: { kind: 'assets', title: it.title, page_url: it.page_url, license: fx.license || 'unknown', download: fx.download || null, preview: fx.preview || null, files: [{ path: 'assets/' + it.id + '-' + String(it.title || 'asset').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) + '.jpg', contains: 'downloaded original' }], steps: ['Check the license on the Aura asset page before commercial use — this server reports unknown, never assumes free-to-sell.', 'Download the download URL into the suggested path.', 'Use the preview URL for <img> srcset while drafting.'] } }); },
+      return textResult({ item: it, install: { kind: 'assets', title: it.title, page_url: it.page_url, license: fx.license || 'all-rights-reserved (Aura Terms §4)', terms_url: 'https://www.aura.build/terms', download: fx.download || null, preview: fx.preview || null, files: [{ path: 'assets/' + it.id + '-' + String(it.title || 'asset').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) + '.jpg', contains: 'downloaded original' }], steps: ['Check the license on the Aura asset page before commercial use — this server reports unknown, never assumes free-to-sell.', 'Download the download URL into the suggested path.', 'Use the preview URL for <img> srcset while drafting.'] } }); },
+    aura_bulk_fetch: async (a) => { a = a || {}; const kind = a.kind;
+      if (kind !== 'components' && kind !== 'design_systems' && kind !== 'assets') toolFn_bad('kind must be components|design_systems|assets');
+      const ids = idList(a.ids, 'ids');
+      if (!ids || !ids.length) toolFn_bad('provide ids (array of 1-8)');
+      return textResult({ kind, results: await catalog.bundleItems(kind, ids) }); },
     aura_scaffold_page: async (a) => { a = a || {}; if (typeof a.goal !== 'string' || !a.goal.trim()) toolFn_bad('goal (string) is required');
       const sysRef = (typeof a.system === 'string' && a.system) ? a.system : null;
       const compRefs = idList(a.components, 'components') || [];

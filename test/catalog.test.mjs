@@ -107,6 +107,13 @@ test("facets ride on search + get (theme/weight/download)", async () => {
   assert.equal(g.item.facets.download, "uorig");
 });
 
+test("slim lists exclude blobs (payload guard)", () => {
+  const { params } = buildSearchParams("components", { sort: "popular", limit: 5, offset: 0 });
+  assert.ok(!String(params.get("select")).includes("code"));
+  const a = buildSearchParams("assets", { sort: "popular", limit: 5, offset: 0 });
+  assert.ok(!String(a.params.get("select")).includes("image_original"));
+});
+
 test("bundle captures per-id errors, related excludes self", async () => {
   const stub = { getJson: async (url) => {
     if (url.includes("id=eq.1")) return { rows: [{ id: 1, title: "one two three", description: "four five", tags: ["hero"], code: "x", background: "fff", created_by: null }], total: 1 };

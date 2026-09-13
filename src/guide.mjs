@@ -25,10 +25,15 @@ export function facets(kind, row) {
   const f = {};
   if (kind === 'components') {
     const bg = String(row.background || '').toLowerCase();
+    const tags = (row.tags || []).map((x) => String(x).toLowerCase());
     const code = String(row.code || '').toLowerCase();
+    const tagDark = tags.includes('dark');
+    const tagLight = tags.includes('light');
     const darkHits = (code.match(/#0{3,6}\b|#1[0-9a-f]{5}\b|bg-black|bg-neutral-9|bg-zinc-9|bg-slate-9|text-white|slate-300/g) || []).length;
     const lightHits = (code.match(/bg-white|bg-neutral-50|bg-slate-50|bg-gray-50|text-black|text-neutral-9/g) || []).length;
-    f.theme = bg.includes('000') || bg.includes('000000') ? 'dark' : (bg.includes('fff') ? 'light' : (darkHits > lightHits * 2 ? 'dark' : (lightHits > darkHits * 2 ? 'light' : (darkHits || lightHits ? 'mixed' : 'unknown'))));
+    const bgDark = bg.includes('000') && !bg.includes('fff');
+    const bgLight = bg.includes('fff') && !bg.includes('000');
+    f.theme = bgDark || tagDark ? 'dark' : (bgLight || tagLight ? 'light' : (code ? (darkHits > lightHits * 2 ? 'dark' : (lightHits > darkHits * 2 ? 'light' : (darkHits || lightHits ? 'mixed' : 'unknown'))) : (tags.includes('saas') || tags.includes('minimal') ? 'light' : 'unknown')));
     const n = String(row.code || '').length;
     f.weight = n > 20000 ? 'l' : (n > 8000 ? 'm' : 's');
     f.code_chars = n;
@@ -38,7 +43,10 @@ export function facets(kind, row) {
     f.fonts = needs.fonts;
   }
   if (kind === 'assets' || row.image_800w || row.image_original || row.video_url) {
-    f.license = 'unknown — check aura.build asset page before commercial use';
+    // Resolved 2026-09-13 from primary source https://www.aura.build/terms §4-5:
+    // catalogue content is the exclusive property of DESIGNCODE IO PTE. LTD.;
+    // no per-asset license column exists, so commercial reuse needs Aura's permission.
+    f.license = 'all-rights-reserved (Aura Terms §4: DESIGNCODE IO PTE. LTD.) — personal/preview use via page_url; commercial reuse needs Aura permission (support@designcode.io)';
     f.download = row.image_original || row.image_1600w || row.image_800w || row.video_url || null;
     f.preview = row.image_800w || row.video_poster_url || null;
   }

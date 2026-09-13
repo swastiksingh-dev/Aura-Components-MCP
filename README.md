@@ -2,7 +2,7 @@
 
 I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
-> **v1.4.0** — 19 tools. Search never empties (OR-token fallback + suggested queries), bulk-fetch with `aura_bundle`, one-turn page builds with `aura_scaffold_page`, dark/light faceting, related items, legal asset install.
+> **v1.5.0** — 20 tools. Search never empties (OR-token fallback + suggested queries), bulk-fetch with `aura_bulk_fetch` (`aura_bundle` alias),undle`, one-turn page builds with `aura_scaffold_page`, dark/light faceting, related items, legal asset install.
 
 Point any MCP client at `dist/server.js` and your agent can search 2,495 free components, read 187 agent skills in full, pull 30,688 assets, and apply 725 DESIGN.md systems. It answers in seconds because there is nothing to log into and almost nothing to download: one bundled JS file, zero dependencies.
 
@@ -24,9 +24,9 @@ Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good a
 - 187 agent skills with full SKILL.md bodies (GSAP, Tailwind v4, Anime.js, copywriting, and more)
 - 30,688 images and clips with direct CDN URLs at multiple widths
 - 725 DESIGN.md systems with tokens, type rules, layout notes, and preview HTML
-- 19 tools over stdio, one 48KB bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
+- 20 tools over stdio, one 48KB bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
 - Never-empty search: AND-phrase misses retry as OR-tokens (2 passes) with `fallback` + `suggested_queries` on every surface
-- Agent accelerators: `aura_bundle` (8 details/turn), `aura_scaffold_page` (tokens + system + markup in dependency order), `aura_related`, `aura_install_asset` (license-aware)
+- Agent accelerators: `aura_bulk_fetch`/`aura_bundle` (8 details/turn, any of 3 kinds), `aura_scaffold_page` (tokens + system + markup in dependency order), `aura_related`, `aura_install_asset` (license-aware)
 - Faceted lists: every component carries `facets { theme, weight, code_chars, needsTailwind, needsIcons, fonts }`; filter `theme: dark|light` server-side
 
 Start with `aura_status`, then `aura_search_all`. That order matters: status confirms the catalogue is reachable, search_all shows which surface has the best match before you spend calls on details.
@@ -58,25 +58,37 @@ claude mcp add aura-components -- node ./dist/server.js
 { "$schema": "https://opencode.ai/config.json", "mcp": { "aura-components": { "type": "local", "command": ["node", "./dist/server.js"], "enabled": true } } }
 ```
 
-## The 15 tools
+## Demo
+
+<video src="https://github.com/swastiksingh-dev/Aura-Components-MCP/raw/main/assets/heart-demo.mp4" controls muted loop playsinline width="100%">Watch the 30-second flow tour (MP4)</video>
+
+![Animated site tour](assets/site-tour.gif)
+
+*Left: the flow/ launch site (dark WebGL hero, tools, setup). Right: `aura_recommend` turning one sentence into a starter kit. Full clips in [`assets/`](assets/).*
+
+## The 20 tools
 
 | Tool | What it returns |
 | --- | --- |
 | `aura_status` | Reachability plus live free counts. Call it first. |
-| `aura_search_components` | Free components by text query, category, sort. No blobs, so lists stay small. |
+| `aura_search_components` | Free components by text, category, `theme: dark\|light`, sort. Facets on every row, ~0.6KB each. |
 | `aura_get_component` | One component in full: markup, style block, preview, author, page URL. |
 | `aura_install_component` | The same component plus a paste plan: CDN scripts, fonts, steps, file map. |
 | `aura_search_skills` | Skill metadata (title, description, source repo, views). |
 | `aura_get_skill` | The whole SKILL.md body. This is the one agents actually build from. |
 | `aura_install_skill` | Where to save SKILL.md so the agent can load it, plus upstream link. |
-| `aura_search_assets` | Images and clips by keyword, media type filter included. |
-| `aura_search_design_systems` | DESIGN.md metadata: title, views, author. |
+| `aura_search_assets` | Images and clips by keyword, media type filter included. Slim rows (no 4K URLs until install). |
+| `aura_install_asset` | Legal drop-in: download + preview URLs, license (all-rights-reserved per [Aura Terms §4](https://www.aura.build/terms)), file path. |
+| `aura_search_design_systems` | DESIGN.md metadata: title, description, views, author. |
 | `aura_get_design_system` | Full DESIGN.md content plus preview HTML. |
 | `aura_use_design_system` | Token starter CSS plus the order to apply things in. |
-| `aura_search_all` | All four surfaces in parallel. Best first search for a new task. |
+| `aura_search_all` | All four surfaces in parallel. Never empties (fallback + suggestions). |
 | `aura_recommend` | A starter kit for a goal sentence, with links and a short rationale. |
-| `aura_trending` | Last-7-days leaders per surface, one call. |
+| `aura_trending` | 90-day leaders per surface, one call. |
 | `aura_categories` | The 13 component categories with live free counts. |
+| `aura_bundle` / `aura_bulk_fetch` | 2–8 details in one call (components/design_systems/assets). Per-item errors never fail the batch. |
+| `aura_scaffold_page` | One-turn page build: tokens.css + system preview + markup in order, combined deps + files. |
+| `aura_related` | 3 more-like-this per item. Discovery never dead-ends. |
 
 Every row carries `page_url` (open it to see the design) and `author` where Aura credits one.
 

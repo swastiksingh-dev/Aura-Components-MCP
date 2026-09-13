@@ -65,7 +65,7 @@ check('search all 4 surfaces', all && all.components && all.skills && all.assets
 const rec = J(await tool('aura_recommend', { goal: 'hero landing page' }));
 check('recommend starter kit', rec && rec.starter_kit && rec.starter_kit.components.length > 0, JSON.stringify(rec).slice(0, 200));
 const tr = J(await tool('aura_trending', { limit: 2 }));
-check('trending 4 surfaces', tr && tr.components && tr.skills && tr.window.includes('7 days'), Object.keys(tr || {}).join(','));
+check('trending 4 surfaces', tr && tr.components && tr.skills && tr.window.includes('90 days'), Object.keys(tr || {}).join(','));
 const cats = J(await tool('aura_categories', {}));
 check('13 categories with counts', cats && cats.categories && cats.categories.length === 13 && cats.categories.every((c) => typeof c.free === 'number'), JSON.stringify(cats).slice(0, 200));
 const nf = await tool('aura_get_component', { id: 999999999 });

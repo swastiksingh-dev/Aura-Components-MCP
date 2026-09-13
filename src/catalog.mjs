@@ -12,9 +12,11 @@ const SORTS = {
 };
 
 const LIST_COLS = {
-  components: "id,title,description,tags,code,background,premium,views,forks,slug,created_by,created_at,updated_at",
+  // Lists exclude code (13KB/row): theme falls back to background + tags heuristics.
+  // Full code loads only on get/bundle, where facets recompute exactly.
+  components: "id,title,description,tags,premium,views,forks,slug,background,created_by,created_at,updated_at",
   skills: "id,title,description,source_url,views,forks,featured,created_by,created_at,updated_at",
-  assets: "id,title,description,keywords,resolution,colors,media_type,premium,views,forks,image_320w,image_800w,image_1600w,image_3840w,image_original,image_url,video_url,video_poster_url,video_duration,slug,created_by,created_at,updated_at",
+  assets: "id,title,description,keywords,media_type,premium,views,forks,image_800w,video_url,video_poster_url,created_by,created_at",
   design_systems: "id,slug,title,description,views,forks,featured,created_by,created_at,updated_at",
 };
 
