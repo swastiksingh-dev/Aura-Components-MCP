@@ -2,6 +2,8 @@
 
 I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
+> **v1.4.0** — 19 tools. Search never empties (OR-token fallback + suggested queries), bulk-fetch with `aura_bundle`, one-turn page builds with `aura_scaffold_page`, dark/light faceting, related items, legal asset install.
+
 Point any MCP client at `dist/server.js` and your agent can search 2,495 free components, read 187 agent skills in full, pull 30,688 assets, and apply 725 DESIGN.md systems. It answers in seconds because there is nothing to log into and almost nothing to download: one bundled JS file, zero dependencies.
 
 Built by [swastiksingh-dev](https://github.com/swastiksingh-dev). Catalogue content belongs to Aura (aura.build, by Meng To / DesignCode). This project is not affiliated with Aura.
@@ -22,7 +24,10 @@ Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good a
 - 187 agent skills with full SKILL.md bodies (GSAP, Tailwind v4, Anime.js, copywriting, and more)
 - 30,688 images and clips with direct CDN URLs at multiple widths
 - 725 DESIGN.md systems with tokens, type rules, layout notes, and preview HTML
-- 15 tools over stdio, one 34KB bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
+- 19 tools over stdio, one 48KB bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
+- Never-empty search: AND-phrase misses retry as OR-tokens (2 passes) with `fallback` + `suggested_queries` on every surface
+- Agent accelerators: `aura_bundle` (8 details/turn), `aura_scaffold_page` (tokens + system + markup in dependency order), `aura_related`, `aura_install_asset` (license-aware)
+- Faceted lists: every component carries `facets { theme, weight, code_chars, needsTailwind, needsIcons, fonts }`; filter `theme: dark|light` server-side
 
 Start with `aura_status`, then `aura_search_all`. That order matters: status confirms the catalogue is reachable, search_all shows which surface has the best match before you spend calls on details.
 
