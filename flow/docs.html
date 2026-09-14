@@ -1,26 +1,73 @@
 <!doctype html>
-<html lang='en' data-theme='dark'>
+<html lang="en" data-theme="dark" class="no-js">
 <head>
-<meta charset='utf-8'>
-<meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Docs — how aura-components-mcp works</title>
-<meta name='description' content='Free MCP server for the Aura public catalogue: 2,495 components, 187 skills, 30,688 assets, 725 design systems. No login. Built by swastiksingh-dev.'>
-<link rel='icon' href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 500 500'%3E%3Crect width='500' height='500' rx='110' fill='%2309090b'/%3E%3Cpath d='M 250 110 L 370 330 L 310 330 L 250 210 L 190 330 L 130 330 Z' fill='%23a855f7'/%3E%3Cpath d='M 180 290 L 320 290' stroke='%2338bdf8' stroke-width='14' stroke-linecap='round'/%3E%3Ccircle cx='250' cy='110' r='16' fill='white'/%3E%3Ccircle cx='130' cy='330' r='16' fill='%236366f1'/%3E%3Ccircle cx='370' cy='330' r='16' fill='%23ec4899'/%3E%3Ccircle cx='250' cy='290' r='11' fill='%2338bdf8'/%3E%3C/svg%3E">
-<link rel='preconnect' href='https://fonts.googleapis.com'>
-<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
-<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap' rel='stylesheet'>
-<link rel='stylesheet' href='./styles.css'>
+<meta name="description" content="New to MCP? Five minutes top to bottom: status, search, fetch, install. Free-only, fast.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='black'/%3E%3Cpath d='M16 6 26 24h-5l-5-10-5 10H6z' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<script>(function(){try{var s=localStorage.getItem("acm-theme");document.documentElement.dataset.theme=s==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}})();</script>
+<link rel="stylesheet" href="./styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js" defer></script>
+<script src="./app.js" defer></script>
 </head>
 <body>
-<nav class='nav'><div class='nav-in'>
-<svg class='mlogo logo-anim' viewBox='0 0 500 500' role='img' aria-label='AURA.MCP logo'><defs><radialGradient id='lg_bg' cx='50%' cy='50%' r='50%'><stop offset='0%' stop-color='#1e1b4b' stop-opacity='.6'/><stop offset='100%' stop-color='#09090b' stop-opacity='1'/></radialGradient><linearGradient id='lg_aura' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='#6366f1'/><stop offset='50%' stop-color='#a855f7'/><stop offset='100%' stop-color='#ec4899'/></linearGradient><linearGradient id='lg_node' x1='0%' y1='0%' x2='100%' y2='0%'><stop offset='0%' stop-color='#38bdf8'/><stop offset='100%' stop-color='#818cf8'/></linearGradient></defs><rect width='500' height='500' rx='110' fill='url(#lg_bg)'/><path class='lg-a' d='M 250 110 L 370 330 L 310 330 L 250 210 L 190 330 L 130 330 Z' fill='url(#lg_aura)' opacity='.95'/><path class='lg-bar' d='M 180 290 L 320 290' stroke='url(#lg_node)' stroke-width='14' stroke-linecap='round' fill='none'/><circle class='lg-n lg-n1' cx='250' cy='110' r='16' fill='#fff'/><circle class='lg-n lg-n2' cx='130' cy='330' r='16' fill='#6366f1'/><circle class='lg-n lg-n3' cx='370' cy='330' r='16' fill='#ec4899'/><circle class='lg-n lg-n4' cx='250' cy='290' r='11' fill='#38bdf8'/><text x='250' y='415' font-family='Inter,Arial,sans-serif' font-size='34' font-weight='700' fill='#fff' text-anchor='middle'>AURA<tspan fill='#a855f7'>.MCP</tspan></text></svg>
-<div class='bname'>aura-components-mcp<small>by swastiksingh-dev &middot; free only &middot; no login</small></div>
-<div class='tabs'><a href='./index.html'>Home</a><a href='./how.html'>How it works</a><a href='./tools.html'>Tools</a><a href='./compare.html'>Compare</a><a href='./setup.html'>Setup</a><a href='./docs.html' class='on'>Docs</a></div>
-<button class='iconbtn' id='themeBtn' title='Toggle dark mode'>&#9788;</button>
+<a class="skip" href="#main">Skip to content</a>
+<div id="progress"></div>
+<nav class="nav"><div class="nav-in">
+<a class="brand" href="./index.html"><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 5 27 25h-5.2L16 13.2 10.2 25H5Z" style="fill:var(--bg)"/><rect x="11" y="21.3" width="10" height="2.5" rx="1.25" style="fill:var(--muted2)"/></svg></span>
+<span class="bname">aura-components-mcp<small>free catalogue · no login</small></span></a>
+<div class="tabs" id="tabs"><a href="./index.html">Home</a><a href="./how.html">How it works</a><a href="./tools.html">Tools</a><a href="./compare.html">Compare</a><a href="./setup.html">Setup</a><a href="./docs.html">Docs</a></div>
+<a class="ghbtn" href="https://github.com/swastiksingh-dev/Aura-Components-MCP" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>GitHub</span></a>
+<button class="iconbtn menubtn" id="menuBtn" aria-label="Menu">☰</button>
+<button class="iconbtn" id="themeBtn" title="Toggle theme">☾</button>
 </div></nav>
-<header class='hero'><canvas class='gl' aria-hidden='true'></canvas><div class='hero-shade'></div><div class='hero-in'><div class='eyebrow'>docs</div><h1>How it works,<br>slowly.</h1><p class='lede'>New to MCP? Five minutes, top to bottom.</p><div class='cta'></div><div class='stats'><div class='stat'><b>2,495</b><span>components</span></div><div class='stat'><b>187</b><span>skills</span></div><div class='stat'><b>30,688</b><span>assets</span></div><div class='stat'><b>725</b><span>systems</span></div></div></div></header>
-<div class='wrap'><section class='sec'><div class='eyebrow center'>docs</div><h2>The four-step loop.</h2><div class='doc'><h3>What is this?</h3><p>An MCP server: a program your agent launches over stdio (<code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>). Ours exposes the free Aura catalogue as 19 tools.</p><h3>Loop</h3><ol><li><b>Status</b> (<code>aura_status</code>), <b>search</b> (<code>aura_search_all</code>), <b>fetch</b> (<code>aura_get_*</code>), <b>install</b> (<code>aura_install_*</code>).</li></ol><h3>Free-only</h3><p>Queries filter <code>private=false + premium=false</code>. Pro refused with explanation.</p><h3>Fast</h3><p>48KB bundle, 60s LRU, coalescing, bounded payloads.</p></div></section></div>
-<footer><div class='foot-in'><span><b>aura-components-mcp</b> by swastiksingh-dev</span><span class='sp'></span><a href='https://github.com/swastiksingh-dev/Aura-Components-MCP'>GitHub</a><a href='https://www.aura.build/components'>Aura</a></div></footer>
-<script src='./app.js'></script>
+<div class="mpanel" id="mpanel"><div class="moverlay" data-close></div><div class="msheet">
+<div class="mhead"><span>Menu</span><button class="iconbtn" data-close aria-label="Close menu">✕</button></div>
+<a href="./index.html" data-nav>Home</a><a href="./how.html" data-nav>How it works</a><a href="./tools.html" data-nav>Tools</a><a href="./compare.html" data-nav>Compare</a><a href="./setup.html" data-nav>Setup</a><a href="./docs.html" data-nav>Docs</a>
+</div></div>
+<header class="hero"><div class="hero-in">
+<span class="badge"><i></i>docs · 5 min</span>
+<h1>How it works,<br><span class="grad">slowly.</span></h1>
+<p class="lede">New to MCP? Top to bottom, no jargon.</p>
+<div class="stats"><div class="stat"><b>2,495</b><span>components</span></div><div class="stat"><b>187</b><span>skills</span></div><div class="stat"><b>30,688</b><span>assets</span></div><div class="stat"><b>725</b><span>systems</span></div></div>
+</div></header>
+<main class="wrap" id="main">
+<section class="sec"><div class="kicker">docs</div><h2>The four-step loop.</h2>
+<div class="toc"><a href="#what">What</a><a href="#loop">Loop</a><a href="#free">Free-only</a><a href="#fast">Fast</a><a href="#install">Install</a><a href="#tuning">Tuning</a></div>
+<div class="doc">
+<h3 id="what">What is this?</h3>
+<p>An MCP server: a program your agent launches over stdio (<code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>). Ours exposes the free Aura catalogue as 20 tools.</p>
+<h3 id="loop">Loop</h3>
+<ol><li><b>Status</b> (<code>aura_status</code>) → <b>search</b> (<code>aura_search_all</code>) → <b>fetch</b> (<code>aura_get_*</code>) → <b>install</b> (<code>aura_install_*</code>).</li></ol>
+<h3 id="free">Free-only</h3>
+<p>Queries filter <code>private=false + premium=false</code>. Pro ids are refused with an explanation instead of guessing.</p>
+<h3 id="fast">Fast</h3>
+<p>48KB bundle · 60s LRU (300 keys) · request coalescing · bounded payloads · retries with jittered backoff.</p>
+<h3 id="install">Install via npm</h3>
+<p>On npm as <code>aura-components-mcp</code> — no repo needed. Global install, then run, or zero-install straight through <code>npx</code>:</p>
+<div class="code"><button class="copy" data-copy>Copy</button><pre>npm install -g aura-components-mcp
+npx -y aura-components-mcp@latest</pre></div>
+<p>Full client matrix lives in <a href="./setup.html">Setup</a>.</p>
+<h3 id="tuning">Tuning</h3>
+<div class="code"><button class="copy" data-copy>Copy</button><pre>AURA_TIMEOUT_MS=12000 AURA_RETRIES=2 AURA_CACHE_TTL_MS=60000
+AURA_DEFAULT_LIMIT=10 AURA_MAX_LIMIT=25 AURA_CODE_CHARS=12000</pre></div>
+<div class="note">Every row carries <code>page_url</code> + <code>author</code>. Open the design before you paste it.</div>
+<div class="cta"><a class="btn btn-pri" href="./setup.html">Set up in a minute</a><a class="btn btn-sec" href="./tools.html">See all 20 tools</a></div>
+</div></section></main>
+<footer><div class="foot-grid">
+<div class="foot-brand"><span class="bname">aura-components-mcp</span><p>Every free thing on Aura, one call away. Free only, no login, MIT.</p><span class="ver">v1.5.4 · 20 tools</span></div>
+<div><h4>Product</h4><a href="./how.html">How it works</a><a href="./tools.html">All 20 tools</a><a href="./compare.html">vs official MCP</a></div>
+<div><h4>Resources</h4><a href="./setup.html">Setup in a minute</a><a href="./docs.html">Docs, slowly</a><a href="https://www.aura.build/components">Aura catalogue</a></div>
+<div><h4>Project</h4><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP">GitHub</a><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/issues">Issues</a><a href="https://www.npmjs.com/package/aura-components-mcp">npm</a></div>
+</div><div class="foot-in"><span><b>aura-components-mcp</b> by swastiksingh-dev · MIT</span><span class="sp"></span><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP">GitHub</a><a href="https://www.aura.build/components">Aura</a><span id="yr"></span></div></footer>
+<button id="toTop" aria-label="Back to top">↑</button>
 </body>
 </html>
