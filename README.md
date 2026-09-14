@@ -1,5 +1,7 @@
 # aura-components-mcp
 
+[![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![npm downloads](https://img.shields.io/npm/dm/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE) [![node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](./package.json) [![MCP](https://img.shields.io/badge/MCP-stdio-blue)](./dist/server.js)
+
 I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
 > **v1.5.0** — 20 tools. Search never empties (OR-token fallback + suggested queries), bulk-fetch with `aura_bulk_fetch` (`aura_bundle` alias),undle`, one-turn page builds with `aura_scaffold_page`, dark/light faceting, related items, legal asset install.
@@ -60,11 +62,13 @@ claude mcp add aura-components -- node ./dist/server.js
 
 ## Demo
 
-<video src="https://github.com/swastiksingh-dev/Aura-Components-MCP/raw/main/assets/heart-demo.mp4" controls muted loop playsinline width="100%">Watch the 30-second flow tour (MP4)</video>
+https://github.com/user-attachments/assets/heart-demo — *replace with your upload URL after attaching the MP4 below*
+
+<video src="https://github.com/swastiksingh-dev/Aura-Components-MCP/raw/main/assets/heart-demo.mp4" controls muted loop playsinline width="100%">Watch the 10-second flow tour (MP4, 1918×936, ~8MB)</video>
 
 ![Animated site tour](assets/site-tour.gif)
 
-*Left: the flow/ launch site (dark WebGL hero, tools, setup). Right: `aura_recommend` turning one sentence into a starter kit. Full clips in [`assets/`](assets/).*
+*The flow/ launch site: dark WebGL hero, 19 grouped tools, one-minute setup. `aura_recommend` turns one sentence into a starter kit with links. Full clip in [`assets/`](assets/).*
 
 ## The 20 tools
 
@@ -112,7 +116,7 @@ Optional tuning (env vars, all with defaults): `AURA_TIMEOUT_MS` (12000), `AURA_
 ## Develop
 
 ```bash
-npm test      # 12 hermetic tests, no network
+npm test      # 20 hermetic tests, no network
 npm run verify  # 18 live checks against the real catalogue
 npm run build   # rebundle src/*.mjs into dist/server.js
 ```

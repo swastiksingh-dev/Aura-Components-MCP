@@ -1,0 +1,21 @@
+# aura-components-mcp
+
+> Free-only MCP server (stdio, zero deps, no login) for the Aura (aura.build) public catalogue: 2,495 components, 187 skills, 30,688 assets, 725 design systems. Built by swastiksingh-dev (MIT). Catalogue content belongs to Aura (Meng To / DesignCode).
+
+- Repo: https://github.com/swastiksingh-dev/Aura-Components-MCP
+- npm: https://www.npmjs.com/package/aura-components-mcp
+- Setup: https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md (Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness)
+- Live demo site: https://github.com/swastiksingh-dev/Aura-Components-MCP/tree/main/flow
+- Official Aura MCP (account projects/publishing, OAuth): https://www.aura.build/mcp
+
+## Start here
+
+- Call `aura_status` first (reachability + live free counts).
+- Then `aura_search_all` with the task words (all four surfaces, parallel, never empties via OR-token fallback).
+- Then `aura_get_*` on 2-3 finalists, `aura_install_*` / `aura_use_design_system` on the winner.
+- One-turn builds: `aura_bundle` (bulk details), `aura_scaffold_page` (tokens + system + markup ordered), `aura_related` (more-like-this).
+
+## Rules
+
+- Free-only by default; Pro rows are refused with explanation, never leaked.
+- Asset license: all-rights-reserved per Aura Terms §4 (https://www.aura.build/terms) — preview ok, commercial reuse needs Aura permission.

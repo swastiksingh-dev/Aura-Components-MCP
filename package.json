@@ -35,12 +35,20 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "model-context-protocol-server",
+    "mcp-server",
     "aura",
     "aura.build",
     "components",
     "tailwind",
+    "tailwindcss",
     "skills",
-    "ai-agents"
+    "ai-agents",
+    "claude-code",
+    "cursor",
+    "opencode",
+    "design-system",
+    "landing-page"
   ],
   "repository": {
     "type": "git",
