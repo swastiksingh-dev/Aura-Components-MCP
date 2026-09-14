@@ -62,11 +62,11 @@ claude mcp add aura-components -- node ./dist/server.js
 
 ## Demo
 
-https://github.com/user-attachments/assets/heart-demo — *replace with your upload URL after attaching the MP4 below*
 
-<video src="https://github.com/swastiksingh-dev/Aura-Components-MCP/raw/main/assets/heart-demo.mp4" controls muted loop playsinline width="100%">Watch the 10-second flow tour (MP4, 1918×936, ~8MB)</video>
 
-![Animated site tour](assets/site-tour.gif)
+<video src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4" controls autoplay muted loop playsinline width="100%">Watch the 10-second flow tour (MP4, 1918x936, ~8MB) — same file as <a href="./assets/heart-demo.mp4">assets/heart-demo.mp4</a></video>
+
+![Animated site tour](https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/site-tour.gif)
 
 *The flow/ launch site: dark WebGL hero, 19 grouped tools, one-minute setup. `aura_recommend` turns one sentence into a starter kit with links. Full clip in [`assets/`](assets/).*
 
