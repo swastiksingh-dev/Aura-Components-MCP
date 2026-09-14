@@ -48,4 +48,5 @@ const server = readFileSync(join(root, "src", "server.mjs"), "utf8")
 out += "\n// ---- server.mjs (main) ----\n" + server;
 mkdirSync(join(root, "dist"), { recursive: true });
 writeFileSync(join(root, "dist", "server.js"), out);
-console.log("built dist/server.js (" + out.length + " chars)");
+writeFileSync(join(root, "dist", "cli.cjs"), "#!/usr/bin/env node\nrequire('./server.js');\n");
+console.log("built dist/server.js (" + out.length + " chars) + dist/cli.cjs");

@@ -2,7 +2,11 @@
 
 [![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![npm downloads](https://img.shields.io/npm/dm/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE) [![node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](./package.json) [![MCP](https://img.shields.io/badge/MCP-stdio-blue)](./dist/server.js)
 
-I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
+<p align="center">
+  <a href="./flow/index.html"><img src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/site-tour.gif" alt="aura-components-mcp demo: dark WebGL hero, 19 grouped tools, one-minute setup" width="100%"></a>
+</p>
+
+> I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
 > **v1.5.0** — 20 tools. Search never empties (OR-token fallback + suggested queries), bulk-fetch with `aura_bulk_fetch` (`aura_bundle` alias),undle`, one-turn page builds with `aura_scaffold_page`, dark/light faceting, related items, legal asset install.
 
@@ -43,7 +47,7 @@ cd aura-components-mcp
 npm run build
 ```
 
-Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md): Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio. Launch site with animated explainer: open `flow/index.html` in a browser.
+Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio — or click through the animated [launch site](./flow/index.html) ([how it works](./flow/how.html) · [tools](./flow/tools.html) · [compare vs official](./flow/compare.html) · [setup](./flow/setup.html) · [docs](./flow/docs.html)). Launch site with animated explainer: open `flow/index.html` in a browser.
 
 ```bash
 # Claude Code

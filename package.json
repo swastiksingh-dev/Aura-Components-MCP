@@ -1,12 +1,12 @@
 {
   "name": "aura-components-mcp",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "Free-only MCP server for the Aura (aura.build) public catalogue: 2,495 components, 187 skills, 30,688 assets, 725 design systems. No login. Built by swastiksingh-dev.",
   "type": "module",
   "license": "MIT",
   "author": "swastiksingh-dev",
   "bin": {
-    "aura-components-mcp": "./dist/server.js"
+    "aura-components-mcp": "dist/cli.cjs"
   },
   "files": [
     "dist",
@@ -17,7 +17,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/swastiksingh-dev/aura-components-mcp.git"
+    "url": "git+https://github.com/swastiksingh-dev/aura-components-mcp.git"
   },
   "homepage": "https://github.com/swastiksingh-dev/aura-components-mcp",
   "bugs": {
