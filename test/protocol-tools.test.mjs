@@ -30,6 +30,7 @@ test("initialize -> list -> call aura_status", async () => {
     { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "aura_status", arguments: {} } },
   ]);
   assert.equal(out[0].result.serverInfo.name, "aura-components-mcp");
+  assert.match(out[0].result.serverInfo.version, /^\d+\.\d+\.\d+$/);
   assert.equal(out[1].result.tools.length, 20);
   assert.ok(out[2].result.content[0].text.includes('"ok": true'));
 });

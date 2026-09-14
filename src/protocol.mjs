@@ -1,7 +1,12 @@
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
-export const SERVER_INFO = { name: "aura-components-mcp", version: "1.0.0" };
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+let PKG_VERSION = "0.0.0-dev";
+try { PKG_VERSION = require("../../package.json").version; } catch { /* bundled dist: falls back below */ }
+if (PKG_VERSION === "0.0.0-dev") { try { PKG_VERSION = require("../package.json").version; } catch { /* keep dev */ } }
+export const SERVER_INFO = { name: "aura-components-mcp", version: PKG_VERSION };
 export const PROTOCOL_VERSION = "2024-11-05";
 
 const err = (code, message, data) => ({ code, message, ...(data === undefined ? {} : { data }) });
