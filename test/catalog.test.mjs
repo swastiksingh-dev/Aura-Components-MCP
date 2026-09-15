@@ -150,6 +150,42 @@ test("theme hint reranks dark first + scored fallback (precision)", async () => 
   assert.ok(r.fallback_score === undefined || String(r.fallback_score).includes("theme:dark"));
 });
 
+test("negative_theme + min_views filter (gap 1)", async () => {
+  const stub = { getJson: async () => ({ rows: [
+    { id: 1, title: "Light Hero", description: "x", tags: [], code: "<div class=x bg-white></div>", background: "ffffff", views: 2, created_by: null },
+    { id: 2, title: "Dark Hero", description: "x", tags: [], code: "<div class=x bg-black></div>", background: "000000", views: 50, created_by: null },
+  ], total: 2 }) };
+  const { facets } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const r = await cat.searchCatalog("components", { query: "hero", limit: 5, negative_theme: "light", min_views: 10 });
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].id, 2);
+});
+
+test("inline snippets on design/skill search (gap 4)", async () => {
+  const stub = { getJson: async (url) => url.includes("preview_html") || (url.includes("design_systems") && url.includes("content")) || url.includes("id=in.")
+    ? { rows: [{ id: "d1", content: "tokens here", preview_html: "<body>hi</body>" }], total: 1 }
+    : { rows: [{ id: "d1", slug: "s", title: "t", description: "d", created_by: null }], total: 1 } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("design_systems", { query: "x", limit: 2 });
+  assert.equal(String(r.items[0].preview_snippet).slice(0, 6), "<body>");
+});
+
+test("commercial_ok:true explains instead of silence (gap 5)", async () => {
+  const { facets } = await import("../src/guide.mjs");
+  assert.equal(facets("assets", { id: 1, image_800w: "u" }).commercial_ok, false);
+});
+
+test("editorialPicks orders forks-first server-side (gap 2)", async () => {
+  let seenUrl = "";
+  const stub = { getJson: async (url) => { seenUrl = url; return { rows: [{ id: 1, title: "a", slug: "a", code: "x", background: "fff", views: 1, forks: 2, created_by: null }], total: 1 }; } };
+  const { facets } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const p = await cat.editorialPicks(2);
+  assert.ok(seenUrl.includes("order=forks.desc"));
+  assert.equal(p.length, 1);
+});
+
 test("chunkText paginates + getItem chunk param (payloads)", async () => {
   const c = chunkText("abcdefghij", 4, 1);
   assert.equal(c.text, "efgh…[truncated]");

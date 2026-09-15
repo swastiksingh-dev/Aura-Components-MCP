@@ -71,7 +71,7 @@ function windowAgoIso(days) {
   return d.toISOString();
 }
 function weekAgoIso() { return windowAgoIso(7); }
-export function trendingIso() { return windowAgoIso(90); } // 7d window is empty: newest DS row is ~12 weeks old; 90d keeps "trending" meaningful
+export function trendingIso(days = 90) { return windowAgoIso(days); } // 7d seed is empty; callers pass window_days (default 30 for components now)
 
 export function buildSearchParams(kind, q = {}) {
   const p = new URLSearchParams();
@@ -99,7 +99,7 @@ export function buildSearchParams(kind, q = {}) {
     else if (kind === "assets") ors.push("title.ilike." + v + ",description.ilike." + v);
     else ors.push("title.ilike." + v + ",description.ilike." + v);
   }
-  if (q.sort === "trending") filters.push("created_at=gte." + trendingIso());
+  if (q.sort === "trending") filters.push("created_at=gte." + trendingIso(q.window_days ?? 90));
   return { params: p, filters, ors };
 }
 
@@ -140,9 +140,14 @@ export function shapeRow(kind, row, cfg, withFacets) {
   if (kind === "components" && typeof base.code === "string") {
     base.code_chars = base.code.length;
     if (withFacets) { try { base.facets = withFacets(kind, { ...base, code: base.code.slice(0, 600) }, { fullLength: base.code.length }); } catch { /* never break rows */ } }
+    // Gap 3: code_excerpt (first 1200 chars, readable) + full_fetch flag. Agents skim
+    // the excerpt, then get chunk N — no more blind 18k-70k dumps or silent cuts.
+    base.code_excerpt = String(base.code).slice(0, 1200);
+    base.full_fetch = { tool: "aura_get_component", id: base.id ?? base.slug, chunks: Math.max(1, Math.ceil(base.code.length / cfg.codeChars)) };
     const ch = chunkText(base.code, cfg.codeChars, 0);
     base.code = ch.text;
     base.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+    if (base.facets) base.facets.deps_summary = base.facets.needsTailwind || base.facets.needsIcons ? [base.facets.needsTailwind && "tailwindcss", base.facets.needsIcons && "iconify-icon"].filter(Boolean) : [];
   }
   if (kind === "skills" && typeof base.content === "string") {
     const ch = chunkText(base.content, cfg.contentChars, 0);
@@ -217,7 +222,11 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     const offset = Math.max(0, q.offset ?? 0);
     const sort = SORTS[kind][q.sort] ? q.sort : "popular";
     const freeOnly = q.freeOnly ?? config.freeOnlyDefault;
-    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly].join("|");
+    // Gap 1: negative_theme (exclude a theme) + min_views (quality floor). Both ride
+    // the cache key so filtered/unfiltered variants never collide.
+    const negTheme = q.negative_theme ? String(q.negative_theme).toLowerCase() : "";
+    const minViews = Math.max(0, q.min_views ?? 0);
+    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, negTheme, minViews].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     if (inflight.has(key)) return inflight.get(key);
@@ -285,9 +294,35 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
           return (u && byUrl.get(u) === r) ? { ...r, canonical: true } : r;
         });
       }
+      // Gap 4: inline snippets — one extra batched fetch fills preview/tokens glimpses
+      // into search rows (top N only) so agents decide without a second call per row.
+      // Bounded: top 5 rows, client-side sliced to 800 chars. No extra call when empty.
+      if ((kind === "design_systems" || kind === "skills") && rows.length) {
+        const topIds = rows.slice(0, 5).map((r) => r.id);
+        try {
+          const idList = topIds.map((id) => encodeURIComponent(String(id))).join(",");
+          const sel = kind === "design_systems" ? "id,content,preview_html" : "id,content,source_url";
+          const { rows: full } = await fetcher.getJson(base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&id=in.(" + idList + ")", headers);
+          const byId = new Map(full.map((r) => [String(r.id), r]));
+          rows = rows.map((r) => {
+            const f = byId.get(String(r.id));
+            if (!f) return r;
+            if (kind === "design_systems") return { ...r, preview_snippet: String(f.preview_html || "").slice(0, 800), tokens_snippet: String(f.content || "").slice(0, 800) };
+            return { ...r, content_snippet: String(f.content || "").slice(0, 800) };
+          });
+        } catch { /* snippets are best-effort; rows still return */ }
+      }
       const enriched = await enrichAuthors(rows);
       const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
       if (deduped) out.deduped = deduped;
+      // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
+      // hard exclusion. Both apply before theme re-rank so counts stay honest.
+      if (minViews > 0) out.items = out.items.filter((it) => (it.views || 0) >= minViews);
+      if (negTheme && kind === "components") {
+        const before = out.items.length;
+        out.items = out.items.filter((it) => !it.facets || it.facets.theme !== negTheme);
+        if (out.items.length < before) out.negative_theme_filtered_out = before - out.items.length;
+      }
       // Theme-aware re-rank (components): theme hint from query (dark/light/cinematic)
       // or explicit q.theme reorders so matches come first — never silently drops rows,
       // but reports how many were filtered out of the top for transparency.
@@ -408,6 +443,19 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     return out;
   }
 
+  // Gap 2: editorial picks — human-grade component leads for when views-signal is
+  // noise (free trending total=2). Top free by forks (remix = real reuse), then views.
+  async function editorialPicks(limit = 5) {
+    const lim = Math.max(1, Math.min(limit || 5, 8));
+    const sel = encodeURIComponent(LIST_COLS.components);
+    const url = base + "/rest/v1/components?select=" + sel + "&private=eq.false&premium=eq.false&order=forks.desc,views.desc&limit=" + lim;
+    try {
+      const { rows } = await fetcher.getJson(url, headers);
+      const enriched = await enrichAuthors(rows);
+      return enriched.map((r) => shapeRow("components", r, config, facetsFn));
+    } catch { return []; }
+  }
+
   // Bulk fetch: N details in one parallel round (backs aura_bundle + aura_scaffold_page).
   // Per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
   async function bundleItems(kind, ids, max = 5) {
@@ -440,5 +488,5 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     } catch { return { item: shapeRow(kind, item, config), related: [] }; }
   }
 
-  return { searchCatalog, getItem, getStatus, categoryCounts, bundleItems, relatedItems };
+  return { searchCatalog, getItem, getStatus, categoryCounts, bundleItems, relatedItems, editorialPicks };
 }

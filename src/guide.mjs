@@ -72,6 +72,10 @@ export function facets(kind, row, opts) {
     // catalogue content is the exclusive property of DESIGNCODE IO PTE. LTD.;
     // no per-asset license column exists, so commercial reuse needs Aura's permission.
     f.license = 'all-rights-reserved (Aura Terms §4: DESIGNCODE IO PTE. LTD.) — personal/preview use via page_url; commercial reuse needs Aura permission (support@designcode.io)';
+    // Gap 5: machine-readable license gate. commercial_ok:false always (no per-asset
+    // column exists to prove otherwise) — agents filter without parsing prose.
+    f.commercial_ok = false;
+    f.terms_url = 'https://www.aura.build/terms';
     f.download = row.image_original || row.image_1600w || row.image_800w || row.video_url || null;
     f.preview = row.image_800w || row.video_poster_url || null;
   }

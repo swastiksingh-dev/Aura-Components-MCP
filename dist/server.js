@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v1.6.0 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v1.6.1 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -121,9 +121,38 @@ const esc = (s) => String(s).replaceAll('"', '""');
 const ilike = (v) => "*" + String(v).replaceAll("*", "").replaceAll(",", " ").trim() + "*";
 
 // Split a goal sentence into significant tokens for OR fallback (stop-word filtered).
-const STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,free,dark,also,that,this,from,into,plus,vs,top,best,up".split(","));
+// Theme words (dark/light) are NOT search tokens — they become rank/filter signals
+// (see detectThemeHint + scoreByTheme), so "dark cinematic" can't match light rows.
+const STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,free,also,that,this,from,into,plus,vs,top,best,up".split(","));
+const THEME_WORDS = new Set(["dark", "light", "midnight", "noir", "black", "white", "bright", "airy", "minimal"]);
 function queryTokens(q, max = 4) {
-  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t)).slice(0, max);
+  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t) && !THEME_WORDS.has(t)).slice(0, max);
+}
+// Theme hint from the raw query: explicit signal, separate from match tokens.
+function detectThemeHint(q) {
+  const t = String(q ?? "").toLowerCase();
+  const dark = /\bdark\b|\bmidnight\b|\bnoir\b|\bcinematic\b/.test(t);
+  const light = /\blight\b|\bbright\b|\bairy\b/.test(t);
+  if (dark && !light) return "dark";
+  if (light && !dark) return "light";
+  return null;
+}
+// Rank rows: +2 per matched token in title, +1 in description/tags, theme match first.
+// Returns { rows, scored } where scored explains the top pick for fallback_score.
+function scoreRows(kind, rows, toks, themeHint) {
+  const scored = rows.map((r) => {
+    const title = String(r.title || "").toLowerCase();
+    const desc = String(r.description || "").toLowerCase();
+    const tags = ((r.tags || []).map((x) => String(x).toLowerCase()).join(" "));
+    let s = 0;
+    for (const t of toks) { if (title.includes(t)) s += 2; else if (desc.includes(t) || tags.includes(t)) s += 1; }
+    const th = r.facets && r.facets.theme;
+    const themeOk = !themeHint || th === themeHint || th === "mixed" || th === "unknown";
+    if (themeHint && th === themeHint) s += 3;
+    return { r, s, themeOk };
+  });
+  scored.sort((a, b) => ((b.themeOk ? 1 : 0) - (a.themeOk ? 1 : 0)) || (b.s - a.s) || ((b.r.views || 0) - (a.r.views || 0)));
+  return scored;
 }
 
 function windowAgoIso(days) {
@@ -132,7 +161,7 @@ function windowAgoIso(days) {
   return d.toISOString();
 }
 function weekAgoIso() { return windowAgoIso(7); }
-function trendingIso() { return windowAgoIso(90); } // 7d window is empty: newest DS row is ~12 weeks old; 90d keeps "trending" meaningful
+function trendingIso(days = 90) { return windowAgoIso(days); } // 7d seed is empty; callers pass window_days (default 30 for components now)
 
 function buildSearchParams(kind, q = {}) {
   const p = new URLSearchParams();
@@ -160,7 +189,7 @@ function buildSearchParams(kind, q = {}) {
     else if (kind === "assets") ors.push("title.ilike." + v + ",description.ilike." + v);
     else ors.push("title.ilike." + v + ",description.ilike." + v);
   }
-  if (q.sort === "trending") filters.push("created_at=gte." + trendingIso());
+  if (q.sort === "trending") filters.push("created_at=gte." + trendingIso(q.window_days ?? 90));
   return { params: p, filters, ors };
 }
 
@@ -171,7 +200,15 @@ function buildUrl(base, table, params, filters, ors) {
   return base + "/rest/v1/" + table + "?" + qs;
 }
 
+// Truncation with cursors: agents see full_length + chunk info instead of a silent
+// marker, and can fetch the rest via getItem with { chunk } (see getItem below).
 const trunc = (s, n) => (s && s.length > n ? s.slice(0, n) + "…[truncated]" : s);
+function chunkText(s, n, chunk = 0) {
+  const full = String(s || "");
+  const total = Math.max(1, Math.ceil(full.length / n));
+  const i = Math.max(0, Math.min(chunk, total - 1));
+  return { text: full.slice(i * n, (i + 1) * n) + (i < total - 1 ? "…[truncated]" : ""), chunk: i, chunks: total, full_length: full.length, truncated: total > 1 };
+}
 
 function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
@@ -193,12 +230,31 @@ function shapeRow(kind, row, cfg, withFacets) {
   if (kind === "components" && typeof base.code === "string") {
     base.code_chars = base.code.length;
     if (withFacets) { try { base.facets = withFacets(kind, { ...base, code: base.code.slice(0, 600) }, { fullLength: base.code.length }); } catch { /* never break rows */ } }
-    base.code = trunc(base.code, cfg.codeChars);
+    // Gap 3: code_excerpt (first 1200 chars, readable) + full_fetch flag. Agents skim
+    // the excerpt, then get chunk N — no more blind 18k-70k dumps or silent cuts.
+    base.code_excerpt = String(base.code).slice(0, 1200);
+    base.full_fetch = { tool: "aura_get_component", id: base.id ?? base.slug, chunks: Math.max(1, Math.ceil(base.code.length / cfg.codeChars)) };
+    const ch = chunkText(base.code, cfg.codeChars, 0);
+    base.code = ch.text;
+    base.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+    if (base.facets) base.facets.deps_summary = base.facets.needsTailwind || base.facets.needsIcons ? [base.facets.needsTailwind && "tailwindcss", base.facets.needsIcons && "iconify-icon"].filter(Boolean) : [];
   }
-  if (kind === "skills" && typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
+  if (kind === "skills" && typeof base.content === "string") {
+    const ch = chunkText(base.content, cfg.contentChars, 0);
+    base.content = ch.text;
+    base.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+  }
   if (kind === "design_systems") {
-    if (typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
-    if (typeof base.preview_html === "string") base.preview_html = trunc(base.preview_html, cfg.codeChars);
+    if (typeof base.content === "string") {
+      const ch = chunkText(base.content, cfg.contentChars, 0);
+      base.content = ch.text;
+      base.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+    }
+    if (typeof base.preview_html === "string") {
+      const ch = chunkText(base.preview_html, cfg.codeChars, 0);
+      base.preview_html = ch.text;
+      base.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+    }
   }
   base.page_url = pageUrl(kind, row);
   if (kind === "assets") base.asset_key = assetKey(row);
@@ -256,7 +312,11 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const offset = Math.max(0, q.offset ?? 0);
     const sort = CATALOG_SORTS[kind][q.sort] ? q.sort : "popular";
     const freeOnly = q.freeOnly ?? config.freeOnlyDefault;
-    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly].join("|");
+    // Gap 1: negative_theme (exclude a theme) + min_views (quality floor). Both ride
+    // the cache key so filtered/unfiltered variants never collide.
+    const negTheme = q.negative_theme ? String(q.negative_theme).toLowerCase() : "";
+    const minViews = Math.max(0, q.min_views ?? 0);
+    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, negTheme, minViews].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     if (inflight.has(key)) return inflight.get(key);
@@ -270,8 +330,10 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
       let fallback = null;
       // AND-phrase queries like "dark cinematic portfolio" match nothing literally:
       // retry as OR over significant tokens so every surface degrades instead of emptying.
-      // Single-token queries that miss also retry bare (drops tag/media filters) + suggest queries.
+      // Theme words (dark/light/cinematic) are rank signals, not match tokens.
       const toks = (q.query && q.query.trim() && !q.tag) ? queryTokens(q.query) : [];
+      const themeHint = (q.query && q.query.trim()) ? detectThemeHint(q.query) : null;
+      const effTheme = q.theme || themeHint;
       const suggest = (t) => {
         const s = [];
         if (t.length > 1) s.push(t.slice(0, Math.min(3, t.length)).join(" "));
@@ -322,16 +384,59 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
           return (u && byUrl.get(u) === r) ? { ...r, canonical: true } : r;
         });
       }
+      // Gap 4: inline snippets — one extra batched fetch fills preview/tokens glimpses
+      // into search rows (top N only) so agents decide without a second call per row.
+      // Bounded: top 5 rows, client-side sliced to 800 chars. No extra call when empty.
+      if ((kind === "design_systems" || kind === "skills") && rows.length) {
+        const topIds = rows.slice(0, 5).map((r) => r.id);
+        try {
+          const idList = topIds.map((id) => encodeURIComponent(String(id))).join(",");
+          const sel = kind === "design_systems" ? "id,content,preview_html" : "id,content,source_url";
+          const { rows: full } = await fetcher.getJson(base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&id=in.(" + idList + ")", headers);
+          const byId = new Map(full.map((r) => [String(r.id), r]));
+          rows = rows.map((r) => {
+            const f = byId.get(String(r.id));
+            if (!f) return r;
+            if (kind === "design_systems") return { ...r, preview_snippet: String(f.preview_html || "").slice(0, 800), tokens_snippet: String(f.content || "").slice(0, 800) };
+            return { ...r, content_snippet: String(f.content || "").slice(0, 800) };
+          });
+        } catch { /* snippets are best-effort; rows still return */ }
+      }
       const enriched = await enrichAuthors(rows);
       const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
       if (deduped) out.deduped = deduped;
-      // Post-filter: theme (dark|light) is derived, not a column — filter shaped rows.
-      if (q.theme && (kind === "components")) {
-        const want = String(q.theme).toLowerCase();
-        out.items = out.items.filter((it) => (it.facets && it.facets.theme) === want);
+      // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
+      // hard exclusion. Both apply before theme re-rank so counts stay honest.
+      if (minViews > 0) out.items = out.items.filter((it) => (it.views || 0) >= minViews);
+      if (negTheme && kind === "components") {
+        const before = out.items.length;
+        out.items = out.items.filter((it) => !it.facets || it.facets.theme !== negTheme);
+        if (out.items.length < before) out.negative_theme_filtered_out = before - out.items.length;
+      }
+      // Theme-aware re-rank (components): theme hint from query (dark/light/cinematic)
+      // or explicit q.theme reorders so matches come first — never silently drops rows,
+      // but reports how many were filtered out of the top for transparency.
+      if (kind === "components" && effTheme) {
+        const scored = scoreRows(kind, out.items, toks, effTheme);
+        const topTheme = scored.filter((s) => s.themeOk).map((s) => s.r);
+        const dropped = out.items.length - topTheme.length;
+        if (topTheme.length) {
+          out.items = topTheme;
+          out.theme_hint = effTheme;
+          if (dropped) out.theme_filtered_out = dropped;
+        } else {
+          out.theme_hint = effTheme;
+          out.theme_warning = "no " + effTheme + "-theme rows in top results; showing unfiltered, check facets.theme per row";
+        }
       }
       // ISS15: transparent fallback — agents see what happened, not a magic string.
-      if (fallback) { out.fallback = fallback; out.isFallback = true; out.fallback_score = "token-overlap:" + toks.length + "-terms"; }
+      if (fallback) {
+        out.fallback = fallback; out.isFallback = true;
+        const scoredTop = out.items[0];
+        const topTitle = scoredTop ? String(scoredTop.title || "").toLowerCase() : "";
+        const hits = toks.filter((t) => topTitle.includes(t)).length;
+        out.fallback_score = "token-overlap:" + hits + "/" + toks.length + "-terms" + (effTheme ? ";theme:" + effTheme : "");
+      }
       else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggest(toks).filter((s) => !/^[a-z0-9]{8,}$/i.test(s.replace(/\s/g, ""))); if (!out.suggested_queries.length) out.suggested_queries = ["hero", "pricing", "landing page"]; }
       cacheSet(key, out);
       return out;
@@ -340,8 +445,9 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     try { return await p; } finally { inflight.delete(key); }
   }
 
-  async function getItem(kind, idOrSlug) {
-    const key = ["get", kind, String(idOrSlug)].join("|");
+  async function getItem(kind, idOrSlug, opts = {}) {
+    const chunk = Math.max(0, opts.chunk ?? 0);
+    const key = ["get", kind, String(idOrSlug), "c" + chunk].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(idOrSlug));
@@ -357,7 +463,35 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
     const enriched = await enrichAuthors(rows);
-    const out = { kind, item: shapeRow(kind, enriched[0], config, facetsFn), cached: false };
+    const full = enriched[0];
+    // Chunked fetch: re-slice full blobs per requested chunk so agents can page
+    // through 18k-70k payloads instead of hitting one silent truncation wall.
+    const item = shapeRow(kind, full, config, facetsFn);
+    if (chunk > 0) {
+      if (kind === "components" && typeof full.code === "string") {
+        const ch = chunkText(full.code, config.codeChars, chunk);
+        item.code = ch.text;
+        item.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+      }
+      if ((kind === "skills") && typeof full.content === "string") {
+        const ch = chunkText(full.content, config.contentChars, chunk);
+        item.content = ch.text;
+        item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+      }
+      if (kind === "design_systems") {
+        if (typeof full.content === "string") {
+          const ch = chunkText(full.content, config.contentChars, chunk);
+          item.content = ch.text;
+          item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+        }
+        if (typeof full.preview_html === "string") {
+          const ch = chunkText(full.preview_html, config.codeChars, chunk);
+          item.preview_html = ch.text;
+          item.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+        }
+      }
+    }
+    const out = { kind, item, cached: false };
     cacheSet(key, out);
     return out;
   }
@@ -399,6 +533,19 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     return out;
   }
 
+  // Gap 2: editorial picks — human-grade component leads for when views-signal is
+  // noise (free trending total=2). Top free by forks (remix = real reuse), then views.
+  async function editorialPicks(limit = 5) {
+    const lim = Math.max(1, Math.min(limit || 5, 8));
+    const sel = encodeURIComponent(LIST_COLS.components);
+    const url = base + "/rest/v1/components?select=" + sel + "&private=eq.false&premium=eq.false&order=forks.desc,views.desc&limit=" + lim;
+    try {
+      const { rows } = await fetcher.getJson(url, headers);
+      const enriched = await enrichAuthors(rows);
+      return enriched.map((r) => shapeRow("components", r, config, facetsFn));
+    } catch { return []; }
+  }
+
   // Bulk fetch: N details in one parallel round (backs aura_bundle + aura_scaffold_page).
   // Per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
   async function bundleItems(kind, ids, max = 5) {
@@ -431,11 +578,11 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     } catch { return { item: shapeRow(kind, item, config), related: [] }; }
   }
 
-  return { searchCatalog, getItem, getStatus, categoryCounts, bundleItems, relatedItems };
+  return { searchCatalog, getItem, getStatus, categoryCounts, bundleItems, relatedItems, editorialPicks };
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "1.6.0" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "1.6.1" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
@@ -576,6 +723,10 @@ function facets(kind, row, opts) {
     // catalogue content is the exclusive property of DESIGNCODE IO PTE. LTD.;
     // no per-asset license column exists, so commercial reuse needs Aura's permission.
     f.license = 'all-rights-reserved (Aura Terms §4: DESIGNCODE IO PTE. LTD.) — personal/preview use via page_url; commercial reuse needs Aura permission (support@designcode.io)';
+    // Gap 5: machine-readable license gate. commercial_ok:false always (no per-asset
+    // column exists to prove otherwise) — agents filter without parsing prose.
+    f.commercial_ok = false;
+    f.terms_url = 'https://www.aura.build/terms';
     f.download = row.image_original || row.image_1600w || row.image_800w || row.video_url || null;
     f.preview = row.image_800w || row.video_poster_url || null;
   }
@@ -713,14 +864,11 @@ function tokenHints(content, previewHtml) {
 };
 
 // ---- tools.mjs ----
-// Module: tools — thin adapters. Each tool validates args at the seam,
+// Module: tools â€” thin adapters. Each tool validates args at the seam,
 // calls one catalog/guide method, wraps textResult. No retries/caching here.
-
-
 const TOOL_KINDS = ['components', 'skills', 'assets', 'design_systems'];
 const TOOL_SORTS = ['popular', 'recent', 'trending', 'updated'];
 const TOOL_CATS = ['hero','section','button','card','background','header','logo','feature','pricing','testimonial','footer','form','heading'];
-
 function toolFn_bad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
 function toolFn_str(v, name) { if (v !== undefined && typeof v !== 'string') toolFn_bad(name + ' must be a string'); return v; }
 function toolFn_num(v, name) { if (v !== undefined && typeof v !== 'number') toolFn_bad(name + ' must be a number'); return v; }
@@ -729,16 +877,15 @@ function toolFn_sort(v) { if (v !== undefined && !TOOL_SORTS.includes(v)) toolFn
 function theme(v) { if (v !== undefined && v !== 'dark' && v !== 'light') toolFn_bad('theme must be dark|light'); return v; }
 function idList(v, name) { if (v === undefined) return v; if (!Array.isArray(v) || !v.length || v.length > 8 || v.some((x) => typeof x !== 'string' && typeof x !== 'number')) toolFn_bad(name + ' must be an array of 1-8 ids'); return v; }
 function toolFn_cat(v) { if (v !== undefined && !TOOL_CATS.includes(v)) toolFn_bad('category must be one of ' + TOOL_CATS.join('|')); return v; }
-
 const TOOL_DEFS = [
   { name: 'aura_status', description: 'Catalogue health plus free counts (components, skills, assets, design systems). Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, theme dark|light filter, sorts. Items carry facets (theme/weight/needs).', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
-  { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' } }, additionalProperties: false } },
+  { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, theme dark|light filter, negative_theme exclusion, min_views floor, sorts. Items carry facets (theme/weight/needs).', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
+  { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug. Chunk param pages large code (see code_info).', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_search_skills', description: 'Search free Aura agent skills (187). Metadata only; use aura_get_skill for the full SKILL.md content.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
-  { name: 'aura_get_skill', description: 'Full free agent-skill content (SKILL.md body) plus source_url and page URL. Skill id.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false } },
-  { name: 'aura_search_assets', description: 'Search free Aura assets (images and video). Keywords, media_type image or video.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, mediaType: { type: 'string', enum: ['image', 'video'] }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
+  { name: 'aura_get_skill', description: 'Full free agent-skill content (SKILL.md body) plus source_url and page URL. Skill id. Chunk param pages large bodies (see content_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, chunk: { type: 'number' } }, required: ['id'], additionalProperties: false } },
+  { name: 'aura_search_assets', description: 'Search free Aura assets (images and video). Keywords, media_type image or video.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, mediaType: { type: 'string', enum: ['image', 'video'] }, commercial_ok: { type: 'boolean' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_search_design_systems', description: 'Search free Aura DESIGN.md systems (725). Metadata only; use aura_get_design_system for content.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
-  { name: 'aura_get_design_system', description: 'Full free DESIGN.md content plus preview_html, tokens, and page URL. System id or slug.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' } }, additionalProperties: false } },
+  { name: 'aura_get_design_system', description: 'Full free DESIGN.md content plus preview_html, tokens, and page URL. System id or slug. Chunk param pages large preview_html (see preview_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' }, chunk: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_search_all', description: 'One call across components, skills, assets, and design systems in parallel. Free only.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_recommend', description: 'Starter kit for a goal: top free components, skills, design systems, and assets with page URLs and rationale.', inputSchema: { type: 'object', properties: { goal: { type: 'string' } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_install_component', description: 'Paste-ready setup for a free component: dependency list, setup steps, file map, fonts. Goes beyond the official Aura MCP, which only reads project source.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' } }, additionalProperties: false } },
@@ -749,37 +896,44 @@ const TOOL_DEFS = [
   { name: 'aura_scaffold_page', description: 'One ordered page build: DESIGN.md tokens.css + system preview + component markup in dependency order, combined deps + files[]. Merges install_* + use_* in a single turn.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, system: { type: 'string' }, components: { type: 'array', items: {} } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_related', description: 'More-like-this: 3 related items for a component/skill/design-system by tag + text overlap. Discovery never dead-ends.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'skills', 'design_systems'] }, id: {} }, required: ['kind', 'id'], additionalProperties: false } },
   { name: 'aura_bulk_fetch', description: 'Bulk-fetch 2-8 details in one call for components, design_systems, or assets. Alias-friendly name for aura_bundle. Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'design_systems', 'assets'] }, ids: { type: 'array', items: {} } }, required: ['kind', 'ids'], additionalProperties: false } },
-  { name: 'aura_install_asset', description: 'Legal drop-in plan for an asset: direct download URL, preview URL, license (all-rights-reserved per Aura Terms §4 — check page before commercial use), suggested file path.', inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'], additionalProperties: false } },
+  { name: 'aura_install_asset', description: 'Legal drop-in plan for an asset: direct download URL, preview URL, license (all-rights-reserved per Aura Terms Â§4 â€” check page before commercial use), suggested file path.', inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_categories', description: 'The 13 component categories with live free counts. Pick one, then search within it.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
 ];
-
 function createHandlers(catalog) {
   const free = { freeOnly: true };
   return {
     aura_status: async () => textResult(await catalog.getStatus()),
     aura_search_components: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('components', {
       query: toolFn_str(a.query, 'query'), tag: toolFn_cat(a.category), freeOnly: true, theme: theme(a.theme),
+      negative_theme: a.negative_theme === undefined ? undefined : theme(a.negative_theme),
+      min_views: toolFn_num(a.min_views, 'min_views'),
       sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'),
     })); },
     aura_get_component: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (id === undefined || (typeof id !== 'string' && typeof id !== 'number')) toolFn_bad('provide id (number) or slug (string)');
-      return textResult(await catalog.getItem('components', id)); },
+      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
+      return textResult(await catalog.getItem('components', id, { chunk })); },
     aura_search_skills: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('skills', {
       query: toolFn_str(a.query, 'query'), sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'),
     })); },
     aura_get_skill: async (a) => { a = a || {}; if (typeof a.id !== 'string' || !a.id) toolFn_bad('id (string) is required');
-      return textResult(await catalog.getItem('skills', a.id)); },
-    aura_search_assets: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('assets', {
-      query: toolFn_str(a.query, 'query'),
-      mediaType: a.mediaType === undefined ? undefined : (a.mediaType === 'image' || a.mediaType === 'video' ? a.mediaType : toolFn_bad('mediaType must be image|video')),
-      freeOnly: true, sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'),
-    })); },
+      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
+      return textResult(await catalog.getItem('skills', a.id, { chunk })); },
+    aura_search_assets: async (a) => { a = a || {}; const co = a.commercial_ok === undefined ? undefined : toolFn_bool(a.commercial_ok, 'commercial_ok');
+      const r = await catalog.searchCatalog('assets', { query: toolFn_str(a.query, 'query'), mediaType: a.mediaType === undefined ? undefined : (a.mediaType === 'image' || a.mediaType === 'video' ? a.mediaType : toolFn_bad('mediaType must be image|video')), freeOnly: true, sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset') });
+      // Gap 5: commercial_ok filter (all-rights-reserved per Aura Terms S4).
+      // commercial_ok:true returns [] with explanation, never silence.
+      if (co === true) return textResult({ ...r, items: [], commercial_ok: false, commercial_note: 'All Aura catalogue assets are all-rights-reserved per Aura Terms S4. Preview/personal use via page_url; commercial reuse needs Aura permission.' });
+      if (co === true) return textResult({ ...r, items: [], commercial_ok: false, commercial_note: 'x' });
+      if (co === true) return textResult({ ...r, items: [], commercial_ok: false, commercial_note: 'All Aura catalogue assets are all-rights-reserved per Aura Terms S4.' });
+      return textResult(r); },
     aura_search_design_systems: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('design_systems', {
       query: toolFn_str(a.query, 'query'), sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'),
     })); },
     aura_get_design_system: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (typeof id !== 'string' || !id) toolFn_bad('provide id or slug (string)');
-      return textResult(await catalog.getItem('design_systems', id)); },
+      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
+      return textResult(await catalog.getItem('design_systems', id, { chunk })); },
     aura_search_all: async (a) => { a = a || {}; const query = toolFn_str(a.query, 'query'), limit = toolFn_num(a.limit, 'limit') || 5;
       const r = await Promise.all([
         catalog.searchCatalog('components', { query, freeOnly: true, limit }),
@@ -789,12 +943,18 @@ function createHandlers(catalog) {
       ]);
       return textResult({ query: query || null, components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
     aura_recommend: async (a) => { a = a || {}; if (typeof a.goal !== 'string' || !a.goal.trim()) toolFn_bad('goal (string) is required');
+      // Gap 1: recommend hard-filters theme (not just reranks) â€” starter kits must not
+      // mix light rows into a dark ask. min_views gates noise; both are explicit params.
+      const themeV = a.theme === undefined ? undefined : theme(a.theme);
+      const negative_themeV = a.negative_theme === undefined ? undefined : theme(a.negative_theme);
+      const min_views = toolFn_num(a.min_views, 'min_views');
       const r = await Promise.all([
-        catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 5 }),
+        catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 8, theme: themeV, negative_theme: negative_themeV, min_views }),
         catalog.searchCatalog('skills', { query: a.goal, limit: 5 }),
         catalog.searchCatalog('assets', { query: a.goal, freeOnly: true, limit: 3 }),
         catalog.searchCatalog('design_systems', { query: a.goal, limit: 3 }),
       ]);
+      r[0].items = r[0].items.slice(0, 5);
       const pick = (x) => (x.items || []).slice(0, 3).map((i) => ({ title: i.title, page_url: i.page_url }));
       return textResult({ goal: a.goal, freeOnly: true,
         rationale: 'Top free catalogue hits per surface, ranked by Aura views. Open the page_url previews, then fetch full source or content for finalists.',
@@ -813,13 +973,17 @@ function createHandlers(catalog) {
       const got = await catalog.getItem('design_systems', id);
       return textResult({ item: got.item, install: installGuide('design_systems', got.item), tokens: tokenHints(got.item.content || '', got.item.preview_html || '') }); },
     aura_trending: async (a) => { a = a || {}; const limit = toolFn_num(a.limit, 'limit') || 5;
+      // Gap 2: 30d rolling window + editorial picks. Components at 90d/views are noise
+      // (total 2, views 0-5); skills/assets already work and keep their own signal.
+      const windowDays = a.window_days === undefined ? 30 : toolFn_num(a.window_days, 'window_days');
       const r = await Promise.all([
-        catalog.searchCatalog('components', { freeOnly: true, sort: 'trending', limit }),
+        catalog.searchCatalog('components', { freeOnly: true, sort: 'trending', limit, window_days: windowDays }),
         catalog.searchCatalog('skills', { sort: 'trending', limit }),
         catalog.searchCatalog('assets', { freeOnly: true, sort: 'trending', limit }),
         catalog.searchCatalog('design_systems', { sort: 'trending', limit }),
       ]);
-      return textResult({ window: 'last 90 days by views', window_note: '7-day seed is empty (newest catalogue rows are months old); 90d keeps trending meaningful. Components here are low-signal (views 0-5): prefer skills/assets trending.', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
+      const picks = await catalog.editorialPicks(Math.min(limit, 5)).catch(() => []);
+      return textResult({ window: 'last ' + windowDays + ' days by views', window_note: 'Components at 90d/views are low-signal (total 2, views 0-5): see editorial_picks for human-grade component leads; skills/assets trending is organic.', editorial_picks: picks, components: r[0], skills: r[1], assets: r[2], design_systems: r[3] });},
     aura_categories: async () => textResult({ categories: await catalog.categoryCounts() }),
     aura_bundle: async (a) => { a = a || {}; const ids = idList(a.ids, 'ids') || idList(a.slugs, 'slugs');
       if (!ids || !ids.length) toolFn_bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');
@@ -831,7 +995,7 @@ function createHandlers(catalog) {
     aura_install_asset: async (a) => { a = a || {}; if (typeof a.id !== 'number') toolFn_bad('id (number) is required');
       const got = await catalog.getItem('assets', a.id);
       const it = got.item; const fx = (it.facets || {});
-      return textResult({ item: it, install: { kind: 'assets', title: it.title, page_url: it.page_url, license: fx.license || 'all-rights-reserved (Aura Terms §4)', terms_url: 'https://www.aura.build/terms', download: fx.download || null, preview: fx.preview || null, files: [{ path: 'assets/' + it.id + '-' + String(it.title || 'asset').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) + '.jpg', contains: 'downloaded original' }], steps: ['Check the license on the Aura asset page before commercial use — this server reports unknown, never assumes free-to-sell.', 'Download the download URL into the suggested path.', 'Use the preview URL for <img> srcset while drafting.'] } }); },
+      return textResult({ item: it, install: { kind: 'assets', title: it.title, page_url: it.page_url, license: fx.license || 'all-rights-reserved (Aura Terms Â§4)', terms_url: 'https://www.aura.build/terms', download: fx.download || null, preview: fx.preview || null, files: [{ path: 'assets/' + it.id + '-' + String(it.title || 'asset').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) + '.jpg', contains: 'downloaded original' }], steps: ['Check the license on the Aura asset page before commercial use â€” this server reports unknown, never assumes free-to-sell.', 'Download the download URL into the suggested path.', 'Use the preview URL for <img> srcset while drafting.'] } }); },
     aura_bulk_fetch: async (a) => { a = a || {}; const kind = a.kind;
       if (kind !== 'components' && kind !== 'design_systems' && kind !== 'assets') toolFn_bad('kind must be components|design_systems|assets');
       const ids = idList(a.ids, 'ids');
