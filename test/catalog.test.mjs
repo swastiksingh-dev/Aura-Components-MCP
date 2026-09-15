@@ -104,12 +104,43 @@ test("facets ride on search + get (theme/weight/download)", async () => {
   const s = await cat.searchCatalog("components", { query: "x", limit: 2 });
   assert.equal(s.items[0].facets.theme, "dark");
   const g = await cat.getItem("assets", 9);
-  assert.equal(g.item.facets.download, "uorig");
+  assert.ok(String(g.item.facets.download).endsWith("/uorig")); // absolute-URL fix (ISS8)
+});
+
+test("parity: search facets equal detail facets (ISS1-3)", async () => {
+  const stub = { getJson: async () => ({ rows: [{ id: 7, title: "t", slug: "S", code: "<div class=x><svg></svg></div>", background: "000000", tags: [], created_by: null }], total: 1 }) };
+  const { facets } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const s = await cat.searchCatalog("components", { query: "x", limit: 1 });
+  const g = await cat.getItem("components", 7);
+  assert.deepEqual(s.items[0].facets, g.item.facets);
+});
+
+test("related defaults freeOnly (ISS10)", async () => {
+  const seen = [];
+  const stub = { getJson: async (url) => { seen.push(url); if (url.includes("id=eq.1") && !url.includes("neq")) return { rows: [{ id: 1, title: "one two three", description: "x", tags: ["hero"], code: "x", background: "fff", created_by: null }], total: 1 }; return { rows: [], total: 0 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  await cat.relatedItems("components", 1, 3);
+  assert.ok(seen.some((u) => u.includes("premium=eq.false")));
+});
+
+test("skill dedupe by source_url + canonical flag (ISS7)", async () => {
+  const stub = { getJson: async () => ({ rows: [
+    { id: "a", title: "A", source_url: "https://x/SKILL.md", views: 10, created_by: null },
+    { id: "b", title: "B", source_url: "https://x/SKILL.md", views: 5, created_by: null },
+  ], total: 2 }) };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("skills", { query: "x", limit: 5 });
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].canonical, true);
+  assert.equal(r.deduped, 1);
 });
 
 test("slim lists exclude blobs (payload guard)", () => {
+  // components list fetches code for the 600-char facet probe, but shapeRow truncates
+  // before facets, so wire payloads stay ~0.7KB/row (parity fix ISS1-3).
   const { params } = buildSearchParams("components", { sort: "popular", limit: 5, offset: 0 });
-  assert.ok(!String(params.get("select")).includes("code"));
+  assert.ok(String(params.get("select")).includes("code"));
   const a = buildSearchParams("assets", { sort: "popular", limit: 5, offset: 0 });
   assert.ok(!String(a.params.get("select")).includes("image_original"));
 });

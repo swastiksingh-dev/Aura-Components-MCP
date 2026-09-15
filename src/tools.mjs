@@ -98,7 +98,7 @@ export function createHandlers(catalog) {
     aura_use_design_system: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (typeof id !== 'string' || !id) bad('provide id or slug (string)');
       const got = await catalog.getItem('design_systems', id);
-      return textResult({ item: got.item, install: installGuide('design_systems', got.item), tokens: tokenHints(got.item.content || '') }); },
+      return textResult({ item: got.item, install: installGuide('design_systems', got.item), tokens: tokenHints(got.item.content || '', got.item.preview_html || '') }); },
     aura_trending: async (a) => { a = a || {}; const limit = num(a.limit, 'limit') || 5;
       const r = await Promise.all([
         catalog.searchCatalog('components', { freeOnly: true, sort: 'trending', limit }),
@@ -106,7 +106,7 @@ export function createHandlers(catalog) {
         catalog.searchCatalog('assets', { freeOnly: true, sort: 'trending', limit }),
         catalog.searchCatalog('design_systems', { sort: 'trending', limit }),
       ]);
-      return textResult({ window: 'last 90 days by views (7-day seed is empty: newest catalogue rows are months old)', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
+      return textResult({ window: 'last 90 days by views', window_note: '7-day seed is empty (newest catalogue rows are months old); 90d keeps trending meaningful. Components here are low-signal (views 0-5): prefer skills/assets trending.', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
     aura_categories: async () => textResult({ categories: await catalog.categoryCounts() }),
     aura_bundle: async (a) => { a = a || {}; const ids = idList(a.ids, 'ids') || idList(a.slugs, 'slugs');
       if (!ids || !ids.length) bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');

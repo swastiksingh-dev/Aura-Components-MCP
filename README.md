@@ -8,7 +8,7 @@
 
 > I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
-> **v1.5.0** — 20 tools. Search never empties (OR-token fallback + suggested queries), bulk-fetch with `aura_bulk_fetch` (`aura_bundle` alias),undle`, one-turn page builds with `aura_scaffold_page`, dark/light faceting, related items, legal asset install.
+> **v1.6.0** — 20 tools. Search facets now equal detail facets (icons, fonts, weight), skills deduped by source_url, full DESIGN token surface with preview-mode warnings, legal asset plans, scoped CSS + paginated installs, transparent fallbacks. Search never empties (OR-token fallback + suggested queries), bulk-fetch with `aura_bulk_fetch` (`aura_bundle` alias),undle`, one-turn page builds with `aura_scaffold_page`, dark/light faceting, related items, legal asset install.
 
 Point any MCP client at `dist/server.js` and your agent can search 2,495 free components, read 187 agent skills in full, pull 30,688 assets, and apply 725 DESIGN.md systems. It answers in seconds because there is nothing to log into and almost nothing to download: one bundled JS file, zero dependencies.
 

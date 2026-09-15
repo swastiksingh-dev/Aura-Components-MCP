@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v1.5.4 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v1.6.0 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -102,9 +102,9 @@ const CATALOG_SORTS = {
 };
 
 const LIST_COLS = {
-  // Lists exclude code (13KB/row): theme falls back to background + tags heuristics.
-  // Full code loads only on get/bundle, where facets recompute exactly.
-  components: "id,title,description,tags,premium,views,forks,slug,background,created_by,created_at,updated_at",
+  // PostgREST can't substring server-side: lists fetch code but shapeRow truncates to
+  // a 600-char probe for facets BEFORE the truncation marker (see shapeRow). ~0.7KB/row.
+  components: "id,title,description,tags,code,premium,views,forks,slug,background,created_by,created_at,updated_at",
   skills: "id,title,description,source_url,views,forks,featured,created_by,created_at,updated_at",
   assets: "id,title,description,keywords,media_type,premium,views,forks,image_800w,video_url,video_poster_url,created_by,created_at",
   design_systems: "id,slug,title,description,views,forks,featured,created_by,created_at,updated_at",
@@ -176,20 +176,42 @@ const trunc = (s, n) => (s && s.length > n ? s.slice(0, n) + "…[truncated]" : 
 function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
   if (kind === "skills") return SITE + "/skills/" + row.id;
+  // ISS9: asset pages are query-routed (no /assets/ID route exists). Keep the q= form
+  // but ALSO expose a stable key so agents can cite: id + slug + title together.
   if (kind === "assets") return SITE + "/assets?q=" + encodeURIComponent(row.title ?? "");
   return SITE + "/design-systems/" + (row.slug ?? row.id);
 }
 
+function assetKey(row) {
+  return { id: row.id, slug: row.slug ?? null, title: row.title ?? null };
+}
+
 function shapeRow(kind, row, cfg, withFacets) {
   const base = { ...row };
-  if (kind === "components" && typeof base.code === "string") { base.code_chars = base.code.length; base.code = trunc(base.code, cfg.codeChars); }
+  // Facets probe the first 600 chars of FULL code before truncation, so search facets
+  // equal detail facets for icons/fonts/theme. Weight uses the true length (ISS1/2/3).
+  if (kind === "components" && typeof base.code === "string") {
+    base.code_chars = base.code.length;
+    if (withFacets) { try { base.facets = withFacets(kind, { ...base, code: base.code.slice(0, 600) }, { fullLength: base.code.length }); } catch { /* never break rows */ } }
+    base.code = trunc(base.code, cfg.codeChars);
+  }
   if (kind === "skills" && typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
   if (kind === "design_systems") {
     if (typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
     if (typeof base.preview_html === "string") base.preview_html = trunc(base.preview_html, cfg.codeChars);
   }
   base.page_url = pageUrl(kind, row);
-  if (withFacets) { try { base.facets = withFacets(kind, base); } catch { /* facets never break rows */ } }
+  if (kind === "assets") base.asset_key = assetKey(row);
+  if (withFacets && !base.facets) { try { base.facets = withFacets(kind, base); } catch { /* facets never break rows */ } }
+  // ISS8: force absolute Supabase URLs — relative variant paths break fetch.
+  if (kind === "assets") {
+    const abs = (u) => (!u ? u : (/^https?:\/\//i.test(u) ? u : ("https://hoirqrkdgbmvpwutwuwj-all.supabase.co/storage/v1/object/public/assets/" + String(u).replace(/^\/+/, ""))));
+    for (const k of ["image_320w", "image_800w", "image_1600w", "image_3840w", "image_original", "image_url", "video_url", "video_poster_url"]) if (typeof base[k] === "string") base[k] = abs(base[k]);
+    if (base.facets) {
+      if (base.facets.download) base.facets.download = abs(base.facets.download);
+      if (base.facets.preview) base.facets.preview = abs(base.facets.preview);
+    }
+  }
   return base;
 }
 
@@ -278,15 +300,39 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
           } catch { /* keep original empty result */ }
         }
       }
+      // ISS7: dedupe skills by source_url (same SKILL.md listed twice). First (most-viewed)
+      // wins, gets canonical:true; dupes are dropped and counted in deduped.
+      let deduped = 0;
+      if (kind === "skills") {
+        const seen = new Set();
+        const kept = [];
+        for (const r of rows) {
+          const u = (r.source_url || "").trim().toLowerCase();
+          if (u && seen.has(u)) { deduped++; continue; }
+          if (u) seen.add(u);
+          kept.push(r);
+        }
+        const byUrl = new Map();
+        for (const r of kept) {
+          const u = (r.source_url || "").trim().toLowerCase();
+          if (u && (!byUrl.has(u) || (r.views || 0) > (byUrl.get(u).views || 0))) byUrl.set(u, r);
+        }
+        rows = kept.map((r) => {
+          const u = (r.source_url || "").trim().toLowerCase();
+          return (u && byUrl.get(u) === r) ? { ...r, canonical: true } : r;
+        });
+      }
       const enriched = await enrichAuthors(rows);
       const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      if (deduped) out.deduped = deduped;
       // Post-filter: theme (dark|light) is derived, not a column — filter shaped rows.
       if (q.theme && (kind === "components")) {
         const want = String(q.theme).toLowerCase();
         out.items = out.items.filter((it) => (it.facets && it.facets.theme) === want);
       }
-      if (fallback) out.fallback = fallback;
-      else if ((!rows || !rows.length) && toks.length) out.suggested_queries = suggest(toks);
+      // ISS15: transparent fallback — agents see what happened, not a magic string.
+      if (fallback) { out.fallback = fallback; out.isFallback = true; out.fallback_score = "token-overlap:" + toks.length + "-terms"; }
+      else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggest(toks).filter((s) => !/^[a-z0-9]{8,}$/i.test(s.replace(/\s/g, ""))); if (!out.suggested_queries.length) out.suggested_queries = ["hero", "pricing", "landing page"]; }
       cacheSet(key, out);
       return out;
     })();
@@ -365,7 +411,8 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
   }
 
   // Related: same-tag / same-text overlap, views-ranked, excluding self.
-  async function relatedItems(kind, idOrSlug, limit = 3) {
+  // ISS10: freeOnly default true — free flows never get Pro recommendations.
+  async function relatedItems(kind, idOrSlug, limit = 3, freeOnly = true) {
     const got = await getItem(kind, idOrSlug);
     const item = got.item;
     const toks = queryTokens(item.title + " " + (item.description || "")).slice(0, 3);
@@ -375,7 +422,8 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const sel = LIST_COLS[kind];
     const idCol = (kind === "components") ? "id" : "id";
     const selfId = encodeURIComponent(String(item.id));
-    const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&private=eq.false" + (kind === "components" || kind === "assets" ? "" : "") + tagF + "&" + idCol + "=neq." + selfId + (orParts.length ? "&or=(" + orParts.join(",") + ")" : "") + "&order=views.desc&limit=" + lim;
+    const premF = (freeOnly && (kind === "components" || kind === "assets")) ? "&premium=eq.false" : "";
+    const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&private=eq.false" + premF + tagF + "&" + idCol + "=neq." + selfId + (orParts.length ? "&or=(" + orParts.join(",") + ")" : "") + "&order=views.desc&limit=" + lim;
     try {
       const { rows } = await fetcher.getJson(url, headers);
       const enriched = await enrichAuthors(rows);
@@ -387,7 +435,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "1.5.4" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "1.6.0" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
@@ -463,21 +511,39 @@ const GUIDE_CDN = {
   iconify: 'https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js',
 };
 
+// Font allowlist: real families only. Tailwind weight/size utilities (medium, semibold,
+// normal, light-as-weight, size-*) are NOT families — old regex leaked them into fonts[].
+const KNOWN_FONTS = ['inter', 'geist', 'manrope', 'sora', 'space-grotesk', 'space-mono', 'poppins', 'montserrat', 'playfair-display', 'instrument-serif', 'dm-sans', 'dm-serif-display', 'jetbrains-mono', 'ibm-plex-mono', 'ibm-plex-serif', 'plus-jakarta-sans', 'bricolage-grotesque', 'newsreader', 'fraunces', 'lora', 'merriweather', 'libre-baskerville', 'cormorant-garamond', 'gfs-didot', 'bodoni-moda', 'cardo', 'marcellus', 'gloock', 'aboreto', 'syne', 'urbanist', 'sora', 'anton', 'bebas-neue', 'archivo-black', 'league-gothic', 'fredoka', 'chewy', 'foldit', 'oi', 'honk', 'nabla', 'quicksand', 'nunito', 'work-sans', 'oswald', 'lora', 'roboto', 'open-sans', 'figtree', 'outfit', 'lexend', 'gloria-hallelujah', 'caveat'];
+const FONT_RE = /font-(?:family-)?\[?['"]?([a-z][a-z0-9-]*)/g;
+
 function detectNeeds(code, tags) {
   const c = String(code || '').toLowerCase();
   const t = new Set((tags || []).map((x) => String(x).toLowerCase()));
   const needsTailwind = c.includes('class=') || t.has('tailwind');
-  const needsIcons = c.includes('iconify') || c.includes('svg');
+  // Probes must work on a 2k prefix too: icon svgs usually appear in the first screen of markup.
+  // svg alone under-matches in lists (no code fetched) — but must not over-claim either:
+  // 'svg' counts only with an icon-ish neighbor (iconify, <svg, lucide, heroicons, feather).
+  const needsIcons = c.includes('iconify') || c.includes('<svg') || c.includes('lucide') || c.includes('heroicon') || c.includes('data-lucide');
   const needsKeyframes = c.includes('keyframes') || c.includes('animation:');
   const fonts = new Set();
-  for (const m of c.matchAll(/font-([a-z0-9-]+)/g)) fonts.add(m[1]);
+  for (const m of c.matchAll(FONT_RE)) {
+    const fam = m[1].replace(/['"\]]/g, '');
+    if (KNOWN_FONTS.includes(fam)) fonts.add(fam);
+  }
+  // font-family: 'X', Y declarations (not utility classes)
+  for (const m of c.matchAll(/font-family\s*:\s*([^;}]{1,80})/g)) {
+    for (const part of m[1].split(',')) {
+      const fam = part.trim().replace(/['"]/g, '').toLowerCase().replace(/\s+/g, '-');
+      if (KNOWN_FONTS.includes(fam)) fonts.add(fam);
+    }
+  }
   return { needsTailwind, needsIcons, needsKeyframes, fonts: [...fonts].slice(0, 6) };
 };
 
 // Facets: cheap derived signals so search lists answer "dark? heavy? pro?" without a get.
 // theme: dark|light|mixed|unknown from background field + code palette probes.
 // weight: code_chars bucket (s/m/l) so agents can prefer light embeds.
-function facets(kind, row) {
+function facets(kind, row, opts) {
   const f = {};
   if (kind === 'components') {
     const bg = String(row.background || '').toLowerCase();
@@ -490,13 +556,20 @@ function facets(kind, row) {
     const bgDark = bg.includes('000') && !bg.includes('fff');
     const bgLight = bg.includes('fff') && !bg.includes('000');
     f.theme = bgDark || tagDark ? 'dark' : (bgLight || tagLight ? 'light' : (code ? (darkHits > lightHits * 2 ? 'dark' : (lightHits > darkHits * 2 ? 'light' : (darkHits || lightHits ? 'mixed' : 'unknown'))) : (tags.includes('saas') || tags.includes('minimal') ? 'light' : 'unknown')));
-    const n = String(row.code || '').length;
+    const n = (opts && opts.fullLength) || String(row.code || '').length;
     f.weight = n > 20000 ? 'l' : (n > 8000 ? 'm' : 's');
     f.code_chars = n;
     const needs = detectNeeds(row.code || '', row.tags || []);
     f.needsTailwind = needs.needsTailwind;
     f.needsIcons = needs.needsIcons;
     f.fonts = needs.fonts;
+  }
+  // ISS14 lives here too: license is top-level on every asset row, not buried.
+  // ISS13: rewrite hotlinked demo images to stable asset references where possible.
+  // i.pravatar.cc + bare demo URLs 404 in production; flag them in the install plan.
+  if (kind === 'components' && typeof row.code === 'string') {
+    const hot = [...row.code.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)].map((m) => m[1]).filter((u) => /pravatar|placehold|dummyimage|unsplash\/photos\/..\/download|example\.com/i.test(u));
+    if (hot.length) row = { ...row, _hotlinked: [...new Set(hot)].slice(0, 5) };
   }
   if (kind === 'assets' || row.image_800w || row.image_original || row.video_url) {
     // Resolved 2026-09-13 from primary source https://www.aura.build/terms §4-5:
@@ -506,7 +579,11 @@ function facets(kind, row) {
     f.download = row.image_original || row.image_1600w || row.image_800w || row.video_url || null;
     f.preview = row.image_800w || row.video_poster_url || null;
   }
-  if (kind === 'design_systems') f.has_preview = Boolean(row.preview_html);
+  if (kind === 'design_systems') {
+    // ISS4: lists never fetch preview_html (24KB/row). has_preview:true is authoritative
+    // only on detail; on lists report 'unknown-list' so agents fetch instead of trusting false.
+    f.has_preview = row.preview_html !== undefined ? Boolean(row.preview_html) : 'unknown-list';
+  }
   return f;
 }
 
@@ -526,11 +603,23 @@ function installGuide(kind, row) {
       steps.push('Add the iconify-icon CDN script so the icon tags render.');
     }
     if (needs.needsKeyframes) steps.push('Keep the embedded style block with the markup: that is where the keyframes live.');
+    // ISS11+12: pagination + CSS scoping. Code ships truncated at codeChars; the scope
+    // prefix below prevents .button/.inner/.point collisions in multi-component scaffolds.
+    const scope = 'aura-' + String(row.slug || row.id).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const fullLen = String(row.code || '').length;
+    const isTrunc = /…\[truncated\]$/.test(String(row.code || ''));
+    if (isTrunc) {
+      files.push({ path: 'components/' + (row.slug || row.id) + '.part1.html', contains: 'markup part 1 of N — fetch aura_get_component again and concatenate code chunks' });
+      steps.push('Code is paginated (' + fullLen + ' chars shown of more): install part files in order, or re-fetch for the full body.');
+    } else {
+      files.push({ path: 'components/' + (row.slug || row.id) + '.html', contains: 'section markup plus its style block' });
+    }
+    steps.push('Scope global CSS before pasting: prefix bare selectors (.button, .inner, .point) with .' + scope + ' to avoid collisions in multi-component pages.');
     steps.push('Paste the markup where the section belongs and update the CTA link (it ships as #).');
     if (url) steps.push('Preview first: ' + url);
-    files.push({ path: 'components/' + (row.slug || row.id) + '.html', contains: 'section markup plus its style block' });
+    if (row._hotlinked && row._hotlinked.length) steps.push('Replace demo images before shipping (' + row._hotlinked.slice(0, 3).join(', ') + '): hotlinked placeholders 404 in production — swap for aura_search_assets results.');
     if (needs.fonts.length) files.push({ path: 'styles/fonts.css', contains: 'font families referenced: ' + needs.fonts.join(', ') });
-    return { kind, title: row.title, page_url: url, free: row.premium === false, steps, deps, files, needs };
+    return { kind, title: row.title, page_url: url, free: row.premium === false, steps, deps, files, needs, css_scope: scope, code_truncated: isTrunc };
   }
   if (kind === 'skills') {
     steps.push('Read the SKILL.md content from aura_get_skill first: it names its own triggers and pitfalls.');
@@ -539,15 +628,37 @@ function installGuide(kind, row) {
     return { kind, title: row.title, page_url: url, steps, deps, files: [{ path: 'skills/' + row.id + '/SKILL.md', contains: 'full skill content' }] };
   }
   if (kind === 'design_systems') {
+    // ISS6: derive preview deps from preview_html so agents don't ship static pages.
+    const ph = String(row.preview_html || '');
+    const pl = ph.toLowerCase();
+    const has = (...ss) => ss.some((s) => pl.includes(s));
+    if (has('cdn.tailwindcss.com', 'tailwind')) deps.push({ name: 'tailwindcss', via: 'CDN (in preview_html)', cdn: GUIDE_CDN.tailwind });
+    if (has('iconify', '<svg', 'lucide', 'data-lucide')) deps.push({ name: 'iconify-icon', via: 'CDN (in preview_html)', cdn: GUIDE_CDN.iconify });
+    if (has('gsap')) deps.push({ name: 'gsap', via: 'CDN (in preview_html)', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js' });
+    if (has('scrolltrigger')) deps.push({ name: 'gsap-ScrollTrigger', via: 'CDN (in preview_html)', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js' });
+    const fonts = new Set();
+    for (const m of pl.matchAll(/family=([a-z+]+)/g)) fonts.add(m[1].replace(/\+/g, '-'));
+    if (fonts.size) deps.push({ name: 'google-fonts:' + [...fonts].slice(0, 4).join(','), via: 'link (in preview_html)' });
     steps.push('Copy the DESIGN.md content into your repo as DESIGN.md and treat it as the source of truth.');
     steps.push('Apply the color, type, and spacing tokens before copying any component markup.');
+    if (deps.length) steps.push('Install preview deps first (' + deps.map((d) => d.name).join(', ') + ') — the preview_html needs them.');
     return { kind, title: row.title, page_url: url, steps, deps, files: [{ path: 'DESIGN.md', contains: 'tokens and rules' }] };
   }
   steps.push('Use the image_800w URL for previews and image_original for production.');
   return { kind, title: row.title, page_url: url, steps, deps, files };
 };
 
-function tokenHints(content) {
+// ISS5: full token surface — colors + typography + spacing + radius — so scaffolded
+// pages don't lose the system. Also detects preview dark/light mode so agents don't
+// apply light-cream tokens to a dark preview body.
+function previewMode(previewHtml) {
+  const h = String(previewHtml || '').toLowerCase();
+  if (/bg-black|bg-neutral-950|bg-zinc-950|bg-slate-950|bg-\[#0/.test(h)) return 'dark';
+  if (/bg-white|bg-neutral-50|bg-slate-50/.test(h)) return 'light';
+  return 'unknown';
+}
+
+function tokenHints(content, previewHtml) {
   const Q = String.fromCharCode(39);
   const lines = String(content || '').split(Q + 'n' === Q + 'n' ? '\n' : '\n');
   const get = (key) => {
@@ -563,13 +674,42 @@ function tokenHints(content) {
   };
   const tokens = {
     primary: get('primary'),
+    secondary: get('secondary'),
+    accent: get('accent'),
     background: get('background'),
     surface: get('surface'),
-    text: get('text-primary') || get('text_primary'),
+    text_primary: get('text-primary') || get('text_primary'),
+    text_secondary: get('text-secondary') || get('text_secondary'),
+    border: get('border'),
+    display_font: get('display_lg_fontfamily') || get('display-font'),
+    body_font: get('body_md_fontfamily') || get('body-font'),
+    mono_font: get('label_md_fontfamily') || get('mono-font'),
+    section_padding: get('section-padding') || get('section_padding'),
+    card_padding: get('card-padding') || get('card_padding'),
+    card_radius: get('card') === null ? get('card_radius') : null,
+    control_radius: get('control'),
+    pill_radius: get('pill'),
   };
-  const rows = Object.entries(tokens).filter((e) => e[1]).map((e) => '  --aura-' + e[0] + ': ' + e[1] + ';');
+  const pick = (obj, keys) => { const o = {}; for (const k of keys) if (obj[k]) o[k] = obj[k]; return o; };
+  const colors = pick(tokens, ['primary', 'secondary', 'accent', 'background', 'surface', 'text_primary', 'text_secondary', 'border']);
+  const rows = [];
+  for (const [k, v] of Object.entries(colors)) rows.push('  --aura-' + k.replace(/_/g, '-') + ': ' + v + ';');
+  if (tokens.body_font) rows.push('  --aura-font-body: ' + tokens.body_font + ';');
+  if (tokens.display_font) rows.push('  --aura-font-display: ' + tokens.display_font + ';');
+  if (tokens.mono_font) rows.push('  --aura-font-mono: ' + tokens.mono_font + ';');
+  if (tokens.section_padding) rows.push('  --aura-section-padding: ' + tokens.section_padding + ';');
+  if (tokens.card_padding) rows.push('  --aura-card-padding: ' + tokens.card_padding + ';');
+  if (tokens.card_radius) rows.push('  --aura-radius-card: ' + tokens.card_radius + ';');
+  if (tokens.control_radius) rows.push('  --aura-radius-control: ' + tokens.control_radius + ';');
+  if (tokens.pill_radius) rows.push('  --aura-radius-pill: ' + tokens.pill_radius + ';');
   const css = rows.length ? ':root{' + '\n' + rows.join('\n') + '\n}' : '';
-  return { tokens, css };
+  const mode = previewMode(previewHtml);
+  const warn = (mode === 'dark' && tokens.background && !/000|0f1115|111827|1a1a1a|09090b/i.test(tokens.background))
+    ? 'tokens say light background ' + tokens.background + ' but preview_html renders dark — follow the preview body, not the tokens, or ask which mode is wanted'
+    : ((mode === 'light' && tokens.background && /000000|0f1115/i.test(tokens.background))
+      ? 'tokens say dark background but preview renders light — follow the preview body'
+      : null);
+  return { tokens, css, preview_mode: mode, mode_warning: warn };
 };
 
 // ---- tools.mjs ----
@@ -671,7 +811,7 @@ function createHandlers(catalog) {
     aura_use_design_system: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (typeof id !== 'string' || !id) toolFn_bad('provide id or slug (string)');
       const got = await catalog.getItem('design_systems', id);
-      return textResult({ item: got.item, install: installGuide('design_systems', got.item), tokens: tokenHints(got.item.content || '') }); },
+      return textResult({ item: got.item, install: installGuide('design_systems', got.item), tokens: tokenHints(got.item.content || '', got.item.preview_html || '') }); },
     aura_trending: async (a) => { a = a || {}; const limit = toolFn_num(a.limit, 'limit') || 5;
       const r = await Promise.all([
         catalog.searchCatalog('components', { freeOnly: true, sort: 'trending', limit }),
@@ -679,7 +819,7 @@ function createHandlers(catalog) {
         catalog.searchCatalog('assets', { freeOnly: true, sort: 'trending', limit }),
         catalog.searchCatalog('design_systems', { sort: 'trending', limit }),
       ]);
-      return textResult({ window: 'last 90 days by views (7-day seed is empty: newest catalogue rows are months old)', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
+      return textResult({ window: 'last 90 days by views', window_note: '7-day seed is empty (newest catalogue rows are months old); 90d keeps trending meaningful. Components here are low-signal (views 0-5): prefer skills/assets trending.', components: r[0], skills: r[1], assets: r[2], design_systems: r[3] }); },
     aura_categories: async () => textResult({ categories: await catalog.categoryCounts() }),
     aura_bundle: async (a) => { a = a || {}; const ids = idList(a.ids, 'ids') || idList(a.slugs, 'slugs');
       if (!ids || !ids.length) toolFn_bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');

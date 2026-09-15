@@ -12,9 +12,9 @@ const SORTS = {
 };
 
 const LIST_COLS = {
-  // Lists exclude code (13KB/row): theme falls back to background + tags heuristics.
-  // Full code loads only on get/bundle, where facets recompute exactly.
-  components: "id,title,description,tags,premium,views,forks,slug,background,created_by,created_at,updated_at",
+  // PostgREST can't substring server-side: lists fetch code but shapeRow truncates to
+  // a 600-char probe for facets BEFORE the truncation marker (see shapeRow). ~0.7KB/row.
+  components: "id,title,description,tags,code,premium,views,forks,slug,background,created_by,created_at,updated_at",
   skills: "id,title,description,source_url,views,forks,featured,created_by,created_at,updated_at",
   assets: "id,title,description,keywords,media_type,premium,views,forks,image_800w,video_url,video_poster_url,created_by,created_at",
   design_systems: "id,slug,title,description,views,forks,featured,created_by,created_at,updated_at",
@@ -86,20 +86,42 @@ const trunc = (s, n) => (s && s.length > n ? s.slice(0, n) + "…[truncated]" : 
 export function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
   if (kind === "skills") return SITE + "/skills/" + row.id;
+  // ISS9: asset pages are query-routed (no /assets/ID route exists). Keep the q= form
+  // but ALSO expose a stable key so agents can cite: id + slug + title together.
   if (kind === "assets") return SITE + "/assets?q=" + encodeURIComponent(row.title ?? "");
   return SITE + "/design-systems/" + (row.slug ?? row.id);
 }
 
+export function assetKey(row) {
+  return { id: row.id, slug: row.slug ?? null, title: row.title ?? null };
+}
+
 export function shapeRow(kind, row, cfg, withFacets) {
   const base = { ...row };
-  if (kind === "components" && typeof base.code === "string") { base.code_chars = base.code.length; base.code = trunc(base.code, cfg.codeChars); }
+  // Facets probe the first 600 chars of FULL code before truncation, so search facets
+  // equal detail facets for icons/fonts/theme. Weight uses the true length (ISS1/2/3).
+  if (kind === "components" && typeof base.code === "string") {
+    base.code_chars = base.code.length;
+    if (withFacets) { try { base.facets = withFacets(kind, { ...base, code: base.code.slice(0, 600) }, { fullLength: base.code.length }); } catch { /* never break rows */ } }
+    base.code = trunc(base.code, cfg.codeChars);
+  }
   if (kind === "skills" && typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
   if (kind === "design_systems") {
     if (typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
     if (typeof base.preview_html === "string") base.preview_html = trunc(base.preview_html, cfg.codeChars);
   }
   base.page_url = pageUrl(kind, row);
-  if (withFacets) { try { base.facets = withFacets(kind, base); } catch { /* facets never break rows */ } }
+  if (kind === "assets") base.asset_key = assetKey(row);
+  if (withFacets && !base.facets) { try { base.facets = withFacets(kind, base); } catch { /* facets never break rows */ } }
+  // ISS8: force absolute Supabase URLs — relative variant paths break fetch.
+  if (kind === "assets") {
+    const abs = (u) => (!u ? u : (/^https?:\/\//i.test(u) ? u : ("https://hoirqrkdgbmvpwutwuwj-all.supabase.co/storage/v1/object/public/assets/" + String(u).replace(/^\/+/, ""))));
+    for (const k of ["image_320w", "image_800w", "image_1600w", "image_3840w", "image_original", "image_url", "video_url", "video_poster_url"]) if (typeof base[k] === "string") base[k] = abs(base[k]);
+    if (base.facets) {
+      if (base.facets.download) base.facets.download = abs(base.facets.download);
+      if (base.facets.preview) base.facets.preview = abs(base.facets.preview);
+    }
+  }
   return base;
 }
 
@@ -188,15 +210,39 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
           } catch { /* keep original empty result */ }
         }
       }
+      // ISS7: dedupe skills by source_url (same SKILL.md listed twice). First (most-viewed)
+      // wins, gets canonical:true; dupes are dropped and counted in deduped.
+      let deduped = 0;
+      if (kind === "skills") {
+        const seen = new Set();
+        const kept = [];
+        for (const r of rows) {
+          const u = (r.source_url || "").trim().toLowerCase();
+          if (u && seen.has(u)) { deduped++; continue; }
+          if (u) seen.add(u);
+          kept.push(r);
+        }
+        const byUrl = new Map();
+        for (const r of kept) {
+          const u = (r.source_url || "").trim().toLowerCase();
+          if (u && (!byUrl.has(u) || (r.views || 0) > (byUrl.get(u).views || 0))) byUrl.set(u, r);
+        }
+        rows = kept.map((r) => {
+          const u = (r.source_url || "").trim().toLowerCase();
+          return (u && byUrl.get(u) === r) ? { ...r, canonical: true } : r;
+        });
+      }
       const enriched = await enrichAuthors(rows);
       const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      if (deduped) out.deduped = deduped;
       // Post-filter: theme (dark|light) is derived, not a column — filter shaped rows.
       if (q.theme && (kind === "components")) {
         const want = String(q.theme).toLowerCase();
         out.items = out.items.filter((it) => (it.facets && it.facets.theme) === want);
       }
-      if (fallback) out.fallback = fallback;
-      else if ((!rows || !rows.length) && toks.length) out.suggested_queries = suggest(toks);
+      // ISS15: transparent fallback — agents see what happened, not a magic string.
+      if (fallback) { out.fallback = fallback; out.isFallback = true; out.fallback_score = "token-overlap:" + toks.length + "-terms"; }
+      else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggest(toks).filter((s) => !/^[a-z0-9]{8,}$/i.test(s.replace(/\s/g, ""))); if (!out.suggested_queries.length) out.suggested_queries = ["hero", "pricing", "landing page"]; }
       cacheSet(key, out);
       return out;
     })();
@@ -275,7 +321,8 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
   }
 
   // Related: same-tag / same-text overlap, views-ranked, excluding self.
-  async function relatedItems(kind, idOrSlug, limit = 3) {
+  // ISS10: freeOnly default true — free flows never get Pro recommendations.
+  async function relatedItems(kind, idOrSlug, limit = 3, freeOnly = true) {
     const got = await getItem(kind, idOrSlug);
     const item = got.item;
     const toks = queryTokens(item.title + " " + (item.description || "")).slice(0, 3);
@@ -285,7 +332,8 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     const sel = LIST_COLS[kind];
     const idCol = (kind === "components") ? "id" : "id";
     const selfId = encodeURIComponent(String(item.id));
-    const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&private=eq.false" + (kind === "components" || kind === "assets" ? "" : "") + tagF + "&" + idCol + "=neq." + selfId + (orParts.length ? "&or=(" + orParts.join(",") + ")" : "") + "&order=views.desc&limit=" + lim;
+    const premF = (freeOnly && (kind === "components" || kind === "assets")) ? "&premium=eq.false" : "";
+    const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&private=eq.false" + premF + tagF + "&" + idCol + "=neq." + selfId + (orParts.length ? "&or=(" + orParts.join(",") + ")" : "") + "&order=views.desc&limit=" + lim;
     try {
       const { rows } = await fetcher.getJson(url, headers);
       const enriched = await enrichAuthors(rows);
