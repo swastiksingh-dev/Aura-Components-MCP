@@ -127,6 +127,17 @@ npm run build   # rebundle src/*.mjs into dist/server.js
 
 Layout: `src/config.mjs` holds env parsing. `src/http.mjs` hides timeouts and retries behind an injectable fetch. `src/catalog.mjs` is the deep module (queries, cache, shaping, counts). `src/guide.mjs` turns rows into install plans. `src/tools.mjs` validates args. `src/protocol.mjs` speaks JSON-RPC. `src/server.mjs` only wires stdio.
 
+## Share
+
+Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Components-MCP](https://github.com/swastiksingh-dev/Aura-Components-MCP). Reposits welcome — see [DIRECTION.md](./DIRECTION.md) for where this is headed.
+
+```text
+built a free design MCP on aura.build: 2495 components, 187 skills, 30k assets, 20 tools. no login. resources are @MengTo's
+
+npx -y aura-components-mcp
+https://github.com/swastiksingh-dev/Aura-Components-MCP
+```
+
 ## Credits and license
 
 Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Free to fork, use, and sell with. Catalogue text, code, and images belong to Aura and the creators listed in each `author` field; follow Aura's terms for that content. If you fork this, keep the credit line and point people at the original repo.
