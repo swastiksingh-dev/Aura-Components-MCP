@@ -20,12 +20,12 @@ function cat(v) { if (v !== undefined && !CATS.includes(v)) bad('category must b
 export const TOOL_DEFS = [
   { name: 'aura_status', description: 'Catalogue health plus free counts (components, skills, assets, design systems). Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, theme dark|light filter, sorts. Items carry facets (theme/weight/needs).', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, sort: { type: 'string', enum: SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
-  { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' } }, additionalProperties: false } },
+  { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug. Chunk param pages large code (see code_info).', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_search_skills', description: 'Search free Aura agent skills (187). Metadata only; use aura_get_skill for the full SKILL.md content.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
-  { name: 'aura_get_skill', description: 'Full free agent-skill content (SKILL.md body) plus source_url and page URL. Skill id.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false } },
+  { name: 'aura_get_skill', description: 'Full free agent-skill content (SKILL.md body) plus source_url and page URL. Skill id. Chunk param pages large bodies (see content_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, chunk: { type: 'number' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_search_assets', description: 'Search free Aura assets (images and video). Keywords, media_type image or video.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, mediaType: { type: 'string', enum: ['image', 'video'] }, sort: { type: 'string', enum: SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_search_design_systems', description: 'Search free Aura DESIGN.md systems (725). Metadata only; use aura_get_design_system for content.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: SORTS }, limit: { type: 'number' }, offset: { type: 'number' } }, additionalProperties: false } },
-  { name: 'aura_get_design_system', description: 'Full free DESIGN.md content plus preview_html, tokens, and page URL. System id or slug.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' } }, additionalProperties: false } },
+  { name: 'aura_get_design_system', description: 'Full free DESIGN.md content plus preview_html, tokens, and page URL. System id or slug. Chunk param pages large preview_html (see preview_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' }, chunk: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_search_all', description: 'One call across components, skills, assets, and design systems in parallel. Free only.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, additionalProperties: false } },
   { name: 'aura_recommend', description: 'Starter kit for a goal: top free components, skills, design systems, and assets with page URLs and rationale.', inputSchema: { type: 'object', properties: { goal: { type: 'string' } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_install_component', description: 'Paste-ready setup for a free component: dependency list, setup steps, file map, fonts. Goes beyond the official Aura MCP, which only reads project source.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' } }, additionalProperties: false } },
@@ -50,12 +50,14 @@ export function createHandlers(catalog) {
     })); },
     aura_get_component: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (id === undefined || (typeof id !== 'string' && typeof id !== 'number')) bad('provide id (number) or slug (string)');
-      return textResult(await catalog.getItem('components', id)); },
+      const chunk = a.chunk === undefined ? 0 : num(a.chunk, 'chunk');
+      return textResult(await catalog.getItem('components', id, { chunk })); },
     aura_search_skills: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('skills', {
       query: str(a.query, 'query'), sort: sort(a.sort), limit: num(a.limit, 'limit'), offset: num(a.offset, 'offset'),
     })); },
     aura_get_skill: async (a) => { a = a || {}; if (typeof a.id !== 'string' || !a.id) bad('id (string) is required');
-      return textResult(await catalog.getItem('skills', a.id)); },
+      const chunk = a.chunk === undefined ? 0 : num(a.chunk, 'chunk');
+      return textResult(await catalog.getItem('skills', a.id, { chunk })); },
     aura_search_assets: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('assets', {
       query: str(a.query, 'query'),
       mediaType: a.mediaType === undefined ? undefined : (a.mediaType === 'image' || a.mediaType === 'video' ? a.mediaType : bad('mediaType must be image|video')),
@@ -66,7 +68,8 @@ export function createHandlers(catalog) {
     })); },
     aura_get_design_system: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (typeof id !== 'string' || !id) bad('provide id or slug (string)');
-      return textResult(await catalog.getItem('design_systems', id)); },
+      const chunk = a.chunk === undefined ? 0 : num(a.chunk, 'chunk');
+      return textResult(await catalog.getItem('design_systems', id, { chunk })); },
     aura_search_all: async (a) => { a = a || {}; const query = str(a.query, 'query'), limit = num(a.limit, 'limit') || 5;
       const r = await Promise.all([
         catalog.searchCatalog('components', { query, freeOnly: true, limit }),

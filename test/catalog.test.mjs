@@ -1,7 +1,7 @@
 // catalog.test.mjs — hermetic tests for query building, shaping, caching.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso } from "../src/catalog.mjs";
+import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso, detectThemeHint, scoreRows, chunkText } from "../src/catalog.mjs";
 import { installGuide, tokenHints, detectNeeds } from "../src/guide.mjs";
 
 const cfg = { supabaseUrl: "https://x.supabase.co", anonKey: "k", timeoutMs: 1000, retries: 0, cacheTtlMs: 60000, defaultLimit: 10, maxLimit: 25, codeChars: 100, contentChars: 100, freeOnlyDefault: false, userAgent: "t" };
@@ -134,6 +134,40 @@ test("skill dedupe by source_url + canonical flag (ISS7)", async () => {
   assert.equal(r.items.length, 1);
   assert.equal(r.items[0].canonical, true);
   assert.equal(r.deduped, 1);
+});
+
+test("theme hint reranks dark first + scored fallback (precision)", async () => {
+  const stub = { getJson: async () => ({ rows: [
+    { id: 1, title: "Light SaaS Testimonial", description: "x", tags: ["testimonial"], code: "<div class=x bg-white></div>", background: "ffffff", views: 5, created_by: null },
+    { id: 2, title: "Dark Portfolio Hero", description: "cinematic portfolio", tags: ["hero", "dark"], code: "<div class=x bg-black></div>", background: "000000", views: 3, created_by: null },
+  ], total: 2 }) };
+  const { facets } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const r = await cat.searchCatalog("components", { query: "dark cinematic portfolio", freeOnly: true, limit: 5 });
+  assert.equal(r.items[0].id, 2);
+  assert.equal(r.theme_hint, "dark");
+  // stub returns rows on first pass (no fallback trip): theme_hint alone proves rerank
+  assert.ok(r.fallback_score === undefined || String(r.fallback_score).includes("theme:dark"));
+});
+
+test("chunkText paginates + getItem chunk param (payloads)", async () => {
+  const c = chunkText("abcdefghij", 4, 1);
+  assert.equal(c.text, "efgh…[truncated]");
+  assert.deepEqual([c.chunk, c.chunks, c.full_length, c.truncated], [1, 3, 10, true]);
+  const stub = { getJson: async () => ({ rows: [{ id: 9, title: "t", slug: "S", code: "x".repeat(300), background: "fff", created_by: null }], total: 1 }) };
+  const { facets } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const g0 = await cat.getItem("components", 9);
+  assert.equal(g0.item.code_info.chunks, 3);
+  const g2 = await cat.getItem("components", 9, { chunk: 2 });
+  assert.equal(g2.item.code_info.chunk, 2);
+  assert.ok(!String(g2.item.code).endsWith("…[truncated]"));
+});
+
+test("detectThemeHint reads dark/light/cinematic", () => {
+  assert.equal(detectThemeHint("dark cinematic portfolio"), "dark");
+  assert.equal(detectThemeHint("bright airy landing"), "light");
+  assert.equal(detectThemeHint("pricing section"), null);
 });
 
 test("slim lists exclude blobs (payload guard)", () => {

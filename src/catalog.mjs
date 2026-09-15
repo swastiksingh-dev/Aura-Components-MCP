@@ -31,9 +31,38 @@ const esc = (s) => String(s).replaceAll('"', '""');
 const ilike = (v) => "*" + String(v).replaceAll("*", "").replaceAll(",", " ").trim() + "*";
 
 // Split a goal sentence into significant tokens for OR fallback (stop-word filtered).
-const STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,free,dark,also,that,this,from,into,plus,vs,top,best,up".split(","));
+// Theme words (dark/light) are NOT search tokens — they become rank/filter signals
+// (see detectThemeHint + scoreByTheme), so "dark cinematic" can't match light rows.
+const STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,free,also,that,this,from,into,plus,vs,top,best,up".split(","));
+const THEME_WORDS = new Set(["dark", "light", "midnight", "noir", "black", "white", "bright", "airy", "minimal"]);
 export function queryTokens(q, max = 4) {
-  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t)).slice(0, max);
+  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t) && !THEME_WORDS.has(t)).slice(0, max);
+}
+// Theme hint from the raw query: explicit signal, separate from match tokens.
+export function detectThemeHint(q) {
+  const t = String(q ?? "").toLowerCase();
+  const dark = /\bdark\b|\bmidnight\b|\bnoir\b|\bcinematic\b/.test(t);
+  const light = /\blight\b|\bbright\b|\bairy\b/.test(t);
+  if (dark && !light) return "dark";
+  if (light && !dark) return "light";
+  return null;
+}
+// Rank rows: +2 per matched token in title, +1 in description/tags, theme match first.
+// Returns { rows, scored } where scored explains the top pick for fallback_score.
+export function scoreRows(kind, rows, toks, themeHint) {
+  const scored = rows.map((r) => {
+    const title = String(r.title || "").toLowerCase();
+    const desc = String(r.description || "").toLowerCase();
+    const tags = ((r.tags || []).map((x) => String(x).toLowerCase()).join(" "));
+    let s = 0;
+    for (const t of toks) { if (title.includes(t)) s += 2; else if (desc.includes(t) || tags.includes(t)) s += 1; }
+    const th = r.facets && r.facets.theme;
+    const themeOk = !themeHint || th === themeHint || th === "mixed" || th === "unknown";
+    if (themeHint && th === themeHint) s += 3;
+    return { r, s, themeOk };
+  });
+  scored.sort((a, b) => ((b.themeOk ? 1 : 0) - (a.themeOk ? 1 : 0)) || (b.s - a.s) || ((b.r.views || 0) - (a.r.views || 0)));
+  return scored;
 }
 
 function windowAgoIso(days) {
@@ -81,7 +110,15 @@ export function buildUrl(base, table, params, filters, ors) {
   return base + "/rest/v1/" + table + "?" + qs;
 }
 
+// Truncation with cursors: agents see full_length + chunk info instead of a silent
+// marker, and can fetch the rest via getItem with { chunk } (see getItem below).
 const trunc = (s, n) => (s && s.length > n ? s.slice(0, n) + "…[truncated]" : s);
+export function chunkText(s, n, chunk = 0) {
+  const full = String(s || "");
+  const total = Math.max(1, Math.ceil(full.length / n));
+  const i = Math.max(0, Math.min(chunk, total - 1));
+  return { text: full.slice(i * n, (i + 1) * n) + (i < total - 1 ? "…[truncated]" : ""), chunk: i, chunks: total, full_length: full.length, truncated: total > 1 };
+}
 
 export function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
@@ -103,12 +140,26 @@ export function shapeRow(kind, row, cfg, withFacets) {
   if (kind === "components" && typeof base.code === "string") {
     base.code_chars = base.code.length;
     if (withFacets) { try { base.facets = withFacets(kind, { ...base, code: base.code.slice(0, 600) }, { fullLength: base.code.length }); } catch { /* never break rows */ } }
-    base.code = trunc(base.code, cfg.codeChars);
+    const ch = chunkText(base.code, cfg.codeChars, 0);
+    base.code = ch.text;
+    base.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
   }
-  if (kind === "skills" && typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
+  if (kind === "skills" && typeof base.content === "string") {
+    const ch = chunkText(base.content, cfg.contentChars, 0);
+    base.content = ch.text;
+    base.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+  }
   if (kind === "design_systems") {
-    if (typeof base.content === "string") base.content = trunc(base.content, cfg.contentChars);
-    if (typeof base.preview_html === "string") base.preview_html = trunc(base.preview_html, cfg.codeChars);
+    if (typeof base.content === "string") {
+      const ch = chunkText(base.content, cfg.contentChars, 0);
+      base.content = ch.text;
+      base.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+    }
+    if (typeof base.preview_html === "string") {
+      const ch = chunkText(base.preview_html, cfg.codeChars, 0);
+      base.preview_html = ch.text;
+      base.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: 0, truncated: ch.truncated };
+    }
   }
   base.page_url = pageUrl(kind, row);
   if (kind === "assets") base.asset_key = assetKey(row);
@@ -180,8 +231,10 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       let fallback = null;
       // AND-phrase queries like "dark cinematic portfolio" match nothing literally:
       // retry as OR over significant tokens so every surface degrades instead of emptying.
-      // Single-token queries that miss also retry bare (drops tag/media filters) + suggest queries.
+      // Theme words (dark/light/cinematic) are rank signals, not match tokens.
       const toks = (q.query && q.query.trim() && !q.tag) ? queryTokens(q.query) : [];
+      const themeHint = (q.query && q.query.trim()) ? detectThemeHint(q.query) : null;
+      const effTheme = q.theme || themeHint;
       const suggest = (t) => {
         const s = [];
         if (t.length > 1) s.push(t.slice(0, Math.min(3, t.length)).join(" "));
@@ -235,13 +288,30 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       const enriched = await enrichAuthors(rows);
       const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
       if (deduped) out.deduped = deduped;
-      // Post-filter: theme (dark|light) is derived, not a column — filter shaped rows.
-      if (q.theme && (kind === "components")) {
-        const want = String(q.theme).toLowerCase();
-        out.items = out.items.filter((it) => (it.facets && it.facets.theme) === want);
+      // Theme-aware re-rank (components): theme hint from query (dark/light/cinematic)
+      // or explicit q.theme reorders so matches come first — never silently drops rows,
+      // but reports how many were filtered out of the top for transparency.
+      if (kind === "components" && effTheme) {
+        const scored = scoreRows(kind, out.items, toks, effTheme);
+        const topTheme = scored.filter((s) => s.themeOk).map((s) => s.r);
+        const dropped = out.items.length - topTheme.length;
+        if (topTheme.length) {
+          out.items = topTheme;
+          out.theme_hint = effTheme;
+          if (dropped) out.theme_filtered_out = dropped;
+        } else {
+          out.theme_hint = effTheme;
+          out.theme_warning = "no " + effTheme + "-theme rows in top results; showing unfiltered, check facets.theme per row";
+        }
       }
       // ISS15: transparent fallback — agents see what happened, not a magic string.
-      if (fallback) { out.fallback = fallback; out.isFallback = true; out.fallback_score = "token-overlap:" + toks.length + "-terms"; }
+      if (fallback) {
+        out.fallback = fallback; out.isFallback = true;
+        const scoredTop = out.items[0];
+        const topTitle = scoredTop ? String(scoredTop.title || "").toLowerCase() : "";
+        const hits = toks.filter((t) => topTitle.includes(t)).length;
+        out.fallback_score = "token-overlap:" + hits + "/" + toks.length + "-terms" + (effTheme ? ";theme:" + effTheme : "");
+      }
       else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggest(toks).filter((s) => !/^[a-z0-9]{8,}$/i.test(s.replace(/\s/g, ""))); if (!out.suggested_queries.length) out.suggested_queries = ["hero", "pricing", "landing page"]; }
       cacheSet(key, out);
       return out;
@@ -250,8 +320,9 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     try { return await p; } finally { inflight.delete(key); }
   }
 
-  async function getItem(kind, idOrSlug) {
-    const key = ["get", kind, String(idOrSlug)].join("|");
+  async function getItem(kind, idOrSlug, opts = {}) {
+    const chunk = Math.max(0, opts.chunk ?? 0);
+    const key = ["get", kind, String(idOrSlug), "c" + chunk].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(idOrSlug));
@@ -267,7 +338,35 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
     const enriched = await enrichAuthors(rows);
-    const out = { kind, item: shapeRow(kind, enriched[0], config, facetsFn), cached: false };
+    const full = enriched[0];
+    // Chunked fetch: re-slice full blobs per requested chunk so agents can page
+    // through 18k-70k payloads instead of hitting one silent truncation wall.
+    const item = shapeRow(kind, full, config, facetsFn);
+    if (chunk > 0) {
+      if (kind === "components" && typeof full.code === "string") {
+        const ch = chunkText(full.code, config.codeChars, chunk);
+        item.code = ch.text;
+        item.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+      }
+      if ((kind === "skills") && typeof full.content === "string") {
+        const ch = chunkText(full.content, config.contentChars, chunk);
+        item.content = ch.text;
+        item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+      }
+      if (kind === "design_systems") {
+        if (typeof full.content === "string") {
+          const ch = chunkText(full.content, config.contentChars, chunk);
+          item.content = ch.text;
+          item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+        }
+        if (typeof full.preview_html === "string") {
+          const ch = chunkText(full.preview_html, config.codeChars, chunk);
+          item.preview_html = ch.text;
+          item.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+        }
+      }
+    }
+    const out = { kind, item, cached: false };
     cacheSet(key, out);
     return out;
   }
