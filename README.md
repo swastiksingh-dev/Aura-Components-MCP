@@ -58,7 +58,7 @@ aura-components-mcp
 
 ```bash
 # Option C — npx, no install
-npx -y aura-components-mcp
+npx -y aura-components-mcp@latest
 ```
 
 Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio — or click through the animated [launch site](./flow/index.html) ([how it works](./flow/how.html) · [tools](./flow/tools.html) · [compare vs official](./flow/compare.html) · [setup](./flow/setup.html) · [docs](./flow/docs.html)). Launch site with animated explainer: open `flow/index.html` in a browser.
@@ -194,7 +194,7 @@ Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Compo
 ```text
 built a free design MCP on aura.build: 2495 components, 187 skills, 30k assets, 20 tools. no login. resources are @MengTo's
 
-npx -y aura-components-mcp
+npx -y aura-components-mcp@latest
 https://github.com/swastiksingh-dev/Aura-Components-MCP
 ```
 

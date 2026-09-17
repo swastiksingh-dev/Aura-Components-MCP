@@ -15,7 +15,7 @@ node ./dist/server.js  # prints: aura-components-mcp v1.6.3 listening on stdio (
 ```bash
 # Or without cloning:
 npm i -g aura-components-mcp
-npx -y aura-components-mcp
+npx -y aura-components-mcp@latest
 ```
 
 If that last line prints, the server works. Everything below just points a client at the same file.
