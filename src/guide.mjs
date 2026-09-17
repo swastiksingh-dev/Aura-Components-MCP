@@ -59,6 +59,7 @@ export function facets(kind, row, opts) {
     f.needsTailwind = needs.needsTailwind;
     f.needsIcons = needs.needsIcons;
     f.fonts = needs.fonts;
+    f.license = 'all-rights-reserved (Aura Terms §4) — check page_url before commercial reuse';
   }
   // ISS14 lives here too: license is top-level on every asset row, not buried.
   // ISS13: rewrite hotlinked demo images to stable asset references where possible.
@@ -119,7 +120,17 @@ export function installGuide(kind, row) {
     if (url) steps.push('Preview first: ' + url);
     if (row._hotlinked && row._hotlinked.length) steps.push('Replace demo images before shipping (' + row._hotlinked.slice(0, 3).join(', ') + '): hotlinked placeholders 404 in production — swap for aura_search_assets results.');
     if (needs.fonts.length) files.push({ path: 'styles/fonts.css', contains: 'font families referenced: ' + needs.fonts.join(', ') });
-    return { kind, title: row.title, page_url: url, free: row.premium === false, steps, deps, files, needs, css_scope: scope, code_truncated: isTrunc };
+    // Chunk concat helper: truncated installs carry the exact re-fetch plan so no
+    // agent is left guessing how part files map to chunks.
+    const ci = row.code_info || null;
+    const concat = isTrunc ? {
+      tool: 'aura_get_component',
+      id: row.slug || row.id,
+      chunks: (ci && ci.chunks) || 'unknown — call once with chunk:0 and read code_info.chunks',
+      how: 'call aura_get_component with chunk:0..chunks-1 and concatenate code in order; part files above map 1:1 to chunks',
+    } : null;
+    const css_scope_how = 'in the pasted <style>, rewrite every bare class selector as .' + scope + ' <selector> (e.g. .button -> .' + scope + ' .button); leave Tailwind utilities, :root vars, and @keyframes names untouched';
+    return { kind, title: row.title, page_url: url, free: row.premium === false, steps, deps, files, needs, css_scope: scope, css_scope_how, code_truncated: isTrunc, ...(concat ? { concat } : {}) };
   }
   if (kind === 'skills') {
     steps.push('Read the SKILL.md content from aura_get_skill first: it names its own triggers and pitfalls.');
@@ -209,5 +220,102 @@ export function tokenHints(content, previewHtml) {
     : ((mode === 'light' && tokens.background && /000000|0f1115/i.test(tokens.background))
       ? 'tokens say dark background but preview renders light — follow the preview body'
       : null);
-  return { tokens, css, preview_mode: mode, mode_warning: warn };
+  return { tokens, css, ...(mode === 'unknown' ? {} : { preview_mode: mode }), mode_warning: warn };
+}
+
+// Module: prompt — deep module, small interface (buildPrompt) over all
+// need-based prompt rules. Pure, no fetch: same seam for tool + tests + docs.
+// Pass 1 (no answers): draft + questions[<=4] + next_call. Agent MUST ask the
+// user via native question UI before Pass 2. Pass 2 (with answers): final.
+const PROMPT_SOURCES = [
+  'https://www.aura.build/learn/tips-for-prompting',
+  'https://www.aura.build/learn/introduction',
+  'https://www.aura.build/design-systems',
+];
+const PROMPT_CREDIT = 'Built by swastiksingh-dev — catalogue by Aura (aura.build)';
+const PROMPT_ORDER = ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'];
+
+function promptThemeHint(goal, explicit) {
+  if (explicit === 'dark' || explicit === 'light') return explicit;
+  const t = String(goal || '').toLowerCase();
+  if (/\bdark\b|\bmidnight\b|\bnoir\b|\bcinematic\b/.test(t) && !/\blight\b|\bbright\b|\bairy\b/.test(t)) return 'dark';
+  if (/\blight\b|\bbright\b|\bairy\b/.test(t)) return 'light';
+  return null;
+}
+
+function draftPromptText(goal, theme) {
+  const th = theme ? theme + ' theme' : 'theme to confirm with user';
+  return 'Build: ' + goal + ' (' + th + '). Use Tailwind CSS with container mx-auto px-4, hex palette, numeric color scale 50-900, 8px radius, 768px hamburger breakpoint, hover scale 1.05 + shadow. Typography: Inter 40-60 / 28-36 / 14-16, weights 640/560/460. Motion <500ms + prefers-reduced-motion. Tokens first (DESIGN.md), then markup. Confirm theme/sections/system with user before scaffolding.';
+}
+
+function finalPromptText(goal, a) {
+  const theme = a.theme || 'confirm with user';
+  const sections = (a.sections && a.sections.length ? a.sections.join(', ') : 'hero + 2 sections');
+  const system = a.system || 'auto-pick via aura_search_design_systems';
+  const assets = a.assets || 'only if needed via aura_search_assets';
+  return 'GOAL: ' + goal + '\n'
+    + 'THEME: ' + theme + ' (tokens first, follow preview body on mismatch)\n'
+    + 'SECTIONS: ' + sections + '\n'
+    + 'DESIGN SYSTEM: ' + system + ' — copy DESIGN.md as source of truth, apply color/type/spacing before markup\n'
+    + 'ASSETS: ' + assets + '\n'
+    + 'RULES: Tailwind container mx-auto px-4; hex palette 50-900; radius 8px; breakpoints 1024+/768-1023/<768, 44px touch targets; hover scale 1.05 + shadow; Inter 40-48 H1 / 16 body; motion <500ms + prefers-reduced-motion; vanilla HTML/Tailwind/JS, no proprietary runtime\n'
+    + 'ORDER: 1 tokens.css, 2 system preview_html, 3 component markup\n'
+    + 'CALLS: aura_recommend -> aura_get_* finalists -> aura_use_design_system -> aura_scaffold_page';
+}
+
+export function buildPrompt(input = {}) {
+  const goal = typeof input.goal === 'string' ? input.goal.trim() : '';
+  if (!goal) { const e = new Error('goal (string) is required'); e.code = 'BAD_ARGS'; throw e; }
+  const themeIn = input.theme === 'dark' || input.theme === 'light' ? input.theme : undefined;
+  if (input.theme !== undefined && themeIn === undefined) { const e = new Error('theme must be dark|light'); e.code = 'BAD_ARGS'; throw e; }
+  const theme = promptThemeHint(goal, themeIn);
+  const system = typeof input.system === 'string' && input.system.trim() ? input.system.trim() : null;
+  const surfaces = Array.isArray(input.surfaces) ? input.surfaces.filter((s) => typeof s === 'string').slice(0, 4) : [];
+  const answers = input.answers && typeof input.answers === 'object' && !Array.isArray(input.answers) ? input.answers : null;
+
+  if (!answers) {
+    const questions = [
+      { key: 'theme', question: 'Which theme — dark or light?', options: ['dark', 'light'] },
+      { key: 'sections', question: 'Which sections (e.g. hero, pricing, testimonial, footer)?', options: [] },
+      { key: 'system', question: 'Which DESIGN system, or auto-pick?', options: system ? [system, 'auto-pick'] : ['auto-pick'] },
+      { key: 'assets', question: 'Need images/video?', options: ['no', 'images', 'video'] },
+    ];
+    return {
+      phase: 'draft',
+      goal,
+      theme_hint: theme,
+      draft_prompt: draftPromptText(goal, theme),
+      questions,
+      missing: ['theme', 'sections', 'system', 'assets'],
+      next_call: { tool: 'aura_prompt', arguments: { goal, answers: { theme: theme || 'dark', sections: [], system: system || 'auto-pick', assets: 'no' } } },
+      plan_order: PROMPT_ORDER,
+      sources: PROMPT_SOURCES,
+      credit: PROMPT_CREDIT,
+      note: 'Ask the user these questions via native question UI, then call aura_prompt again with goal + answers. Never skip confirmation.',
+    };
+  }
+
+  const a = {
+    theme: answers.theme === 'dark' || answers.theme === 'light' ? answers.theme : (theme || 'dark'),
+    sections: Array.isArray(answers.sections) ? answers.sections.filter((s) => typeof s === 'string').slice(0, 6) : [],
+    system: typeof answers.system === 'string' && answers.system.trim() ? answers.system.trim() : (system || 'auto-pick'),
+    assets: typeof answers.assets === 'string' ? answers.assets : 'no',
+  };
+  return {
+    phase: 'final',
+    goal,
+    answers: a,
+    final_prompt: finalPromptText(goal, a),
+    plan_order: PROMPT_ORDER,
+    suggested_calls: [
+      { tool: 'aura_recommend', arguments: { goal } },
+      { tool: 'aura_search_all', arguments: { query: goal, limit: 3 } },
+      { tool: 'aura_use_design_system', arguments: a.system !== 'auto-pick' ? { slug: a.system } : { slug: 'auto-pick: search first' } },
+      { tool: 'aura_scaffold_page', arguments: { goal, system: a.system } },
+    ],
+    page_urls: ['https://www.aura.build/design-systems', 'https://www.aura.build/components'],
+    sources: PROMPT_SOURCES,
+    surfaces: surfaces.length ? surfaces : ['components', 'design_systems', 'assets', 'skills'],
+    credit: PROMPT_CREDIT,
+  };
 };

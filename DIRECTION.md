@@ -1,15 +1,15 @@
 # DIRECTION — where Aura-Components-MCP goes next
 
-> The plan for best-in-class + viral. Ranked by evidence (see `docs/research-viral-github.md`). v1.6.0 shipped; this is what comes after.
-
+> v1.6.3 ships it all: 20 tools with `aura_prompt` (2-pass, user-confirmed), honest search (no_match+refused_fallback, exact_match, theme reorder, DS content index, kind-aware skill recall), slim lists, full:true bodies, recommend auto-retry + editorial fill, status freshness, scaffold shapes, overlap + license notes. No dead trending tool — per-surface `sort:'trending'` instead. This is what comes after.
 ## North star
 
-The fastest free door from an idea to a shippable page: any agent, one install line, never-empty search, paste-ready answers. Everything below serves that sentence.
+The fastest free door from an idea to a shippable page: any agent, one install line, honest search, paste-ready answers. Everything below serves that sentence.
 
 ## Now (v1.6.x — trust)
 
-- [x] 20 tools, facets parity, dedupe, absolute URLs, freeOnly related, scoped CSS, transparent fallback
-- [ ] GitHub Release per npm version (v1.6.0 notes first) — doubles npm + GitHub surfaces
+- [x] 20 tools (`aura_prompt` 2-pass + facets parity, dedupe, absolute URLs, freeOnly related, scoped CSS, transparent fallback; no dead trending tool — per-surface `sort:'trending'` instead)
+- [x] v1.6.3 quality: honest empty, exact_match, theme reorder, DS content index, kind-aware recall, slim lists, full:true, recommend retry + editorial fill, freshness, overlap + license notes, concat/scope install docs
+- [ ] GitHub Release per npm version (v1.6.3 notes first) — doubles npm + GitHub surfaces
 - [ ] Topics set (11 listed in research) + social preview image (flow hero or animated logo)
 - [ ] X launch post (draft in chat) + pin + repo link-back
 

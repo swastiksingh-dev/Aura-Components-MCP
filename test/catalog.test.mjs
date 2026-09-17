@@ -1,8 +1,8 @@
 // catalog.test.mjs — hermetic tests for query building, shaping, caching.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso, detectThemeHint, scoreRows, chunkText } from "../src/catalog.mjs";
-import { installGuide, tokenHints, detectNeeds } from "../src/guide.mjs";
+import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso, detectThemeHint, scoreRows, chunkText, matchOverlap } from "../src/catalog.mjs";
+import { installGuide, tokenHints, detectNeeds, buildPrompt, facets } from "../src/guide.mjs";
 
 const cfg = { supabaseUrl: "https://x.supabase.co", anonKey: "k", timeoutMs: 1000, retries: 0, cacheTtlMs: 60000, defaultLimit: 10, maxLimit: 25, codeChars: 100, contentChars: 100, freeOnlyDefault: false, userAgent: "t" };
 
@@ -89,7 +89,7 @@ test("trending window is 90 days (7d seed is empty)", () => {
 
 test("empty AND-phrase falls back to OR tokens", async () => {
   const calls = [];
-  const stub = { getJson: async (url) => { calls.push(url); if (calls.length === 1) return { rows: [], total: 0 }; return { rows: [{ id: 1, title: "t", slug: "S", created_by: null }], total: 9 }; } };
+  const stub = { getJson: async (url) => { calls.push(url); if (calls.length === 1) return { rows: [], total: 0 }; return { rows: [{ id: 1, title: "Cinematic Hero", slug: "S", created_by: null }], total: 9 }; } };
   const cat = createCatalog({ fetcher: stub, config: cfg });
   const r = await cat.searchCatalog("components", { query: "dark cinematic portfolio", limit: 5 });
   assert.equal(r.items.length, 1);
@@ -246,4 +246,196 @@ test("guide: detectNeeds spots icons and fonts", () => {
   const n = detectNeeds('<div class="font-geist"><iconify-icon></iconify-icon></div>', []);
   assert.equal(n.needsIcons, true);
   assert.ok(n.fonts.includes("geist"));
+});
+
+test("guide: buildPrompt Pass1 draft requires user confirmation", () => {
+  const p1 = buildPrompt({ goal: "dark SaaS pricing" });
+  assert.equal(p1.phase, "draft");
+  assert.equal(p1.questions.length, 4);
+  assert.ok(p1.draft_prompt.includes("dark SaaS pricing"));
+  assert.ok(p1.next_call.tool === "aura_prompt");
+  assert.throws(() => buildPrompt({}), (e) => e.code === "BAD_ARGS");
+});
+
+test("guide: buildPrompt Pass2 final is copy-paste with order + calls", () => {
+  const p2 = buildPrompt({ goal: "dark SaaS pricing", answers: { theme: "dark", sections: ["hero", "pricing"], system: "auto-pick", assets: "no" } });
+  assert.equal(p2.phase, "final");
+  assert.ok(p2.final_prompt.includes("container mx-auto px-4"));
+  assert.deepEqual(p2.plan_order, ['1 tokens.css', '2 system preview_html', '3 component markup in listed order']);
+  assert.ok(p2.suggested_calls.some((c) => c.tool === "aura_scaffold_page"));
+});
+
+test("safety net refusal: nonsense query returns honest empty", async () => {
+  const stub = { getJson: async (url) => {
+    if (url.includes("ilike")) return { rows: [], total: 0 }; // phrase + OR passes miss
+    return { rows: [{ id: 9, title: "popular hero", slug: "PH9", code: "x".repeat(50), created_by: null }], total: 99 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const r = await cat.searchCatalog("components", { query: "xqztqvpzzzqqq", limit: 3 });
+  assert.equal(r.items.length, 0);
+  assert.equal(r.total, 0);
+  assert.equal(r.isFallback, false);
+  assert.equal(r.no_match, true);
+  assert.equal(r.refused_fallback, "popular-safety-net");
+  assert.ok(Array.isArray(r.suggested_queries) && r.suggested_queries.length > 0);
+});
+
+test("slim lists drop blobs by default, slim:false keeps them", async () => {
+  const stub = { getJson: async () => ({ rows: [{ id: 1, title: "t", slug: "S", code: "x".repeat(500), created_by: null }], total: 1 }) };
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const slim = await cat.searchCatalog("components", { query: "t", limit: 1 });
+  assert.ok(!("code" in slim.items[0]));
+  assert.ok(slim.items[0].code_excerpt.length > 0 && slim.items[0].full_fetch);
+  const full = await cat.searchCatalog("components", { query: "t", limit: 1, slim: false });
+  assert.ok(typeof full.items[0].code === "string");
+});
+
+test("facets probe full code: late data-lucide marks needsIcons", () => {
+  const row = shapeRow("components", { slug: "S", code: "x".repeat(700) + ' <i data-lucide="home"></i>' }, cfg, facets);
+  assert.equal(row.facets.needsIcons, true);
+});
+
+test("has_preview is a real boolean for snippet-enriched systems", async () => {
+  const stub = { getJson: async (url) => {
+    if (url.includes("id=in.")) return { rows: [{ id: "u1", content: "tokens", preview_html: "<div>hi</div>" }], total: 1 };
+    return { rows: [{ id: "u1", slug: "s1", title: "sys", created_by: null }], total: 1 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const r = await cat.searchCatalog("design_systems", { query: "sys", limit: 1 });
+  assert.equal(r.items[0].facets.has_preview, true);
+});
+
+test("safety-net-kept: popular title containing a token is kept", async () => {
+  const stub = { getJson: async (url) => {
+    if (url.includes("ilike")) return { rows: [], total: 0 };
+    return { rows: [{ id: 9, title: "popular hero", slug: "PH9", code: "x".repeat(50), created_by: null }], total: 99 };
+  } };
+  const { facets: f } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: f });
+  const r = await cat.searchCatalog("components", { query: "hero", limit: 3 });
+  assert.equal(r.isFallback, true);
+  assert.equal(r.fallback, "popular-safety-net");
+  assert.ok(r.items.length > 0);
+});
+
+test("or-tokens refusal: fallback rows with zero title overlap return honest empty", async () => {
+  const calls = [];
+  const stub = { getJson: async (url) => { calls.push(url); if (calls.length === 1) return { rows: [], total: 0 }; return { rows: [{ id: 1, title: "Unrelated Stuff", slug: "S", created_by: null }], total: 1 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "dark cinematic portfolio", limit: 5 });
+  assert.equal(r.items.length, 0);
+  assert.equal(r.total, 0);
+  assert.equal(r.isFallback, false);
+  assert.equal(r.no_match, true);
+  assert.ok((r.refused_fallback || "").startsWith("or-tokens:"));
+  assert.ok(Array.isArray(r.suggested_queries) && r.suggested_queries.length > 0);
+});
+
+test("theme reorder keeps all rows dark-first with theme_deprioritized", async () => {
+  const stub = { getJson: async () => ({ rows: [
+    { id: 1, title: "Light SaaS Testimonial", description: "x", tags: ["testimonial"], code: "<div class=x bg-white></div>", background: "ffffff", views: 5, created_by: null },
+    { id: 2, title: "Dark Portfolio Hero", description: "cinematic portfolio", tags: ["hero", "dark"], code: "<div class=x bg-black></div>", background: "000000", views: 3, created_by: null },
+  ], total: 2 }) };
+  const { facets: f } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: f });
+  const r = await cat.searchCatalog("components", { query: "dark cinematic portfolio", freeOnly: true, limit: 5 });
+  assert.equal(r.items.length, 2);
+  assert.equal(r.items[0].id, 2);
+  assert.equal(r.theme_hint, "dark");
+  assert.equal(r.theme_checked, 2);
+  assert.equal(r.theme_kept, 2);
+  assert.equal(r.theme_deprioritized, 1);
+  assert.ok(!("theme_filtered_out" in r));
+});
+
+test("exact_match does exactly 1 fetch on miss", async () => {
+  let calls = 0;
+  const stub = { getJson: async () => { calls++; return { rows: [], total: 0 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "dark cinematic portfolio", limit: 5, exact_match: true });
+  assert.equal(calls, 1);
+  assert.equal(r.items.length, 0);
+  assert.equal(r.total, 0);
+  assert.equal(r.isFallback, false);
+  assert.ok(Array.isArray(r.suggested_queries) && r.suggested_queries.length > 0);
+});
+
+test("DS ors include content.ilike+preview_html.ilike", () => {
+  const { ors } = buildSearchParams("design_systems", { query: "portfolio", sort: "popular", limit: 5, offset: 0 });
+  assert.ok(ors.join(",").includes("content.ilike"));
+  assert.ok(ors.join(",").includes("preview_html.ilike"));
+});
+
+test("DS OR fallback includes content+preview_html", async () => {
+  const seen = [];
+  const stub = { getJson: async (url) => { seen.push(url); if (seen.length === 1) return { rows: [], total: 0 }; return { rows: [{ id: "d1", slug: "s", title: "Portfolio System", created_by: null }], total: 1 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("design_systems", { query: "portfolio system", limit: 5 });
+  const orUrl = seen.find((u) => u.includes("or=("));
+  assert.ok(orUrl.includes("content.ilike"));
+  assert.ok(orUrl.includes("preview_html.ilike"));
+  assert.ok(r.items.length > 0);
+});
+
+test("getItem full returns whole code chunks:1", async () => {
+  const stub = { getJson: async () => ({ rows: [{ id: 9, title: "t", slug: "S", code: "x".repeat(300), background: "fff", created_by: null }], total: 1 }) };
+  const { facets: f } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: f });
+  const g = await cat.getItem("components", 9, { full: true });
+  assert.equal(g.item.code.length, 300);
+  assert.deepEqual([g.item.code_info.chunks, g.item.code_info.chunk, g.item.code_info.truncated], [1, 0, false]);
+  assert.equal(g.item.code_info.full_length, 300);
+});
+
+test("skills desc-only kept: OR-pass description match is not refused", async () => {
+  const seen = [];
+  const stub = { getJson: async (url) => {
+    if (url.includes("id=in.")) return { rows: [{ id: "s1", content: "snippet here", source_url: "https://x/a" }], total: 1 };
+    seen.push(url);
+    if (seen.length === 1) return { rows: [], total: 0 };
+    return { rows: [{ id: "s1", title: "Generic Guide", description: "Learn react animation techniques", source_url: "https://x/a", views: 3, created_by: null }], total: 1 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("skills", { query: "react animation", limit: 3 });
+  assert.ok(r.items.length > 0);
+  assert.equal(r.isFallback, true);
+  assert.ok(!r.no_match);
+  assert.ok((r.fallback || "").startsWith("or-tokens:"));
+});
+
+test("components desc-only still refused: title-only gate stays strict", async () => {
+  const seen = [];
+  const stub = { getJson: async (url) => { seen.push(url); if (seen.length === 1) return { rows: [], total: 0 }; return { rows: [{ id: 1, title: "Generic Guide", description: "Learn react animation techniques", slug: "G1", created_by: null }], total: 1 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "react animation", limit: 3 });
+  assert.equal(r.items.length, 0);
+  assert.equal(r.total, 0);
+  assert.equal(r.no_match, true);
+  assert.ok((r.refused_fallback || "").startsWith("or-tokens:"));
+});
+
+test("matchOverlap unit: title-only for components, wide net for skills", () => {
+  // components: tags do NOT count, description does NOT count
+  assert.equal(matchOverlap("components", ["react", "animation"], { title: "React Starter", description: "animation galore", tags: ["animation"] }), 1);
+  assert.equal(matchOverlap("components", ["react"], { title: "Generic", description: "react stuff", tags: ["react"] }), 0);
+  assert.equal(matchOverlap("assets", ["hero"], { title: "Generic", description: "hero shot" }), 0);
+  // skills: description counts
+  assert.equal(matchOverlap("skills", ["react", "animation"], { title: "Generic", description: "react animation guide" }), 2);
+  assert.equal(matchOverlap("skills", ["react"], { title: "Generic", description: "nothing here", tags: ["react"] }), 1);
+  assert.equal(matchOverlap("design_systems", ["tokens"], { title: "Generic", description: "x", tokens_snippet: "design tokens here" }), 1);
+});
+
+test("getStatus freshness keys present (MAX updated_at per table)", async () => {
+  const stub = { getJson: async (url) => {
+    if (url.includes("select=updated_at")) return { rows: [{ updated_at: "2026-07-27T00:00:00.000Z" }], total: 1 };
+    return { rows: [{ id: 1 }], total: 5 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const s = await cat.getStatus();
+  assert.ok(s.freshness);
+  assert.equal(s.freshness.components, "2026-07-27T00:00:00.000Z");
+  assert.equal(s.freshness.skills, "2026-07-27T00:00:00.000Z");
+  assert.equal(s.freshness.assets, "2026-07-27T00:00:00.000Z");
+  assert.equal(s.freshness.design_systems, "2026-07-27T00:00:00.000Z");
+  assert.ok("components_free" in s.counts);
 });

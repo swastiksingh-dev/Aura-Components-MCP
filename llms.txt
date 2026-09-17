@@ -11,11 +11,20 @@
 ## Start here
 
 - Call `aura_status` first (reachability + live free counts).
-- Then `aura_search_all` with the task words (all four surfaces, parallel, never empties via OR-token fallback).
+- Then `aura_search_all` with the task words (all four surfaces, parallel, each with its own fallback pipeline — read `isFallback`/`no_match` per surface; mixed outcomes are normal).
+- Then `aura_prompt` with the goal (draft + 4 questions, ask user, then final with goal + answers).
 - Then `aura_get_*` on 2-3 finalists, `aura_install_*` / `aura_use_design_system` on the winner.
 - One-turn builds: `aura_bundle` (bulk details), `aura_scaffold_page` (tokens + system + markup ordered), `aura_related` (more-like-this).
+- Lists are slim by default (excerpts + `code_info`/`content_info` + `full_fetch`); pass `slim:false` or call `aura_get_*` with `chunk` for full bodies. Truncated installs carry a `concat` plan + `css_scope_how`.
+- Honest search: zero-overlap fallbacks return `total:0` + `no_match:true` + `refused_fallback` + `suggested_queries` (never masked popular rows). `exact_match:true` disables all fallbacks. `aura_trending` is removed — use per-surface `sort:'trending'` on the search tools instead.
+- `aura_recommend` auto-retries once: empty components with `no_match:true` retry via `suggested_queries[0]` (same theme/negative_theme/min_views/slim filters, `retried_from` set), then fill from editorial picks (`editorial_fallback:true`) — `starter_kit.components` never dead-ends.
 
 ## Rules
 
 - Free-only by default; Pro rows are refused with explanation, never leaked.
 - Asset license: all-rights-reserved per Aura Terms §4 (https://www.aura.build/terms) — preview ok, commercial reuse needs Aura permission.
+- Honest search: nonsense queries return honest empty (`total: 0`, `no_match: true`, `refused_fallback` name + `suggested_queries`) — never masked fallbacks. Pass `exact_match: true` to skip all fallbacks.
+- `full: true` on `aura_get_component` / `aura_scaffold_page` returns full bodies (ignores `chunk`); lists stay slim by default.
+- `aura_scaffold_page` components accepts `["732","1364"]` or `[{id:"732"}]` / `[{slug:"..."}]`.
+- Categories overlap: per-category free counts sum past the free total (one component, many tags) — see `overlap_note`; they triage depth, not a partition.
+- `status.freshness` is max `updated_at` per surface; counts mirror upstream live — flat counts + fresh timestamp means metadata moved, not new components.

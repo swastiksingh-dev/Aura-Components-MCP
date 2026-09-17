@@ -65,6 +65,35 @@ export function scoreRows(kind, rows, toks, themeHint) {
   return scored;
 }
 
+// Kind-aware token overlap for the zero-overlap refusal gate (pure, no fetch).
+// Components/assets: title-only (strict visual surfaces; tags/descriptions don't count).
+// Skills/design_systems: wider net — title + description + tags + any snippet present.
+export function matchOverlap(kind, toks, item) {
+  const list = Array.isArray(toks) ? toks : [];
+  if (!list.length || !item) return 0;
+  if (kind === "components" || kind === "assets") {
+    const title = String(item.title || "").toLowerCase();
+    let n = 0;
+    for (const t of list) {
+      const tok = String(t ?? "").toLowerCase();
+      if (tok && title.includes(tok)) n++;
+    }
+    return n;
+  }
+  const parts = [String(item.title || ""), String(item.description || "")];
+  if (Array.isArray(item.tags)) parts.push(item.tags.map((x) => String(x)).join(" "));
+  for (const k of ["content_snippet", "content_excerpt", "preview_snippet", "tokens_snippet"]) {
+    if (typeof item[k] === "string" && item[k]) parts.push(item[k]);
+  }
+  const hay = parts.join("\n").toLowerCase();
+  let n = 0;
+  for (const t of list) {
+    const tok = String(t ?? "").toLowerCase();
+    if (tok && hay.includes(tok)) n++;
+  }
+  return n;
+}
+
 function windowAgoIso(days) {
   const d = new Date();
   d.setDate(d.getDate() - days);
@@ -97,7 +126,7 @@ export function buildSearchParams(kind, q = {}) {
     if (kind === "components") ors.push("title.ilike." + v + ",description.ilike." + v);
     else if (kind === "skills") ors.push("title.ilike." + v + ",description.ilike." + v);
     else if (kind === "assets") ors.push("title.ilike." + v + ",description.ilike." + v);
-    else ors.push("title.ilike." + v + ",description.ilike." + v);
+    else ors.push("title.ilike." + v + ",description.ilike." + v + ",content.ilike." + v + ",preview_html.ilike." + v);
   }
   if (q.sort === "trending") filters.push("created_at=gte." + trendingIso(q.window_days ?? 90));
   return { params: p, filters, ors };
@@ -120,6 +149,22 @@ export function chunkText(s, n, chunk = 0) {
   return { text: full.slice(i * n, (i + 1) * n) + (i < total - 1 ? "…[truncated]" : ""), chunk: i, chunks: total, full_length: full.length, truncated: total > 1 };
 }
 
+// Slim lists: drop heavy blobs (full code/content/preview_html) from list rows,
+// keep excerpts + chunk pointers + full_fetch so agents fetch detail on purpose.
+// getItem/bundleItems stay full — detail is their job. Default on (q.slim ?? true).
+export function slimRows(kind, items) {
+  return (items || []).map((it) => {
+    const o = { ...it };
+    if (kind === "components" && typeof o.code === "string") delete o.code; // keep code_excerpt + code_info + full_fetch
+    if (kind === "skills" && typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
+    if (kind === "design_systems") {
+      if (typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
+      if (typeof o.preview_html === "string") { o.preview_excerpt = String(o.preview_html).slice(0, 800); delete o.preview_html; }
+    }
+    return o;
+  });
+}
+
 export function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
   if (kind === "skills") return SITE + "/skills/" + row.id;
@@ -135,11 +180,12 @@ export function assetKey(row) {
 
 export function shapeRow(kind, row, cfg, withFacets) {
   const base = { ...row };
-  // Facets probe the first 600 chars of FULL code before truncation, so search facets
-  // equal detail facets for icons/fonts/theme. Weight uses the true length (ISS1/2/3).
+  // Facets probe the FULL available code (pre-truncation) so search facets equal
+  // detail facets and install-time needs: a short prefix missed late markers
+  // like data-lucide (id 1572 drift). Weight uses the true length (ISS1/2/3).
   if (kind === "components" && typeof base.code === "string") {
     base.code_chars = base.code.length;
-    if (withFacets) { try { base.facets = withFacets(kind, { ...base, code: base.code.slice(0, 600) }, { fullLength: base.code.length }); } catch { /* never break rows */ } }
+    if (withFacets) { try { base.facets = withFacets(kind, base, { fullLength: base.code.length }); } catch { /* never break rows */ } }
     // Gap 3: code_excerpt (first 1200 chars, readable) + full_fetch flag. Agents skim
     // the excerpt, then get chunk N — no more blind 18k-70k dumps or silent cuts.
     base.code_excerpt = String(base.code).slice(0, 1200);
@@ -226,7 +272,9 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     // the cache key so filtered/unfiltered variants never collide.
     const negTheme = q.negative_theme ? String(q.negative_theme).toLowerCase() : "";
     const minViews = Math.max(0, q.min_views ?? 0);
-    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, negTheme, minViews].join("|");
+    const slim = q.slim ?? true;
+    const exactFlag = q.exact_match === true ? "exact" : "fuzzy";
+    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, negTheme, minViews, slim ? "slim" : "full", exactFlag].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     if (inflight.has(key)) return inflight.get(key);
@@ -250,12 +298,13 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
         for (const x of t.slice(0, 3)) s.push(x);
         return [...new Set(s)].slice(0, 4);
       };
-      if ((!rows || !rows.length) && toks.length) {
+      if ((!rows || !rows.length) && toks.length && q.exact_match !== true) {
         // Pass 1: OR over tokens, same filters (drops the AND-phrase requirement).
         const orParts = [];
         for (const t of toks) {
           const v = ilike(t);
-          orParts.push("title.ilike." + v + ",description.ilike." + v);
+          if (kind === "design_systems") orParts.push("title.ilike." + v + ",description.ilike." + v + ",content.ilike." + v + ",preview_html.ilike." + v);
+          else orParts.push("title.ilike." + v + ",description.ilike." + v);
         }
         const b1 = buildSearchParams(kind, { ...q, query: "", limit, offset, sort, freeOnly });
         try {
@@ -269,7 +318,17 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
           try {
             const fb2 = await fetcher.getJson(buildUrl(base, kind, b2.params, b2.filters, orParts), headers);
             if (fb2.rows && fb2.rows.length) { rows = fb2.rows; total = fb2.total; fallback = "or-tokens-unwindowed:" + toks.join(","); }
-          } catch { /* keep original empty result */ }
+          } catch { /* try safety net */ }
+        }
+        // Safety net: total miss on a text query still returns usable items.
+        // Same freeOnly/tag/mediaType filters, popular order, labeled honestly —
+        // true never-empty (unless upstream itself is down).
+        if ((!rows || !rows.length)) {
+          const b3 = buildSearchParams(kind, { ...q, query: "", limit, offset, sort: "popular", freeOnly });
+          try {
+            const fb3 = await fetcher.getJson(buildUrl(base, kind, b3.params, b3.filters, []), headers);
+            if (fb3.rows && fb3.rows.length) { rows = fb3.rows; total = fb3.total; fallback = "popular-safety-net"; }
+          } catch { /* keep empty: upstream truth */ }
         }
       }
       // ISS7: dedupe skills by source_url (same SKILL.md listed twice). First (most-viewed)
@@ -297,6 +356,8 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       // Gap 4: inline snippets — one extra batched fetch fills preview/tokens glimpses
       // into search rows (top N only) so agents decide without a second call per row.
       // Bounded: top 5 rows, client-side sliced to 800 chars. No extra call when empty.
+      // Same fetch also resolves facets.has_preview to a real boolean for those rows.
+      let presence = null;
       if ((kind === "design_systems" || kind === "skills") && rows.length) {
         const topIds = rows.slice(0, 5).map((r) => r.id);
         try {
@@ -304,6 +365,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
           const sel = kind === "design_systems" ? "id,content,preview_html" : "id,content,source_url";
           const { rows: full } = await fetcher.getJson(base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&id=in.(" + idList + ")", headers);
           const byId = new Map(full.map((r) => [String(r.id), r]));
+          if (kind === "design_systems") presence = new Map(full.map((r) => [String(r.id), Boolean(r.preview_html)]));
           rows = rows.map((r) => {
             const f = byId.get(String(r.id));
             if (!f) return r;
@@ -325,29 +387,59 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       }
       // Theme-aware re-rank (components): theme hint from query (dark/light/cinematic)
       // or explicit q.theme reorders so matches come first — never silently drops rows,
-      // but reports how many were filtered out of the top for transparency.
+      // and always reports checked/kept counts so the re-rank is auditable, not opaque.
       if (kind === "components" && effTheme) {
         const scored = scoreRows(kind, out.items, toks, effTheme);
-        const topTheme = scored.filter((s) => s.themeOk).map((s) => s.r);
-        const dropped = out.items.length - topTheme.length;
-        if (topTheme.length) {
-          out.items = topTheme;
-          out.theme_hint = effTheme;
-          if (dropped) out.theme_filtered_out = dropped;
-        } else {
-          out.theme_hint = effTheme;
+        const themeOkCount = scored.filter((s) => s.themeOk).length;
+        out.theme_hint = effTheme;
+        out.theme_checked = scored.length;
+        out.theme_kept = out.items.length;
+        if (themeOkCount === 0) {
           out.theme_warning = "no " + effTheme + "-theme rows in top results; showing unfiltered, check facets.theme per row";
+        } else {
+          out.items = scored.map((s) => s.r);
+          const dep = scored.length - themeOkCount;
+          if (dep > 0) out.theme_deprioritized = dep;
+        }
+      }
+      // Real has_preview for snippet-enriched rows (top 5); the rest stay unknown-list.
+      if (presence) {
+        for (const it of out.items) {
+          if (presence.has(String(it.id)) && it.facets) it.facets = { ...it.facets, has_preview: presence.get(String(it.id)) };
         }
       }
       // ISS15: transparent fallback — agents see what happened, not a magic string.
+      // Safety net additionally carries suggested_queries so agents can retry sharp.
+      const suggestList = () => { const sq = suggest(toks).filter((s) => !/^[a-z0-9]{8,}$/i.test(s.replace(/\s/g, ""))); return sq.length ? sq : ["hero", "pricing", "landing page"]; };
       if (fallback) {
         out.fallback = fallback; out.isFallback = true;
         const scoredTop = out.items[0];
-        const topTitle = scoredTop ? String(scoredTop.title || "").toLowerCase() : "";
-        const hits = toks.filter((t) => topTitle.includes(t)).length;
+        const hits = matchOverlap(kind, toks, scoredTop);
         out.fallback_score = "token-overlap:" + hits + "/" + toks.length + "-terms" + (effTheme ? ";theme:" + effTheme : "");
+        if (fallback === "popular-safety-net") out.suggested_queries = suggestList();
       }
-      else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggest(toks).filter((s) => !/^[a-z0-9]{8,}$/i.test(s.replace(/\s/g, ""))); if (!out.suggested_queries.length) out.suggested_queries = ["hero", "pricing", "landing page"]; }
+      else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggestList(); }
+      // Zero-overlap refusal: fallback engaged but top row matches 0/N tokens —
+      // honest empty instead of irrelevant popular rows. Direct hits never refused.
+      // Kind-aware: components/assets stay title-only strict; skills/systems use the
+      // wider net (title+description+tags+snippets) via matchOverlap.
+      if (fallback != null && toks.length > 0) {
+        const top = out.items[0];
+        const hits2 = matchOverlap(kind, toks, top);
+        if (hits2 === 0) {
+          const refused = fallback;
+          out.items = [];
+          out.total = 0;
+          out.isFallback = false;
+          delete out.fallback;
+          delete out.fallback_score;
+          out.no_match = true;
+          out.refused_fallback = refused;
+          out.suggested_queries = suggestList();
+          out.note = "Top fallback result matched 0/" + toks.length + " title tokens — empty instead of irrelevant popular rows. Try a suggested query.";
+        }
+      }
+      if (slim) out.items = slimRows(kind, out.items);
       cacheSet(key, out);
       return out;
     })();
@@ -357,7 +449,8 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
 
   async function getItem(kind, idOrSlug, opts = {}) {
     const chunk = Math.max(0, opts.chunk ?? 0);
-    const key = ["get", kind, String(idOrSlug), "c" + chunk].join("|");
+    const wantFull = !!opts.full;
+    const key = ["get", kind, String(idOrSlug), "c" + chunk, wantFull ? "full" : "trunc"].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(idOrSlug));
@@ -377,7 +470,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     // Chunked fetch: re-slice full blobs per requested chunk so agents can page
     // through 18k-70k payloads instead of hitting one silent truncation wall.
     const item = shapeRow(kind, full, config, facetsFn);
-    if (chunk > 0) {
+    if (chunk > 0 && !wantFull) {
       if (kind === "components" && typeof full.code === "string") {
         const ch = chunkText(full.code, config.codeChars, chunk);
         item.code = ch.text;
@@ -398,6 +491,26 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
           const ch = chunkText(full.preview_html, config.codeChars, chunk);
           item.preview_html = ch.text;
           item.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
+        }
+      }
+    }
+    if (wantFull) {
+      if (kind === "components" && typeof full.code === "string") {
+        item.code = full.code;
+        item.code_info = { full_length: full.code.length, chunks: 1, chunk: 0, truncated: false };
+      }
+      if (kind === "skills" && typeof full.content === "string") {
+        item.content = full.content;
+        item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+      }
+      if (kind === "design_systems") {
+        if (typeof full.content === "string") {
+          item.content = full.content;
+          item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+        }
+        if (typeof full.preview_html === "string") {
+          item.preview_html = full.preview_html;
+          item.preview_info = { full_length: full.preview_html.length, chunks: 1, chunk: 0, truncated: false };
         }
       }
     }
@@ -422,7 +535,17 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       try { const { total } = await fetcher.getJson(base + "/rest/v1/" + path, headers); counts[k] = total; }
       catch { counts[k] = null; }
     }));
-    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, cached: false };
+    // Freshness: best-effort MAX(updated_at) per table so agents see staleness.
+    // Never throws; null on failure; cached with the status entry.
+    const freshness = { components: null, skills: null, assets: null, design_systems: null };
+    await Promise.all(Object.keys(freshness).map(async (table) => {
+      try {
+        const { rows } = await fetcher.getJson(base + "/rest/v1/" + table + "?select=updated_at&order=updated_at.desc&limit=1", headers);
+        const v = rows && rows[0] ? rows[0].updated_at : null;
+        freshness[table] = v ? String(v) : null;
+      } catch { freshness[table] = null; }
+    }));
+    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, freshness, cached: false };
     cacheSet(key, out);
     return out;
   }
@@ -452,16 +575,16 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     try {
       const { rows } = await fetcher.getJson(url, headers);
       const enriched = await enrichAuthors(rows);
-      return enriched.map((r) => shapeRow("components", r, config, facetsFn));
+      return enriched.map((r) => slimRows("components", [shapeRow("components", r, config, facetsFn)])[0]);
     } catch { return []; }
   }
 
   // Bulk fetch: N details in one parallel round (backs aura_bundle + aura_scaffold_page).
   // Per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
-  async function bundleItems(kind, ids, max = 5) {
+  async function bundleItems(kind, ids, max = 5, opts = {}) {
     const list = [...new Set((ids || []).map(String))].slice(0, Math.max(1, Math.min(max, 8)));
     const out = await Promise.all(list.map(async (id) => {
-      try { const got = await getItem(kind, id); return { ok: true, id, item: got.item }; }
+      try { const got = await getItem(kind, id, { full: !!opts.full }); return { ok: true, id, item: got.item }; }
       catch (e) { return { ok: false, id, error: (e && e.code === "NOT_FOUND") ? "not found" : String((e && e.message) || e).slice(0, 160) }; }
     }));
     return out;
@@ -484,7 +607,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     try {
       const { rows } = await fetcher.getJson(url, headers);
       const enriched = await enrichAuthors(rows);
-      return { item: shapeRow(kind, item, config), related: enriched.map((r) => shapeRow(kind, r, config)) };
+      return { item: shapeRow(kind, item, config), related: slimRows(kind, enriched.map((r) => shapeRow(kind, r, config))) };
     } catch { return { item: shapeRow(kind, item, config), related: [] }; }
   }
 

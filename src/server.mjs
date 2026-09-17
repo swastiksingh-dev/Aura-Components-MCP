@@ -64,6 +64,6 @@ async function boot() {
   await sleepMs(180);
   paint("built by swastiksingh-dev — free to use, MIT, no paywall");
   await sleepMs(180);
-  paint(SERVER_INFO.name + " v" + SERVER_INFO.version + " running — 15 tools on stdio");
+  paint(SERVER_INFO.name + " v" + SERVER_INFO.version + " running — 20 tools on stdio");
 }
 boot();
