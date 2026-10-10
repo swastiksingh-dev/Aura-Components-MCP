@@ -1,5 +1,7 @@
 <h1 align="center">aura-components-mcp</h1>
 
+<p align="center"><sub>FREE MCP SERVER · STDIO · ZERO DEPS · MIT</sub></p>
+
 <p align="center">
   <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/v/aura-components-mcp" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/dm/aura-components-mcp" alt="npm downloads"></a>
@@ -11,7 +13,7 @@
 <p align="center"><i>Every free thing on Aura, one call away — no account, no key, no browser.</i></p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/site-tour.gif" alt="aura-components-mcp demo: dark WebGL hero, 28 grouped tools, one-minute setup" width="100%">
+  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ WATCH THE 10-SECOND TOUR (MP4) ▲</b></a>
 </p>
 
 > I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
@@ -119,8 +121,8 @@ claude mcp add aura-components -- node ./dist/server.js
 
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><img src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/site-tour.gif" alt="Watch the 10-second flow tour (MP4) — click to play" width="100%"></a>
-  <br><em>Click the preview to watch the 10-second flow tour (MP4, 1918x936, ~8MB) — same file as <a href="./assets/heart-demo.mp4">assets/heart-demo.mp4</a></em>
+  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ CLICK TO WATCH THE 10-SECOND FLOW TOUR (MP4) ▲</b></a>
+  <br><em>Same file as <a href="./assets/heart-demo.mp4">assets/heart-demo.mp4</a></em>
 </p>
 
 *`aura_prompt` turns one sentence into a confirmed prompt, `aura_recommend` turns it into a starter kit with links. Full clip in [`assets/`](assets/).*
