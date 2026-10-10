@@ -1,28 +1,33 @@
-# aura-components-mcp
+# aura-components-mcp (v1.7.0 — 28 tools)
 
-> Free-only MCP server (stdio, zero deps, no login) for the Aura (aura.build) public catalogue: 2,495 components, 187 skills, 30,688 assets, 725 design systems. Built by swastiksingh-dev (MIT). Catalogue content belongs to Aura (Meng To / DesignCode).
+> Free-only MCP server (stdio, zero deps, no login) for the Aura (aura.build) public catalogue: 2,495 components, 192 skills, 30,688 assets, 725 design systems. Built by swastiksingh-dev (MIT). Catalogue content belongs to Aura (Meng To / DesignCode).
 
 - Repo: https://github.com/swastiksingh-dev/Aura-Components-MCP
 - npm: https://www.npmjs.com/package/aura-components-mcp
 - Setup: https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md (Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness)
-- Live demo site: https://github.com/swastiksingh-dev/Aura-Components-MCP/tree/main/flow
+- Live demo videos: https://github.com/swastiksingh-dev/Aura-Components-MCP/tree/main/assets
 - Official Aura MCP (account projects/publishing, OAuth): https://www.aura.build/mcp
 
 ## Start here
 
 - Call `aura_status` first (reachability + live free counts).
 - Then `aura_search_all` with the task words (all four surfaces, parallel, each with its own fallback pipeline — read `isFallback`/`no_match` per surface; mixed outcomes are normal).
-- Then `aura_prompt` with the goal (draft + 4 questions, ask user, then final with goal + answers).
+- Then `aura_prompt` with the goal (draft + 6 questions: theme, sections, system, assets, macrostructure, vibe — ask user, then final with goal + answers). Pass 2 leads with `inspo.recommend` + `aura_inspo_recommend`.
 - Then `aura_get_*` on 2-3 finalists, `aura_install_*` / `aura_use_design_system` on the winner.
-- One-turn builds: `aura_bundle` (bulk details), `aura_scaffold_page` (tokens + system + markup ordered), `aura_related` (more-like-this).
+- One-turn builds: `aura_bundle` (bulk details), `aura_scaffold_page` (tokens + system + markup ordered, refuses Pro ids, carries `docs_stamp`), `aura_related` (more-like-this).
+- Fresh docs (pure helpers, agent calls Context7): `aura_docs_plan` (trusted: tailwind, gsap, lenis, iconify) + `aura_docs_check` (verdict + look-preserving fixes, excerpts under 20000 chars). Every install/scaffold carries `docs_stamp`. Conflict rule: fresh API wins, look stays identical.
+- Free icons (live): `aura_icon {name}` returns ready-to-paste SVG from Font Awesome Free or the HackerNoon pixel library with auto-fallback, plus font/CSS alternative. CC BY 4.0 — credit line on every hit.
+- Inspo bridge (pure mappers, no fetch — paste slim evidence): `aura_inspo_recommend` (strict macro gate: `need_macro:true` without a macrostructure), `aura_inspo_components`, `aura_inspo_reference`, `aura_inspo_system` (A/B/blend + `system_choice` question + contrast warning), `aura_inspo_compare` (2–4 slim sites → house style). Palette priority: brand hex > Inspo evidence > Aura tokens.
 - Lists are slim by default (excerpts + `code_info`/`content_info` + `full_fetch`); pass `slim:false` or call `aura_get_*` with `chunk` for full bodies. Truncated installs carry a `concat` plan + `css_scope_how`.
 - Honest search: zero-overlap fallbacks return `total:0` + `no_match:true` + `refused_fallback` + `suggested_queries` (never masked popular rows). `exact_match:true` disables all fallbacks. `aura_trending` is removed — use per-surface `sort:'trending'` on the search tools instead.
 - `aura_recommend` auto-retries once: empty components with `no_match:true` retry via `suggested_queries[0]` (same theme/negative_theme/min_views/slim filters, `retried_from` set), then fill from editorial picks (`editorial_fallback:true`) — `starter_kit.components` never dead-ends.
 
 ## Rules
 
-- Free-only by default; Pro rows are refused with explanation, never leaked.
+- Free-only by default; Pro rows are refused with explanation, never leaked (`aura_install_component` errors; `aura_scaffold_page` filters + reports `pro_filtered_out`).
 - Asset license: all-rights-reserved per Aura Terms §4 (https://www.aura.build/terms) — preview ok, commercial reuse needs Aura permission.
+- Icon license: every `aura_icon` hit is CC BY 4.0 (Font Awesome Free and HackerNoon pixel SVGs alike) — always keep its `credit` line; never strip it.
+- Inspo evidence stays slim (slugs + palette + fonts + macro + mode + vibe, max 4 sites, no autopsy/screenshots); without a macrostructure, `aura_inspo_recommend` returns `need_macro:true` — run `inspo.recommend` first, never scaffold generic.
 - Honest search: nonsense queries return honest empty (`total: 0`, `no_match: true`, `refused_fallback` name + `suggested_queries`) — never masked fallbacks. Pass `exact_match: true` to skip all fallbacks.
 - `full: true` on `aura_get_component` / `aura_scaffold_page` returns full bodies (ignores `chunk`); lists stay slim by default.
 - `aura_scaffold_page` components accepts `["732","1364"]` or `[{id:"732"}]` / `[{slug:"..."}]`.

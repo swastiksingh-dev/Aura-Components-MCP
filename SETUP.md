@@ -9,7 +9,7 @@ git clone https://github.com/swastiksingh-dev/Aura-Components-MCP.git
 cd Aura-Components-MCP
 npm install
 npm run build
-node ./dist/server.js  # prints: aura-components-mcp v1.6.3 listening on stdio (Ctrl+C to stop)
+node ./dist/server.js  # prints: aura-components-mcp v1.7.0 listening on stdio (Ctrl+C to stop)
 ```
 
 ```bash
@@ -69,11 +69,11 @@ Restart Windsurf, open Cascade, allow the server when asked.
 
 1. Open Cline settings, MCP Servers section.
 2. Add server: command `node`, arg `/absolute/path/to/aura-components-mcp/dist/server.js`, name `aura-components`.
-3. It lists 20 tools starting with `aura_`. Approve them once.
+3. It lists 28 tools starting with `aura_`. Approve them once.
 
 ## Roo Code (VS Code)
 
-Same as Cline: Add MCP server, command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. Roo shows the 20 `aura_` tools in its tool list after reload.
+Same as Cline: Add MCP server, command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. Roo shows the 28 `aura_` tools in its tool list after reload.
 
 ## DeepSeek Harness
 
@@ -102,7 +102,7 @@ Add to `opencode.json` (or `opencode.jsonc`) in your project root or `~/.config/
 }
 ```
 
-Restart OpenCode (or run `/mcp` to reload). The 20 `aura_*` tools show up in the TUI. Same first prompt as Claude Code above. A copy-paste file lives at `examples/opencode.json`.
+Restart OpenCode (or run `/mcp` to reload). The 28 `aura_*` tools show up in the TUI. Same first prompt as Claude Code above. A copy-paste file lives at `examples/opencode.json`.
 
 ## Any other MCP client
 
@@ -110,7 +110,7 @@ Transport is stdio, no auth. Command `node`, args `["/absolute/path/to/aura-comp
 
 ## Prompts that work
 
-- `Check aura_status. Then call aura_prompt with "dark SaaS pricing", ask me its 4 questions, then call it again with my answers.`
+- `Check aura_status. Then call aura_prompt with "dark SaaS pricing", ask me its 6 questions, then call it again with my answers.`
 - `Check aura_status. Then recommend a starter kit for a dark cinematic portfolio (free only).`
 - `Search free pricing components, get the top two in full, and tell me which pastes cleaner into Tailwind.`
 - `Which skill covers GSAP ScrollTrigger pin and scrub? Fetch it in full and apply the pinned-section recipe.`

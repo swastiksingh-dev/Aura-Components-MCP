@@ -11,5 +11,5 @@ Security issues: see [SECURITY.md](./SECURITY.md) — do not open them
 as public issues.
 
 Usage help: [SETUP.md](./SETUP.md) first, then
-[Docs](./flow/docs.html). Catalogue content questions belong to Aura;
+[README.md](./README.md). Catalogue content questions belong to Aura;
 server/code questions belong here.

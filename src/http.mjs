@@ -47,5 +47,32 @@ export function createFetcher({ fetchImpl, timeoutMs, retries, userAgent }) {
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
-  return { getJson };
+  // GET raw text (icons). 404 returns null (fallback chain keeps walking);
+  // 429/5xx retry like getJson; other non-2xx also return null (a missing
+  // icon is normal, not an upstream failure).
+  async function getText(url, headers) {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await once(url, { headers });
+        if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
+          lastErr = new Error("transient upstream status " + res.status);
+        } else if (res.status === 404) {
+          return null;
+        } else if (!res.ok) {
+          return null;
+        } else {
+          return await res.text();
+        }
+      } catch (err) {
+        lastErr = err;
+        if (err && err.name === "AbortError") break;
+      }
+      if (attempt < retries) await sleep(120 * 2 ** attempt + Math.floor(Math.random() * 60));
+    }
+    if (lastErr) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+    return null;
+  }
+
+  return { getJson, getText };
 }

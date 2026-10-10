@@ -1,4 +1,4 @@
-// Full verification: all 20 tools live + error paths, against dist/server.js.
+// Full verification: all 28 tools live + error paths, against dist/server.js.
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +38,7 @@ const check = (label, cond, extra) => {
 await call('initialize', {});
 const t0 = Date.now();
 const st = J(await tool('aura_status', {}));
-check('status counts', st && st.counts.components_free === 2495 && st.counts.skills === 187, JSON.stringify(st).slice(0, 200));
+check('status counts', st && st.counts.components_free >= 2495 && st.counts.skills >= 187 && st.counts.assets >= 30000, JSON.stringify(st && st.counts).slice(0, 200));
 check('status freshness 4 surfaces', st && st.freshness && ['components', 'skills', 'assets', 'design_systems'].every((k) => Object.prototype.hasOwnProperty.call(st.freshness, k)), JSON.stringify(st && st.freshness).slice(0, 200));
 const sc = J(await tool('aura_search_components', { query: 'pricing', limit: 3 }));
 check('search components free-only', sc && sc.items.length > 0 && sc.items.every((i) => i.premium === false), JSON.stringify(sc).slice(0, 200));
@@ -88,7 +88,7 @@ check('search_all theme smoke', allTheme && allTheme.components && (allTheme.com
 const cats = J(await tool('aura_categories', {}));
 check('13 categories with counts', cats && cats.categories && cats.categories.length === 13 && cats.categories.every((c) => typeof c.free === 'number'), JSON.stringify(cats).slice(0, 200));
 const pr1 = J(await tool('aura_prompt', { goal: 'dark SaaS pricing' }));
-check('prompt Pass1 draft + questions', pr1 && pr1.phase === 'draft' && pr1.questions.length === 4 && pr1.next_call.tool === 'aura_prompt', JSON.stringify(pr1).slice(0, 200));
+check('prompt Pass1 draft + questions', pr1 && pr1.phase === 'draft' && pr1.questions.length === 6 && pr1.next_call.tool === 'aura_prompt', JSON.stringify(pr1).slice(0, 200));
 const pr2 = J(await tool('aura_prompt', { goal: 'dark SaaS pricing', answers: { theme: 'dark', sections: ['hero', 'pricing'], system: 'auto-pick', assets: 'no' } }));
 check('prompt Pass2 final copy-paste', pr2 && pr2.phase === 'final' && pr2.final_prompt.includes('dark SaaS pricing') && pr2.plan_order.length === 3, JSON.stringify(pr2).slice(0, 200));
 const nf = await tool('aura_get_component', { id: 999999999 });
@@ -97,6 +97,16 @@ const ba = await tool('aura_get_skill', {});
 check('bad args -> -32602', ba.error && ba.error.code === -32602, JSON.stringify(ba).slice(0, 200));
 const un = await tool('nope_tool', {});
 check('unknown tool -> -32601', un.error && un.error.code === -32601, JSON.stringify(un).slice(0, 200));
+const li = await call('tools/list', {});
+check('tools/list exposes 28', li && li.result && Array.isArray(li.result.tools) && li.result.tools.length === 28 && li.result.tools.some((t) => t.name === 'aura_icon'), String(li && li.result && li.result.tools && li.result.tools.length));
+const ig = J(await tool('aura_inspo_recommend', { brief: 'dark SaaS pricing' }));
+check('inspo macro gate', ig && ig.need_macro === true && ig.inspo_call.tool === 'inspo.recommend', JSON.stringify(ig).slice(0, 200));
+const dp = J(await tool('aura_docs_plan', { library: 'lenis', need: 'GSAP ticker integration' }));
+check('docs plan trusted', dp && dp.trusted === true && dp.context7.id === '/darkroomengineering/lenis', JSON.stringify(dp).slice(0, 200));
+const ic = J(await tool('aura_icon', { name: 'bolt' }));
+check('icon live fetch + credit', ic && typeof ic.svg === 'string' && ic.svg.includes('<svg') && ic.credit.length > 0, JSON.stringify(ic).slice(0, 200));
+const icBad = await tool('aura_icon', {});
+check('icon missing name -> -32602', icBad.error && icBad.error.code === -32602, JSON.stringify(icBad).slice(0, 200));
 console.log('VERIFY pass=' + pass + ' fail=' + fail + ' ms=' + (Date.now() - t0));
 child.kill();
 setTimeout(() => process.exit(fail ? 1 : 0), 500);

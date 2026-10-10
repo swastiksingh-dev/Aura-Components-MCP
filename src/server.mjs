@@ -8,11 +8,13 @@ import { createCatalog } from "./catalog.mjs";
 import { createSession, SERVER_INFO } from "./protocol.mjs";
 import { TOOL_DEFS, createHandlers } from "./tools.mjs";
 import { facets } from "./guide.mjs";
+import { createIcons } from "./icons.mjs";
 
 const config = loadConfig();
 const fetcher = createFetcher({ fetchImpl: globalThis.fetch, timeoutMs: config.timeoutMs, retries: config.retries, userAgent: config.userAgent });
 const catalog = createCatalog({ fetcher, config, facetsFn: facets });
-const handlers = createHandlers(catalog);
+const icons = createIcons({ fetcher });
+const handlers = createHandlers(catalog, icons);
 
 let buffer = "";
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -64,6 +66,6 @@ async function boot() {
   await sleepMs(180);
   paint("built by swastiksingh-dev — free to use, MIT, no paywall");
   await sleepMs(180);
-  paint(SERVER_INFO.name + " v" + SERVER_INFO.version + " running — 20 tools on stdio");
+  paint(SERVER_INFO.name + " v" + SERVER_INFO.version + " running — " + TOOL_DEFS.length + " tools on stdio");
 }
 boot();

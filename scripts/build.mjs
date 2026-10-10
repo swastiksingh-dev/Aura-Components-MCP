@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function prep(name, src) {
-  let s = src.replace(/^#!.*\n/, "");
+  let s = src.replace(/^#![^\n]*\r?\n/, "");
   s = s.split("\n").filter((l) => !/^import\s/.test(l)).join("\n");
   s = s.replace(/^export\s+(?=function|const|class|async function)/gm, "");
   if (name === "catalog.mjs") {
@@ -43,12 +43,12 @@ function prep(name, src) {
   return s;
 }
 
-const order = ["config.mjs", "http.mjs", "catalog.mjs", "protocol.mjs", "guide.mjs", "tools.mjs"];
+const order = ["config.mjs", "http.mjs", "catalog.mjs", "protocol.mjs", "guide.mjs", "icons.mjs", "tools.mjs"];
 const pkgVer = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 let out = "#!/usr/bin/env node\n// aura-components-mcp v" + pkgVer + " — bundled (zero deps). Built by swastiksingh-dev.\n";
 for (const f of order) out += "\n// ---- " + f + " ----\n" + prep(f, readFileSync(join(root, "src", f), "utf8"));
 const server = readFileSync(join(root, "src", "server.mjs"), "utf8")
-  .replace(/^#!.*\n/, "")
+  .replace(/^#![^\n]*\r?\n/, "")
   .replace(/^import[^;]+;\s*$/gm, "");
 out += "\n// ---- server.mjs (main) ----\n" + server;
 mkdirSync(join(root, "dist"), { recursive: true });

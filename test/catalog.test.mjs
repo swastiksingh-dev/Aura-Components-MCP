@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso, detectThemeHint, scoreRows, chunkText, matchOverlap } from "../src/catalog.mjs";
-import { installGuide, tokenHints, detectNeeds, buildPrompt, facets } from "../src/guide.mjs";
+import { installGuide, tokenHints, detectNeeds, buildPrompt, combineScaffold, facets } from "../src/guide.mjs";
 
 const cfg = { supabaseUrl: "https://x.supabase.co", anonKey: "k", timeoutMs: 1000, retries: 0, cacheTtlMs: 60000, defaultLimit: 10, maxLimit: 25, codeChars: 100, contentChars: 100, freeOnlyDefault: false, userAgent: "t" };
 
@@ -248,10 +248,24 @@ test("guide: detectNeeds spots icons and fonts", () => {
   assert.ok(n.fonts.includes("geist"));
 });
 
+test("guide: combineScaffold merges deps once + files in order", () => {
+  const sys = { title: "S" };
+  const comps = [
+    { title: "A", slug: "a", premium: false, code: '<div class="x"></div>', tags: [], page_url: "u" },
+    { title: "B", slug: "b", premium: false, code: '<div class="y"></div>', tags: [], page_url: "u" },
+  ];
+  const r = combineScaffold(sys, comps);
+  assert.deepEqual(r.combined_deps.map((d) => d.name), ["tailwindcss"]);
+  assert.deepEqual(r.files.map((f) => f.path), ["styles/tokens.css", "DESIGN.md", "components/a.html", "components/b.html"]);
+  assert.equal(r.guides.length, 2);
+  const empty = combineScaffold(null, []);
+  assert.deepEqual(empty.files.map((f) => f.path), ["styles/tokens.css"]);
+});
+
 test("guide: buildPrompt Pass1 draft requires user confirmation", () => {
   const p1 = buildPrompt({ goal: "dark SaaS pricing" });
   assert.equal(p1.phase, "draft");
-  assert.equal(p1.questions.length, 4);
+  assert.equal(p1.questions.length, 6);
   assert.ok(p1.draft_prompt.includes("dark SaaS pricing"));
   assert.ok(p1.next_call.tool === "aura_prompt");
   assert.throws(() => buildPrompt({}), (e) => e.code === "BAD_ARGS");

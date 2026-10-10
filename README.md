@@ -3,14 +3,29 @@
 [![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![npm downloads](https://img.shields.io/npm/dm/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE) [![node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](./package.json) [![MCP](https://img.shields.io/badge/MCP-stdio-blue)](./dist/server.js)
 
 <p align="center">
-  <a href="./flow/index.html"><img src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/site-tour.gif" alt="aura-components-mcp demo: dark WebGL hero, 20 grouped tools, one-minute setup" width="100%"></a>
+  <img src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/site-tour.gif" alt="aura-components-mcp demo: dark WebGL hero, 28 grouped tools, one-minute setup" width="100%">
 </p>
 
 > I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
+## Contents
+
+- [Why not the official MCP](#why-i-built-this-instead-of-using-the-official-mcp)
+- [What is inside](#what-is-inside)
+- [Install](#install)
+- [Demo](#demo)
+- [The 28 tools](#the-28-tools)
+- [Fallback rules](#fallback-rules-read-this-once)
+- [Prompt for AI agents](#-prompt-for-ai-agents--start-here)
+- [Free only, no login](#free-only-no-login)
+- [Develop](#develop)
+- [Credits](#credits)
+
+> **v1.7.0** — 28 tools: 5 new pure `aura_inspo_*` mappers (recommend/components/reference/system/compare) bridge Inspo evidence to Aura calls with zero extra deps — strict macro gate (`need_macro`), palette priority brand > Inspo > Aura, enforced tokens-first, mandated image srcset plan, fast preview-URL look gate — plus 2 pure `aura_docs_*` helpers (plan/check) wiring Context7 fresh docs for tailwind/gsap/lenis/iconify, with `docs_stamp` on every install/scaffold and a look-preserving conflict rule (fresh API wins, look stays identical) — plus live `aura_icon` (Font Awesome Free + HackerNoon pixel SVGs, auto-fallback, CC BY 4.0 credit always). `aura_prompt` now asks 6 questions (+macrostructure, +vibe) and leads Pass 2 with `inspo.recommend`. `aura_scaffold_page` refuses explicit Pro ids (`pro_filtered_out`). Build hardened for CRLF checkouts.
+
 > **v1.6.3** — 20 tools. New `aura_prompt`: need-based prompt in 2 passes (draft + 4 questions, ask user, then copy-paste final). Honest search: zero-overlap fallbacks return `total:0` + `no_match` + `refused_fallback` + suggestions instead of masked popular rows; `exact_match:true` skips fallbacks; recommend auto-retries once then fills from editorial picks; theme reorder-not-drop; design-systems index content/preview_html; kind-aware skill recall; slim lists by default (`slim:false` opts out); `full:true` one-shot bodies; scaffold takes `["732","1364"]` / `[{id}]`; `status.freshness` per surface; per-surface `sort:'trending'` (no dead trending tool). Search facets equal detail facets, skills deduped, token starter + preview-mode warnings, legal asset plans, scoped CSS + chunk `concat` plans, bulk-fetch, one-turn scaffold builds.
 
-Point any MCP client at `dist/server.js` and your agent can search 2,495 free components, read 187 agent skills in full, pull 30,688 assets, and apply 725 DESIGN.md systems. It answers in seconds because there is nothing to log into and almost nothing to download: one bundled JS file, zero dependencies.
+Point any MCP client at `dist/server.js` and your agent can search 2,495 free components, read 192 agent skills in full, pull 30,688 assets, and apply 725 DESIGN.md systems. It answers in seconds because there is nothing to log into and almost nothing to download: one bundled JS file, zero dependencies.
 
 Built by [swastiksingh-dev](https://github.com/swastiksingh-dev). Catalogue content belongs to Aura (aura.build, by Meng To / DesignCode). This project is not affiliated with Aura.
 
@@ -27,10 +42,10 @@ Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good a
 ## What is inside
 
 - 2,495 free components with HTML/Tailwind source, preview images, tags, and author credit
-- 187 agent skills with full SKILL.md bodies (GSAP, Tailwind v4, Anime.js, copywriting, and more)
+- 192 agent skills with full SKILL.md bodies (GSAP, Tailwind v4, Anime.js, copywriting, and more)
 - 30,688 images and clips with direct CDN URLs at multiple widths
 - 725 DESIGN.md systems with tokens, type rules, layout notes, and preview HTML
-- 20 tools over stdio, one bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
+- 28 tools over stdio, one bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
 - Honest search: AND-phrase misses retry as OR-tokens (2 passes) plus a labeled safety net — but zero title-overlap fallbacks are refused as `total:0` + `no_match` + `suggested_queries` instead of masking with popular rows; `exact_match:true` skips fallbacks entirely
 - Agent accelerators: `aura_prompt` (2-pass prompt with user confirmation), `aura_bulk_fetch`/`aura_bundle` (8 details/turn, any of 3 kinds), `aura_scaffold_page` (tokens + system + markup in dependency order), `aura_related`, `aura_install_asset` (license-aware)
 - Faceted lists: every component carries `facets { theme, weight, code_chars, needsTailwind, needsIcons, fonts }`; filter `theme: dark|light` server-side
@@ -61,7 +76,7 @@ aura-components-mcp
 npx -y aura-components-mcp@latest
 ```
 
-Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio — or click through the animated [launch site](./flow/index.html) ([how it works](./flow/how.html) · [tools](./flow/tools.html) · [compare vs official](./flow/compare.html) · [setup](./flow/setup.html) · [docs](./flow/docs.html)). Launch site with animated explainer: open `flow/index.html` in a browser.
+Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio.
 
 ```bash
 # Claude Code
@@ -86,9 +101,9 @@ claude mcp add aura-components -- node ./dist/server.js
 
 ![Animated site tour](https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/site-tour.gif)
 
-*The flow/ launch site: dark WebGL hero, 20 grouped tools, one-minute setup. `aura_prompt` turns one sentence into a confirmed prompt, `aura_recommend` turns it into a starter kit with links. Full clip in [`assets/`](assets/).*
+*`aura_prompt` turns one sentence into a confirmed prompt, `aura_recommend` turns it into a starter kit with links. Full clip in [`assets/`](assets/).*
 
-## The 20 tools
+## The 28 tools
 
 | Tool | What it returns |
 | --- | --- |
@@ -110,7 +125,15 @@ claude mcp add aura-components -- node ./dist/server.js
 | `aura_bundle` / `aura_bulk_fetch` | 2–8 details in one call (components/design_systems/assets). Per-item errors never fail the batch. |
 | `aura_scaffold_page` | One-turn page build: tokens.css + system preview + markup in order, combined deps + files. `components: ["732","1364"]` or `[{id:"732"}]`. |
 | `aura_related` | 3 more-like-this per item. Discovery never dead-ends. |
-| `aura_prompt` | Need-based prompt in 2 passes: draft + 4 questions, then copy-paste final. Confirm with user first. |
+| `aura_prompt` | Need-based prompt in 2 passes: draft + 6 questions (theme, sections, system, assets, macrostructure, vibe), then copy-paste final. Confirm with user first. Pass 2 leads with `inspo.recommend` + `aura_inspo_recommend`. |
+| `aura_inspo_recommend` | Brief → Inspo + Aura call plan (pure, no fetch). Strict macro gate: no `macrostructure` returns `need_macro:true`. Palette priority brand > Inspo > Aura. |
+| `aura_inspo_components` | Inspo component filter → Aura category search + scaffold hint (tokens first, weight s\|m). |
+| `aura_inspo_reference` | One Inspo JSX + one Aura component → scoped adapt plan (token swaps, css scope, files). |
+| `aura_inspo_system` | Inspo tokens vs Aura DESIGN system → A/B/blend + one `system_choice` question + contrast warning. |
+| `aura_inspo_compare` | 2–4 slim Inspo sites → house style + closest Aura system/component queries. |
+| `aura_docs_plan` | Fresh-docs lookup plan (pure): library + need → Context7 resolve/query plan (trusted: tailwind, gsap, lenis, iconify) + Aura apply steps. |
+| `aura_docs_check` | Pasted code vs fresh docs (pure): verdict current\|needs-update, look-preserving fixes, pin checks. |
+| `aura_icon` | One free icon as ready SVG (live): FA Free + HackerNoon pixel lib, auto-fallback, license + credit always, font alternative, 24h cache. |
 
 Every row carries `page_url` (open it to see the design) and `author` where Aura credits one.
 
@@ -129,8 +152,8 @@ Every row carries `page_url` (open it to see the design) and `author` where Aura
 Pass 1 — agent calls:
 aura_prompt { "goal": "dark SaaS pricing" }
 
-Server returns: draft_prompt + 4 questions + next_call.
-Agent MUST ask you (theme / sections / system / assets) via native question UI.
+Server returns: draft_prompt + 6 questions + next_call.
+Agent MUST ask you (theme / sections / system / assets / macrostructure / vibe) via native question UI.
 ```
 
 ```text
@@ -145,7 +168,7 @@ Server returns: final_prompt (copy-paste) + plan order + suggested calls.
 Copy-paste starter you can say to any agent:
 
 ```text
-Check aura_status. Then call aura_prompt with my goal, ask me its 4 questions,
+Check aura_status. Then call aura_prompt with my goal, ask me its 6 questions,
 then call it again with my answers and follow its suggested_calls.
 My goal: dark cinematic portfolio.
 ```
@@ -161,7 +184,7 @@ Sources: [tips-for-prompting](https://www.aura.build/learn/tips-for-prompting),
 
 New landing page, dark cinematic portfolio, SaaS pricing section. The shape is the same each time:
 
-1. `aura_prompt` with the goal sentence. Answer its 4 questions. Copy the final prompt.
+1. `aura_prompt` with the goal sentence. Answer its 6 questions. Copy the final prompt.
 2. `aura_recommend` with the goal sentence. Skim the starter kit links.
 3. `aura_get_component` on two or three finalists. Read the markup, not just the description.
 4. `aura_install_component` on the winner. Follow the file map.
@@ -179,11 +202,11 @@ Optional tuning (env vars, all with defaults): `AURA_TIMEOUT_MS` (12000), `AURA_
 
 ```bash
 npm test      # hermetic tests, no network
-npm run verify  # 25 live checks against the real catalogue
+npm run verify  # 35 live checks against the real catalogue
 npm run build   # rebundle src/*.mjs into dist/server.js
 ```
 
-Layout: `src/config.mjs` holds env parsing. `src/http.mjs` hides timeouts and retries behind an injectable fetch. `src/catalog.mjs` is the deep module (queries, cache, shaping, counts). `src/guide.mjs` turns rows into install plans plus `buildPrompt` (pure 2-pass prompt, same seam for tool + tests + docs). `src/tools.mjs` validates args. `src/protocol.mjs` speaks JSON-RPC. `src/server.mjs` only wires stdio.
+Layout: `src/config.mjs` holds env parsing. `src/http.mjs` hides timeouts and retries behind an injectable fetch. `src/catalog.mjs` is the deep module (queries, cache, shaping, counts). `src/icons.mjs` fetches free icons (FA + pixel lib) with its own 24h cache. `src/guide.mjs` turns rows into install plans plus pure mappers (`buildPrompt`, `combineScaffold`, `buildInspo*`, `buildDocs*` — same seam for tools + tests + docs). `src/tools.mjs` validates args. `src/protocol.mjs` speaks JSON-RPC. `src/server.mjs` only wires stdio.
 
 ## Share
 
@@ -192,12 +215,26 @@ Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Compo
 [![Star History Chart](https://api.star-history.com/svg?repos=swastiksingh-dev/Aura-Components-MCP&type=Date)](https://star-history.com/#swastiksingh-dev/Aura-Components-MCP&Date)
 
 ```text
-built a free design MCP on aura.build: 2495 components, 187 skills, 30k assets, 20 tools. no login. resources are @MengTo's
+built a free design MCP on aura.build: 2495 components, 192 skills, 30k assets, 28 tools. no login. resources are @MengTo's
 
 npx -y aura-components-mcp@latest
 https://github.com/swastiksingh-dev/Aura-Components-MCP
 ```
 
-## Credits and license
+## Credits
 
-Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Free to fork, use, and sell with. Catalogue text, code, and images belong to Aura and the creators listed in each `author` field; follow Aura's terms for that content. If you fork this, keep the credit line and point people at the original repo.
+Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Free to fork, use, and sell with. If you fork this, keep the credit line and point people at the original repo.
+
+| Source | Used for | License / terms |
+| --- | --- | --- |
+| [Aura](https://www.aura.build) (Meng To / DesignCode) | The entire catalogue: components, skills, assets, design systems | Belongs to Aura and credited authors; assets all-rights-reserved per [Aura Terms §4](https://www.aura.build/terms) |
+| [Official Aura MCP](https://www.aura.build/mcp) | Comparison only (account projects/publishing over OAuth — the half this server skips) | Aura's terms |
+| Inspo design-reference MCP | Real-site evidence behind `aura_inspo_*` (`recommend`, `find_components`, `get_reference_jsx`, `compare`) | Reference JSX belongs to its authors — adapt tokens, don't ship verbatim |
+| [Context7](https://context7.com) | Fresh library docs behind `aura_docs_*` (trusted: Tailwind CSS, GSAP, Lenis, Iconify) | Docs belong to their projects |
+| [Font Awesome Free](https://fontawesome.com) | Icons via `aura_icon` (served from jsDelivr + cdnjs) | [CC BY 4.0](https://fontawesome.com/license/free) — credit on every hit, enforced by the tool |
+| [HackerNoon Pixel Icon Library](https://github.com/hackernoon/pixel-icon-library) ([site](https://pixeliconlibrary.com)) | Pixel icons via `aura_icon` (served from jsDelivr) | Icons CC BY 4.0, other files MIT — credit on every hit, enforced by the tool |
+| Upstream libraries (Tailwind CSS, GSAP, Lenis, Iconify) | The code this server's guides point at | Each project's own license — check before shipping |
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

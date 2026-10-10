@@ -38,7 +38,7 @@ test("initialize -> list -> call aura_status", async () => {
   ]);
   assert.equal(out[0].result.serverInfo.name, "aura-components-mcp");
   assert.match(out[0].result.serverInfo.version, /^\d+\.\d+\.\d+$/);
-  assert.equal(out[1].result.tools.length, 20);
+  assert.equal(out[1].result.tools.length, 28);
   assert.ok(out[2].result.content[0].text.includes('"ok": true'));
 });
 
@@ -51,7 +51,7 @@ test("aura_prompt Pass1 draft + Pass2 final, missing goal -> -32602", async () =
   ]);
   const p1 = JSON.parse(out[1].result.content[0].text);
   assert.equal(p1.phase, "draft");
-  assert.equal(p1.questions.length, 4);
+  assert.equal(p1.questions.length, 6);
   assert.ok(p1.next_call && p1.next_call.tool === "aura_prompt");
   const p2 = JSON.parse(out[2].result.content[0].text);
   assert.equal(p2.phase, "final");
@@ -78,7 +78,7 @@ test("aura_trending removed: absent from list, call -> -32601", async () => {
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
     { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "aura_trending", arguments: { limit: 2 } } },
   ]);
-  assert.equal(out[1].result.tools.length, 20);
+  assert.equal(out[1].result.tools.length, 28);
   assert.ok(!out[1].result.tools.some((t) => t.name === "aura_trending"));
   assert.equal(out[2].error.code, -32601);
 });

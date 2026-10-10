@@ -99,7 +99,6 @@ function windowAgoIso(days) {
   d.setDate(d.getDate() - days);
   return d.toISOString();
 }
-function weekAgoIso() { return windowAgoIso(7); }
 export function trendingIso(days = 90) { return windowAgoIso(days); } // 7d seed is empty; callers pass window_days (default 30 for components now)
 
 export function buildSearchParams(kind, q = {}) {
@@ -141,7 +140,6 @@ export function buildUrl(base, table, params, filters, ors) {
 
 // Truncation with cursors: agents see full_length + chunk info instead of a silent
 // marker, and can fetch the rest via getItem with { chunk } (see getItem below).
-const trunc = (s, n) => (s && s.length > n ? s.slice(0, n) + "…[truncated]" : s);
 export function chunkText(s, n, chunk = 0) {
   const full = String(s || "");
   const total = Math.max(1, Math.ceil(full.length / n));
