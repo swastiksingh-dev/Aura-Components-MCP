@@ -1,4 +1,4 @@
-<h1 align="center">aura-components-mcp</h1>
+<h1 align="center">Aura Components MCP</h1>
 
 <p align="center"><sub>FREE MCP SERVER · STDIO · ZERO DEPS · MIT</sub></p>
 
