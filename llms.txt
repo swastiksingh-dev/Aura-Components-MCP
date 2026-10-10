@@ -1,4 +1,4 @@
-# aura-components-mcp (v1.7.0 — 28 tools)
+# aura-components-mcp (v1.7.0 — 29 tools)
 
 > Free-only MCP server (stdio, zero deps, no login) for the Aura (aura.build) public catalogue: 2,495 components, 192 skills, 30,688 assets, 725 design systems. Built by swastiksingh-dev (MIT). Catalogue content belongs to Aura (Meng To / DesignCode).
 
@@ -18,6 +18,7 @@
 - Fresh docs (pure helpers, agent calls Context7): `aura_docs_plan` (trusted: tailwind, gsap, lenis, iconify) + `aura_docs_check` (verdict + look-preserving fixes, excerpts under 20000 chars). Every install/scaffold carries `docs_stamp`. Conflict rule: fresh API wins, look stays identical.
 - Free icons (live): `aura_icon {name}` returns ready-to-paste SVG from Font Awesome Free or the HackerNoon pixel library with auto-fallback, plus font/CSS alternative. CC BY 4.0 — credit line on every hit.
 - Inspo bridge (pure mappers, no fetch — paste slim evidence): `aura_inspo_recommend` (strict macro gate: `need_macro:true` without a macrostructure), `aura_inspo_components`, `aura_inspo_reference`, `aura_inspo_system` (A/B/blend + `system_choice` question + contrast warning), `aura_inspo_compare` (2–4 slim sites → house style). Palette priority: brand hex > Inspo evidence > Aura tokens.
+- Self-updating: `aura_version` compares running vs npm-published (hourly cache) and tells the agent to prefer latest; every `aura_status` already carries the verdict.
 - Lists are slim by default (excerpts + `code_info`/`content_info` + `full_fetch`); pass `slim:false` or call `aura_get_*` with `chunk` for full bodies. Truncated installs carry a `concat` plan + `css_scope_how`.
 - Honest search: zero-overlap fallbacks return `total:0` + `no_match:true` + `refused_fallback` + `suggested_queries` (never masked popular rows). `exact_match:true` disables all fallbacks. `aura_trending` is removed — use per-surface `sort:'trending'` on the search tools instead.
 - `aura_recommend` auto-retries once: empty components with `no_match:true` retry via `suggested_queries[0]` (same theme/negative_theme/min_views/slim filters, `retried_from` set), then fill from editorial picks (`editorial_fallback:true`) — `starter_kit.components` never dead-ends.

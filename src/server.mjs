@@ -9,12 +9,14 @@ import { createSession, SERVER_INFO } from "./protocol.mjs";
 import { TOOL_DEFS, createHandlers } from "./tools.mjs";
 import { facets } from "./guide.mjs";
 import { createIcons } from "./icons.mjs";
+import { createVersion } from "./version.mjs";
 
 const config = loadConfig();
 const fetcher = createFetcher({ fetchImpl: globalThis.fetch, timeoutMs: config.timeoutMs, retries: config.retries, userAgent: config.userAgent });
 const catalog = createCatalog({ fetcher, config, facetsFn: facets });
 const icons = createIcons({ fetcher });
-const handlers = createHandlers(catalog, icons);
+const version = createVersion({ fetcher, running: SERVER_INFO.version });
+const handlers = createHandlers(catalog, icons, version);
 
 let buffer = "";
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");

@@ -69,11 +69,11 @@ Restart Windsurf, open Cascade, allow the server when asked.
 
 1. Open Cline settings, MCP Servers section.
 2. Add server: command `node`, arg `/absolute/path/to/aura-components-mcp/dist/server.js`, name `aura-components`.
-3. It lists 28 tools starting with `aura_`. Approve them once.
+3. It lists 29 tools starting with `aura_`. Approve them once.
 
 ## Roo Code (VS Code)
 
-Same as Cline: Add MCP server, command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. Roo shows the 28 `aura_` tools in its tool list after reload.
+Same as Cline: Add MCP server, command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. Roo shows the 29 `aura_` tools in its tool list after reload.
 
 ## DeepSeek Harness
 
@@ -102,7 +102,7 @@ Add to `opencode.json` (or `opencode.jsonc`) in your project root or `~/.config/
 }
 ```
 
-Restart OpenCode (or run `/mcp` to reload). The 28 `aura_*` tools show up in the TUI. Same first prompt as Claude Code above. A copy-paste file lives at `examples/opencode.json`.
+Restart OpenCode (or run `/mcp` to reload). The 29 `aura_*` tools show up in the TUI. Same first prompt as Claude Code above. A copy-paste file lives at `examples/opencode.json`.
 
 ## Any other MCP client
 

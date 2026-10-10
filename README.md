@@ -8,20 +8,25 @@
 
 > I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
+<p align="center">
+  <b>2,495</b> free components · <b>192</b> skills · <b>30,688</b> assets · <b>725</b> design systems<br>
+  <b>29</b> tools · <b>0</b> dependencies · <b>94</b> hermetic tests + <b>35</b> live checks green · version-checked hourly against npm
+</p>
+
 ## Contents
 
 - [Why not the official MCP](#why-i-built-this-instead-of-using-the-official-mcp)
 - [What is inside](#what-is-inside)
 - [Install](#install)
 - [Demo](#demo)
-- [The 28 tools](#the-28-tools)
+- [The 29 tools](#the-28-tools)
 - [Fallback rules](#fallback-rules-read-this-once)
 - [Prompt for AI agents](#-prompt-for-ai-agents--start-here)
 - [Free only, no login](#free-only-no-login)
 - [Develop](#develop)
 - [Credits](#credits)
 
-> **v1.7.0** — 28 tools: 5 new pure `aura_inspo_*` mappers (recommend/components/reference/system/compare) bridge Inspo evidence to Aura calls with zero extra deps — strict macro gate (`need_macro`), palette priority brand > Inspo > Aura, enforced tokens-first, mandated image srcset plan, fast preview-URL look gate — plus 2 pure `aura_docs_*` helpers (plan/check) wiring Context7 fresh docs for tailwind/gsap/lenis/iconify, with `docs_stamp` on every install/scaffold and a look-preserving conflict rule (fresh API wins, look stays identical) — plus live `aura_icon` (Font Awesome Free + HackerNoon pixel SVGs, auto-fallback, CC BY 4.0 credit always). `aura_prompt` now asks 6 questions (+macrostructure, +vibe) and leads Pass 2 with `inspo.recommend`. `aura_scaffold_page` refuses explicit Pro ids (`pro_filtered_out`). Build hardened for CRLF checkouts.
+> **v1.7.0** — 29 tools: 5 pure `aura_inspo_*` mappers (recommend/components/reference/system/compare) bridge Inspo evidence to Aura calls with zero extra deps — strict macro gate (`need_macro`), palette priority brand > Inspo > Aura, enforced tokens-first, mandated image srcset plan, fast preview-URL look gate — plus 2 pure `aura_docs_*` helpers (plan/check) wiring Context7 fresh docs for tailwind/gsap/lenis/iconify, with `docs_stamp` on every install/scaffold and a look-preserving conflict rule (fresh API wins, look stays identical) — plus live `aura_icon` (Font Awesome Free + HackerNoon pixel SVGs, auto-fallback, CC BY 4.0 credit always) — plus `aura_version` (hourly npm check, prefer-latest notice, verdict inside every `aura_status`). `aura_prompt` now asks 6 questions (+macrostructure, +vibe) and leads Pass 2 with `inspo.recommend`. `aura_scaffold_page` refuses explicit Pro ids (`pro_filtered_out`). Build hardened for CRLF checkouts.
 
 > **v1.6.3** — 20 tools. New `aura_prompt`: need-based prompt in 2 passes (draft + 4 questions, ask user, then copy-paste final). Honest search: zero-overlap fallbacks return `total:0` + `no_match` + `refused_fallback` + suggestions instead of masked popular rows; `exact_match:true` skips fallbacks; recommend auto-retries once then fills from editorial picks; theme reorder-not-drop; design-systems index content/preview_html; kind-aware skill recall; slim lists by default (`slim:false` opts out); `full:true` one-shot bodies; scaffold takes `["732","1364"]` / `[{id}]`; `status.freshness` per surface; per-surface `sort:'trending'` (no dead trending tool). Search facets equal detail facets, skills deduped, token starter + preview-mode warnings, legal asset plans, scoped CSS + chunk `concat` plans, bulk-fetch, one-turn scaffold builds.
 
@@ -45,7 +50,7 @@ Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good a
 - 192 agent skills with full SKILL.md bodies (GSAP, Tailwind v4, Anime.js, copywriting, and more)
 - 30,688 images and clips with direct CDN URLs at multiple widths
 - 725 DESIGN.md systems with tokens, type rules, layout notes, and preview HTML
-- 28 tools over stdio, one bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
+- 29 tools over stdio, one bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
 - Honest search: AND-phrase misses retry as OR-tokens (2 passes) plus a labeled safety net — but zero title-overlap fallbacks are refused as `total:0` + `no_match` + `suggested_queries` instead of masking with popular rows; `exact_match:true` skips fallbacks entirely
 - Agent accelerators: `aura_prompt` (2-pass prompt with user confirmation), `aura_bulk_fetch`/`aura_bundle` (8 details/turn, any of 3 kinds), `aura_scaffold_page` (tokens + system + markup in dependency order), `aura_related`, `aura_install_asset` (license-aware)
 - Faceted lists: every component carries `facets { theme, weight, code_chars, needsTailwind, needsIcons, fonts }`; filter `theme: dark|light` server-side
@@ -103,7 +108,7 @@ claude mcp add aura-components -- node ./dist/server.js
 
 *`aura_prompt` turns one sentence into a confirmed prompt, `aura_recommend` turns it into a starter kit with links. Full clip in [`assets/`](assets/).*
 
-## The 28 tools
+## The 29 tools
 
 | Tool | What it returns |
 | --- | --- |
@@ -134,6 +139,7 @@ claude mcp add aura-components -- node ./dist/server.js
 | `aura_docs_plan` | Fresh-docs lookup plan (pure): library + need → Context7 resolve/query plan (trusted: tailwind, gsap, lenis, iconify) + Aura apply steps. |
 | `aura_docs_check` | Pasted code vs fresh docs (pure): verdict current\|needs-update, look-preserving fixes, pin checks. |
 | `aura_icon` | One free icon as ready SVG (live): FA Free + HackerNoon pixel lib, auto-fallback, license + credit always, font alternative, 24h cache. |
+| `aura_version` | Running vs npm-published version (live, hourly cache). `update_available` + prefer-latest notice. `aura_status` carries the verdict on every call. |
 
 Every row carries `page_url` (open it to see the design) and `author` where Aura credits one.
 
@@ -215,7 +221,7 @@ Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Compo
 [![Star History Chart](https://api.star-history.com/svg?repos=swastiksingh-dev/Aura-Components-MCP&type=Date)](https://star-history.com/#swastiksingh-dev/Aura-Components-MCP&Date)
 
 ```text
-built a free design MCP on aura.build: 2495 components, 192 skills, 30k assets, 28 tools. no login. resources are @MengTo's
+built a free design MCP on aura.build: 2495 components, 192 skills, 30k assets, 29 tools. no login. resources are @MengTo's
 
 npx -y aura-components-mcp@latest
 https://github.com/swastiksingh-dev/Aura-Components-MCP

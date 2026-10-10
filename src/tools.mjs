@@ -68,10 +68,22 @@ export const TOOL_DEFS = [
   { name: 'aura_docs_plan', description: 'Plan a fresh-docs lookup (pure, no fetch). library + need -> Context7 resolve/query plan (trusted: tailwind, gsap, lenis, iconify) + apply steps for Aura files + docs stamp slot. The agent calls Context7, Aura shapes the rest.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, need: { type: 'string' } }, required: ['library', 'need'], additionalProperties: false } },
   { name: 'aura_docs_check', description: 'Check pasted code against fresh docs (pure). library + code_excerpt (under 20000 chars, excerpts not full pages) + optional docs_note -> verdict current|needs-update, look-preserving fixes, version-pin needs_check. Fresh API wins, look stays identical.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, code_excerpt: { type: 'string' }, docs_note: { type: 'string' } }, required: ['library', 'code_excerpt'], additionalProperties: false } },
   { name: 'aura_icon', description: 'Fetch one free icon as ready-to-paste SVG (live). name in kebab-case (bolt, arrow-down). source auto|fontawesome|pixel, style auto|solid|regular|brands. Auto-fallback across styles then libraries; every hit carries license + credit (CC BY 4.0, credit always) plus a font/CSS alternative. 24h icon cache.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string', enum: ['auto', 'fontawesome', 'pixel'] }, style: { type: 'string', enum: ['solid', 'regular', 'brands', 'auto'] } }, required: ['name'], additionalProperties: false } },
+  { name: 'aura_version', description: 'Running vs npm-published version (live, hourly cache). Returns update_available + notice telling the agent to prefer latest (npm i -g aura-components-mcp@latest) when behind. Never fails — offline registries return latest:null. aura_status already carries this verdict on every call.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
 ];
-export function createHandlers(catalog, icons) {
+export function createHandlers(catalog, icons, version) {
+  // Automatic update notice: every aura_status carries the cached version
+  // verdict (hourly npm re-check), so agents learn about updates unprompted.
+  const versionNote = async () => {
+    try {
+      if (version && typeof version.getVersion === "function") return await version.getVersion();
+    } catch { /* status must never fail on version check */ }
+    return null;
+  };
   return {
-    aura_status: async () => textResult(await catalog.getStatus()),
+    aura_status: async () => {
+      const [status, update] = await Promise.all([catalog.getStatus(), versionNote()]);
+      return textResult(update ? { ...status, update } : status);
+    },
     aura_search_components: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('components', {
       query: str(a.query, 'query'), tag: cat(a.category), freeOnly: true, theme: theme(a.theme),
       negative_theme: a.negative_theme === undefined ? undefined : theme(a.negative_theme),
@@ -203,6 +215,8 @@ export function createHandlers(catalog, icons) {
       const source = a.source === undefined ? undefined : (a.source === 'auto' || a.source === 'fontawesome' || a.source === 'pixel' ? a.source : bad('source must be auto|fontawesome|pixel'));
       const style = a.style === undefined ? undefined : (a.style === 'auto' || a.style === 'solid' || a.style === 'regular' || a.style === 'brands' ? a.style : bad('style must be auto|solid|regular|brands'));
       return textResult(await icons.getIcon({ name, source, style })); },
+    aura_version: async () => { if (!version || typeof version.getVersion !== 'function') { const e = new Error('version backend not wired'); throw e; }
+      return textResult(await version.getVersion()); },
     aura_bundle: async (a) => { a = a || {}; const ids = normRefs(a.ids, 'ids') || normRefs(a.slugs, 'slugs');
       if (!ids || !ids.length) bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');
       return textResult({ kind: 'components', results: await catalog.bundleItems('components', ids) }); },

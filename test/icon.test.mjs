@@ -88,7 +88,7 @@ test("tools/list exposes 28 tools incl. aura_icon", async () => {
   const { dispatch } = createSession((m) => out.push(m), { tools: TOOL_DEFS, handlers: createHandlers({}, { getIcon: async () => ({}) }) });
   await dispatch({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
   await dispatch({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(out[1].result.tools.length, 28);
+  assert.equal(out[1].result.tools.length, 29);
   assert.ok(out[1].result.tools.some((t) => t.name === "aura_icon"));
 });
 
