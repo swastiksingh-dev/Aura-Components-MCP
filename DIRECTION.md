@@ -1,11 +1,11 @@
 # DIRECTION — where Aura-Components-MCP goes next
 
-> v1.7.0 ships it all: 29 tools with the `aura.inspo.*` bridge (pure mappers, strict macro gate, brand-first palette, enforced tokens-first, mandated image plan, fast look gate), the `aura_docs.*` pair (Context7 plans + look-preserving checks + docs_stamp), and live `aura_icon` (FA Free + pixel SVGs, auto-fallback, credit always) plus the v1.6.3 base (honest search, exact_match, theme reorder, DS content index, kind-aware recall, slim lists, full:true, recommend retry + editorial fill, freshness, overlap + license notes, concat/scope docs, scaffold Pro guard). No dead trending tool — per-surface `sort:'trending'` instead. This is what comes after.
+> v1.7.1 is the hardened release: 29 tools, central fail-closed access policy, theme-isolated cache, bundle-8 end-to-end, disclosed counts, malformed-row gate, Node `>=22` with CI matrix 22.x/24.x, 122 hermetic + 38 live checks green. This is what comes after.
 ## North star
 
 The fastest free door from an idea to a shippable page: any agent, one install line, honest search, paste-ready answers. Everything below serves that sentence.
 
-## Now (v1.6.x — trust)
+## Now (v1.7.x — harden + distribute)
 
 - [x] 29 tools (5 pure `aura.inspo.*` mappers + 2 pure `aura_docs_*` helpers with docs_stamp + live `aura_icon` with auto-fallback and credit-always + `aura_prompt` 6-question 2-pass + facets parity, dedupe, absolute URLs, freeOnly related + scaffold Pro guard, scoped CSS, transparent fallback, macro gate, A/B/blend system choice, contrast warnings; no dead trending tool — per-surface `sort:'trending'` instead)
 - [x] v1.7.1 hardening: central access policy, theme-isolated cache, bundle-8 end-to-end, `total` semantics disclosed, malformed-row gate, no-retry 4xx, Node `>=22` with CI matrix 22.x/24.x, dead-code removal, registry-consistency + packaging tests (122 hermetic + 38 live green)
@@ -14,12 +14,12 @@ The fastest free door from an idea to a shippable page: any agent, one install l
 - [ ] Topics set (11 listed in research) + social preview image (flow hero or animated logo)
 - [ ] X launch post (draft in chat) + pin + repo link-back
 
-## Next (v1.7 — leverage)
+## Next (v1.8 — reach)
 
+- [x] Star-history + share section in README
 - [ ] Registry submissions: PulseMCP, mcp.so, Smithery (tools-list metadata each)
 - [ ] `aura_scaffold_page` templates: 3 canned page recipes (portfolio / SaaS / pricing) agents can call with one goal sentence
 - [ ] Skill frontmatter lint: flag SKILL.md rows missing name:/description: at ingest, surface `loadable:false` so agents skip them
-- [ ] Star-history + share section in README
 
 ## Later (v2 — depth)
 

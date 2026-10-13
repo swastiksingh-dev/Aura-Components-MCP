@@ -24,13 +24,14 @@
 </p>
 
 ---
+## Contents
 
 
 - [Why not the official MCP](#why-i-built-this-instead-of-using-the-official-mcp)
 - [What is inside](#what-is-inside)
 - [Install](#install)
 - [Demo](#demo)
-- [The 29 tools](#the-28-tools)
+- [The 29 tools](#the-29-tools)
 - [Fallback rules](#fallback-rules-read-this-once)
 - [Prompt for AI agents](#-prompt-for-ai-agents--start-here)
 - [Free only, no login](#free-only-no-login)
@@ -53,6 +54,7 @@ Point any MCP client at `dist/server.js` and your agent can search 2,495 free co
 Built by [swastiksingh-dev](https://github.com/swastiksingh-dev). Catalogue content belongs to Aura (aura.build, by Meng To / DesignCode). This project is not affiliated with Aura.
 
 ---
+## Why I built this instead of using the official MCP
 
 
 Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good at what it does: your Canvases, your projects, publishing, all behind OAuth. This server does the other half. It covers the public catalogue, and it skips the parts that slow an agent down: no OAuth dance, no account, no per-project scopes. A few things the official one does not do:
@@ -64,6 +66,7 @@ Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good a
 - Everything defaults to free. Pro rows never sneak into results.
 
 ---
+## What is inside
 
 
 - 2,495 free components with HTML/Tailwind source, preview images, tags, and author credit
@@ -78,6 +81,7 @@ Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good a
 Start with `aura_status`, then `aura_search_all`. That order matters: status confirms the catalogue is reachable, search_all shows which surface has the best match before you spend calls on details.
 
 ---
+## Install
 
 
 Needs Node 22 or newer. No other dependency. Pick one:
@@ -120,6 +124,7 @@ claude mcp add aura-components -- node ./dist/server.js
 ```
 
 ---
+## Demo
 
 
 <p align="center">
@@ -130,6 +135,7 @@ claude mcp add aura-components -- node ./dist/server.js
 *`aura_prompt` turns one sentence into a confirmed prompt, `aura_recommend` turns it into a starter kit with links. Full clip in [`assets/`](assets/).*
 
 ---
+## The 29 tools
 
 
 Start with `aura_status`, then `aura_search_all`. That order matters: status confirms the catalogue is reachable, search_all shows which surface has the best match before you spend calls on details.
@@ -186,6 +192,7 @@ Start with `aura_status`, then `aura_search_all`. That order matters: status con
 Every row carries `page_url` (open it to see the design) and `author` where Aura credits one.
 
 ---
+## Fallback rules (read this once)
 
 
 - **Per surface, not global.** `aura_search_all` fans out to four independent pipelines (phrase → OR-tokens → safety net → kind-aware refusal). Mixed outcomes are normal and correct: skills may return `fallback:or-tokens:...` while components return `total:0, no_match:true`. Read `isFallback` / `no_match` on each surface — never assume one flag covers all four.
@@ -195,6 +202,7 @@ Every row carries `page_url` (open it to see the design) and `author` where Aura
 - **`total` means upstream matches** (for limit/offset paging), not post-filter rows. Local drops are disclosed, never silent: `min_views_filtered_out`, `negative_theme_filtered_out`, `deduped`, bundle `dropped_refs`.
 
 ---
+## ✨ Prompt for AI agents — start here
 
 
 > The fastest way to a shippable page. Two passes, one confirmation.
@@ -232,6 +240,7 @@ Sources: [tips-for-prompting](https://www.aura.build/learn/tips-for-prompting),
 [design-systems](https://www.aura.build/design-systems).
 
 ---
+## How I use it
 
 
 New landing page, dark cinematic portfolio, SaaS pricing section. The shape is the same each time:
@@ -245,6 +254,7 @@ New landing page, dark cinematic portfolio, SaaS pricing section. The shape is t
 Prompts that work well are in [SETUP.md](./SETUP.md#prompts-that-work).
 
 ---
+## Free only, no login
 
 
 There is no auth in this server. No OAuth, no API key to paste, no account to create. Reads go to the same public catalogue endpoints the Aura website uses. The `premium` flag stays on every component row, free-only is the default, and Pro rows are refused everywhere — search filters them, and direct ID lookup, install, bundle, and scaffold refuse them (`-32602`, fail-closed) instead of guessing. If Aura rotates its public key, set `AURA_SUPABASE_ANON_KEY` and rebuild; nothing else changes.
@@ -266,6 +276,7 @@ Optional tuning (all with defaults):
 </details>
 
 ---
+## Develop
 
 
 ```bash
@@ -277,6 +288,7 @@ npm run build   # rebundle src/*.mjs into dist/server.js
 Layout: `src/config.mjs` holds env parsing. `src/http.mjs` hides timeouts and retries behind an injectable fetch. `src/catalog.mjs` is the deep module (queries, cache, shaping, counts). `src/icons.mjs` fetches free icons (FA + pixel lib) with its own 24h cache. `src/guide.mjs` turns rows into install plans plus pure mappers (`buildPrompt`, `combineScaffold`, `buildInspo*`, `buildDocs*` — same seam for tools + tests + docs). `src/tools.mjs` validates args. `src/protocol.mjs` speaks JSON-RPC. `src/server.mjs` only wires stdio.
 
 ---
+## Share
 
 
 Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Components-MCP](https://github.com/swastiksingh-dev/Aura-Components-MCP). Reposits welcome — see [DIRECTION.md](./DIRECTION.md) for where this is headed.
@@ -291,6 +303,7 @@ https://github.com/swastiksingh-dev/Aura-Components-MCP
 ```
 
 ---
+## Credits
 
 
 Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Free to fork, use, and sell with. If you fork this, keep the credit line and point people at the original repo.
@@ -306,6 +319,7 @@ Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Fre
 | Upstream libraries (Tailwind CSS, GSAP, Lenis, Iconify) | The code this server's guides point at | Each project's own license — check before shipping |
 
 ---
+## License
 
 
 MIT — see [LICENSE](./LICENSE).
