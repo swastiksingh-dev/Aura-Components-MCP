@@ -8,8 +8,9 @@ The fastest free door from an idea to a shippable page: any agent, one install l
 ## Now (v1.6.x — trust)
 
 - [x] 29 tools (5 pure `aura.inspo.*` mappers + 2 pure `aura_docs_*` helpers with docs_stamp + live `aura_icon` with auto-fallback and credit-always + `aura_prompt` 6-question 2-pass + facets parity, dedupe, absolute URLs, freeOnly related + scaffold Pro guard, scoped CSS, transparent fallback, macro gate, A/B/blend system choice, contrast warnings; no dead trending tool — per-surface `sort:'trending'` instead)
+- [x] v1.7.1 hardening: central access policy, theme-isolated cache, bundle-8 end-to-end, `total` semantics disclosed, malformed-row gate, no-retry 4xx, Node `>=22` with CI matrix 22.x/24.x, dead-code removal, registry-consistency + packaging tests (122 hermetic + 38 live green)
 - [x] v1.6.3 quality: honest empty, exact_match, theme reorder, DS content index, kind-aware recall, slim lists, full:true, recommend retry + editorial fill, freshness, overlap + license notes, concat/scope install docs
-- [ ] GitHub Release for v1.7.0 (notes: inspo bridge, docs helpers, aura_icon, scaffold Pro guard) — doubles npm + GitHub surfaces
+- [ ] GitHub Release for v1.7.1 (notes: hardening audit — access policy, cache isolation, bundle limits, malformed gate, Node 22) — doubles npm + GitHub surfaces
 - [ ] Topics set (11 listed in research) + social preview image (flow hero or animated logo)
 - [ ] X launch post (draft in chat) + pin + repo link-back
 
