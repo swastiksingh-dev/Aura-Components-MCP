@@ -6,7 +6,7 @@
   <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/v/aura-components-mcp" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/dm/aura-components-mcp" alt="npm downloads"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license: MIT"></a>
-  <a href="./package.json"><img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="node >= 18"></a>
+  <a href="./package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen" alt="node >= 22"></a>
   <a href="./dist/server.js"><img src="https://img.shields.io/badge/MCP-stdio-blue" alt="MCP stdio"></a>
 </p>
 
@@ -80,7 +80,7 @@ Start with `aura_status`, then `aura_search_all`. That order matters: status con
 ---
 
 
-Needs Node 18 or newer. No other dependency. Pick one:
+Needs Node 22 or newer. No other dependency. Pick one:
 
 ```bash
 # Option A — from source (GitHub)

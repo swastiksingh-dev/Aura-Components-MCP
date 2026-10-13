@@ -1,6 +1,6 @@
 # Setup
 
-One server, every client below. No account, no key, nothing to log into. If Node 18+ runs `node ./dist/server.js`, the client can use this.
+One server, every client below. No account, no key, nothing to log into. If Node 22+ runs `node ./dist/server.js`, the client can use this.
 
 Build once:
 
@@ -120,7 +120,7 @@ Transport is stdio, no auth. Command `node`, args `["/absolute/path/to/aura-comp
 
 ## Troubleshooting
 
-- Server exits instantly: check `node --version` (needs 18+), then `npm run build` again.
+- Server exits instantly: check `node --version` (needs 22+), then `npm run build` again.
 - Client shows 0 tools: absolute path wrong, or the client needs a restart after config edit.
 - `upstream` errors on every call: outbound network blocked. `npm run verify` from the same machine tells you in seconds.
 - Counts look stale: 60-second cache. Wait a minute or set `AURA_CACHE_TTL_MS=0`.

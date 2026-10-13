@@ -108,8 +108,7 @@ test("failed searches are not cached and can be retried", async () => {
   assert.equal(calls, 2, "failure left no poisoned cache entry");
 });
 
-test("total keeps upstream meaning; local drops are disclosed, not silent", async () => {
-  const stub = { getJson: async () => ({ rows: [
+test("total keeps upstream meaning; local drops are disclosed, not silent", async () => {  const stub = { getJson: async () => ({ rows: [
     { id: 1, title: "t1", slug: "S1", code: "x", views: 50, created_by: null },
     { id: 2, title: "t2", slug: "S2", code: "x", views: 1, created_by: null },
   ], total: 2 }) };
@@ -120,8 +119,7 @@ test("total keeps upstream meaning; local drops are disclosed, not silent", asyn
   assert.equal(r.min_views_filtered_out, 1);
 });
 
-test("bundleItems honors 8 refs in order; duplicates collapse deliberately", async () => {
-  const stub = { getJson: async (url) => {
+test("bundleItems honors 8 refs in order; duplicates collapse deliberately", async () => {  const stub = { getJson: async (url) => {
     const m = url.match(/id=eq\.(\d+)/);
     const id = m ? m[1] : "0";
     return { rows: [{ id: Number(id), title: "t" + id, slug: "S" + id, code: "x", premium: false, created_by: null }], total: 1 };
@@ -240,7 +238,10 @@ test("negative_theme + min_views filter (gap 1)", async () => {
 });
 
 test("inline snippets on design/skill search (gap 4)", async () => {
-  const stub = { getJson: async (url) => url.includes("preview_html") || (url.includes("design_systems") && url.includes("content")) || url.includes("id=in.")
+  // Main list queries select title (LIST_COLS); the snippet backfill selects
+  // id/content/preview_html only. Route the stub the same way so fixtures
+  // stay schema-accurate.
+  const stub = { getJson: async (url) => url.includes("id=in.")
     ? { rows: [{ id: "d1", content: "tokens here", preview_html: "<body>hi</body>" }], total: 1 }
     : { rows: [{ id: "d1", slug: "s", title: "t", description: "d", created_by: null }], total: 1 } };
   const cat = createCatalog({ fetcher: stub, config: cfg });
@@ -529,4 +530,53 @@ test("getStatus freshness keys present (MAX updated_at per table)", async () => 
   assert.equal(s.freshness.assets, "2026-07-27T00:00:00.000Z");
   assert.equal(s.freshness.design_systems, "2026-07-27T00:00:00.000Z");
   assert.ok("components_free" in s.counts);
+});
+
+test("malformed rows are disclosed via malformed_dropped, never shaped into junk", async () => {
+  const stub = { getJson: async () => ({ rows: [
+    { id: 1, title: "good", slug: "G", code: "x", premium: false, created_by: null },
+    { id: 2, slug: "NOTITLE", code: "x", premium: false, created_by: null },
+    { title: "NOID", code: "x", premium: false, created_by: null },
+    { id: 4, title: 42, slug: "WRONGTYPE", code: "x", premium: false, created_by: null },
+  ], total: 4 }) };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "good", limit: 5 });
+  assert.equal(r.total, 4, "total keeps upstream meaning");
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].id, 1);
+  assert.equal(r.malformed_dropped, 3);
+  assert.ok(r.items.every((i) => typeof i.title === "string" && !String(i.page_url).includes("undefined")));
+});
+
+test("all-malformed results stay disclosed, not mistaken for honest-empty", async () => {
+  const stub = { getJson: async () => ({ rows: [{ id: 1, code: "x", premium: false, created_by: null }], total: 1 }) };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "good", limit: 5 });
+  assert.equal(r.items.length, 0);
+  assert.equal(r.malformed_dropped, 1);
+  assert.ok(!r.no_match, "schema drift must not masquerade as a query miss");
+});
+
+test("getItem on a malformed single row fails loud (not NOT_FOUND, not success)", async () => {
+  const stub = { getJson: async () => ({ rows: [{ id: 7, code: "x", premium: false, created_by: null }], total: 1 }) };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const err = await cat.getItem("components", 7).then(() => null, (e) => e);
+  assert.ok(err && err.code !== "NOT_FOUND", "must not be confused with content availability");
+  assert.ok(/malformed upstream row/.test(err.message));
+});
+
+test("related discovery drops malformed rows, keeps free-only upstream filter", async () => {
+  const seen = [];
+  const stub = { getJson: async (url) => {
+    seen.push(url);
+    if (url.includes("neq.")) return { rows: [
+      { id: 2, title: "ok", slug: "O", code: "x", premium: false, created_by: null },
+      { id: 3, code: "x", premium: false, created_by: null },
+    ], total: 2 };
+    return { rows: [{ id: 1, title: "one two three", description: "x", tags: ["hero"], code: "x", background: "fff", premium: false, created_by: null }], total: 1 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const rel = await cat.relatedItems("components", 1, 3);
+  assert.equal(rel.related.length, 1);
+  assert.equal(rel.related[0].id, 2);
 });

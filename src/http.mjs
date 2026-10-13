@@ -22,6 +22,9 @@ export function createFetcher({ fetchImpl, timeoutMs, retries, userAgent }) {
   }
 
   // GET JSON over PostgREST. Returns { rows, total } (total from content-range).
+  // Retryable: 429/5xx, network errors, timeouts (except AbortError: hung
+  // requests are not retried). Non-retryable: other 4xx (invalid requests
+  // never succeed on retry) — thrown immediately with noRetry set.
   async function getJson(url, headers) {
     let lastErr;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -31,7 +34,9 @@ export function createFetcher({ fetchImpl, timeoutMs, retries, userAgent }) {
           lastErr = new Error("transient upstream status " + res.status);
         } else if (!res.ok) {
           const body = await res.text().catch(() => "");
-          throw new Error("upstream " + res.status + ": " + body.slice(0, 300));
+          const e = new Error("upstream " + res.status + ": " + body.slice(0, 300));
+          if (res.status >= 400 && res.status < 500) e.noRetry = true;
+          throw e;
         } else {
           const range = res.headers?.get?.("content-range") ?? null;
           const total = range && range.includes("/") ? Number(range.split("/").pop()) : null;
@@ -39,8 +44,8 @@ export function createFetcher({ fetchImpl, timeoutMs, retries, userAgent }) {
           return { rows: Array.isArray(rows) ? rows : [rows], total: Number.isFinite(total) ? total : null };
         }
       } catch (err) {
+        if (err && (err.noRetry || err.name === "AbortError")) throw err;
         lastErr = err;
-        if (err && err.name === "AbortError") break; // timeout: retrying rarely helps
       }
       if (attempt < retries) await sleep(120 * 2 ** attempt + Math.floor(Math.random() * 60));
     }

@@ -59,6 +59,9 @@ function createFetcher({ fetchImpl, timeoutMs, retries, userAgent }) {
   }
 
   // GET JSON over PostgREST. Returns { rows, total } (total from content-range).
+  // Retryable: 429/5xx, network errors, timeouts (except AbortError: hung
+  // requests are not retried). Non-retryable: other 4xx (invalid requests
+  // never succeed on retry) — thrown immediately with noRetry set.
   async function getJson(url, headers) {
     let lastErr;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -68,7 +71,9 @@ function createFetcher({ fetchImpl, timeoutMs, retries, userAgent }) {
           lastErr = new Error("transient upstream status " + res.status);
         } else if (!res.ok) {
           const body = await res.text().catch(() => "");
-          throw new Error("upstream " + res.status + ": " + body.slice(0, 300));
+          const e = new Error("upstream " + res.status + ": " + body.slice(0, 300));
+          if (res.status >= 400 && res.status < 500) e.noRetry = true;
+          throw e;
         } else {
           const range = res.headers?.get?.("content-range") ?? null;
           const total = range && range.includes("/") ? Number(range.split("/").pop()) : null;
@@ -76,8 +81,8 @@ function createFetcher({ fetchImpl, timeoutMs, retries, userAgent }) {
           return { rows: Array.isArray(rows) ? rows : [rows], total: Number.isFinite(total) ? total : null };
         }
       } catch (err) {
+        if (err && (err.noRetry || err.name === "AbortError")) throw err;
         lastErr = err;
-        if (err && err.name === "AbortError") break; // timeout: retrying rarely helps
       }
       if (attempt < retries) await sleep(120 * 2 ** attempt + Math.floor(Math.random() * 60));
     }
@@ -299,6 +304,20 @@ function assertFreeRow(kind, row) {
   throw e;
 }
 
+// Row-shape gate: the minimum fields every surface needs to build a usable
+// item (identity for page_url + title for display/matching). Rows that fail
+// are upstream schema drift, not empty results: listings disclose them via
+// malformed_dropped, single-record fetch fails loud. Never silently shaped
+// into "undefined" URLs or untitled items.
+function isWellFormedRow(kind, row) {
+  if (!row || typeof row !== "object") return false;
+  if (typeof row.title !== "string" || !row.title) return false;
+  const hasId = row.id !== undefined && row.id !== null;
+  const hasSlug = typeof row.slug === "string" && !!row.slug;
+  if (kind === "components" || kind === "design_systems") return hasId || hasSlug;
+  return hasId;
+}
+
 function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
   if (kind === "skills") return SITE + "/skills/" + row.id;
@@ -512,7 +531,17 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         } catch { /* snippets are best-effort; rows still return */ }
       }
       const enriched = await enrichAuthors(rows);
-      const out = { kind, total, limit, offset, items: enriched.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      // Schema-drift gate: malformed rows are disclosed, never shaped into
+      // untitled items or ".../undefined" page URLs, and never counted as
+      // successful empty results (total keeps its upstream meaning).
+      const formed = [];
+      let malformed = 0;
+      for (const r of enriched) {
+        if (isWellFormedRow(kind, r)) formed.push(r);
+        else malformed++;
+      }
+      const out = { kind, total, limit, offset, items: formed.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      if (malformed) out.malformed_dropped = malformed;
       if (deduped) out.deduped = deduped;
       // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
       // hard exclusion. Both apply before theme re-rank so counts stay honest.
@@ -610,6 +639,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
     assertFreeRow(kind, rows[0]); // before enrich/cache: refusals are never cached
+    if (!isWellFormedRow(kind, rows[0])) throw new Error("malformed upstream row for " + kind + " " + idOrSlug + ": missing identity/title fields");
     const enriched = await enrichAuthors(rows);
     const full = enriched[0];
     // Chunked fetch: re-slice full blobs per requested chunk so agents can page
@@ -720,7 +750,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     try {
       const { rows } = await fetcher.getJson(url, headers);
       const enriched = await enrichAuthors(rows);
-      return enriched.map((r) => slimRows("components", [shapeRow("components", r, config, facetsFn)])[0]);
+      return enriched.filter((r) => isWellFormedRow("components", r)).map((r) => slimRows("components", [shapeRow("components", r, config, facetsFn)])[0]);
     } catch { return []; }
   }
 
@@ -754,7 +784,8 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     try {
       const { rows } = await fetcher.getJson(url, headers);
       const enriched = await enrichAuthors(rows);
-      return { item: shapeRow(kind, item, config), related: slimRows(kind, enriched.map((r) => shapeRow(kind, r, config))) };
+      const wellFormed = enriched.filter((r) => isWellFormedRow(kind, r));
+      return { item: shapeRow(kind, item, config), related: slimRows(kind, wellFormed.map((r) => shapeRow(kind, r, config))) };
     } catch { return { item: shapeRow(kind, item, config), related: [] }; }
   }
 

@@ -5,10 +5,13 @@ on: [push, pull_request]
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22.x, 24.x]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: ${{ matrix.node }} }
       - run: npm run build
       - run: npm test
       - run: npm run verify

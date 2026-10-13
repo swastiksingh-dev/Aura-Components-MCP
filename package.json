@@ -29,7 +29,7 @@
     "verify": "node ./scripts/verify.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "keywords": [
     "mcp",
