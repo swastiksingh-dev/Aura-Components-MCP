@@ -25,7 +25,8 @@
 
 ## Rules
 
-- Free-only by default; Pro rows are refused with explanation, never leaked (`aura_install_component` errors; `aura_scaffold_page` filters + reports `pro_filtered_out`).
+- Free-only by default; Pro rows are refused with explanation, never leaked (`aura_install_component` errors; direct ID get/bundle refuse `-32602` fail-closed; `aura_scaffold_page` filters + reports `pro_filtered_out` / `dropped_refs`).
+- `total` counts upstream matches for paging; local drops surface as `min_views_filtered_out` / `negative_theme_filtered_out` / `deduped` / `dropped_refs`.
 - Asset license: all-rights-reserved per Aura Terms §4 (https://www.aura.build/terms) — preview ok, commercial reuse needs Aura permission.
 - Icon license: every `aura_icon` hit is CC BY 4.0 (Font Awesome Free and HackerNoon pixel SVGs alike) — always keep its `credit` line; never strip it.
 - Inspo evidence stays slim (slugs + palette + fonts + macro + mode + vibe, max 4 sites, no autopsy/screenshots); without a macrostructure, `aura_inspo_recommend` returns `need_macro:true` — run `inspo.recommend` first, never scaffold generic.

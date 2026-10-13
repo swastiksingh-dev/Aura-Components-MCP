@@ -20,7 +20,7 @@
 
 <p align="center">
   <b>2,495</b> free components · <b>192</b> skills · <b>30,688</b> assets · <b>725</b> design systems<br>
-  <b>29</b> tools · <b>0</b> dependencies · <b>94</b> hermetic tests + <b>35</b> live checks green · version-checked hourly against npm
+  <b>29</b> tools · <b>0</b> dependencies · <b>112</b> hermetic tests + <b>38</b> live checks green · version-checked hourly against npm
 </p>
 
 ---
@@ -36,6 +36,8 @@
 - [Free only, no login](#free-only-no-login)
 - [Develop](#develop)
 - [Credits](#credits)
+
+> **v1.7.1** — bug-fix release, no new tools. Central free-only enforcement: Pro components/assets by direct ID are now refused (`-32602`, fail-closed on ambiguous entitlement) instead of returned in full — search, install, bundle, scaffold, and related all inherit it. Search cache isolates explicit `theme` (dark/light no longer share entries). Bundles honor all 8 refs end-to-end with `dropped_refs` disclosure. New `min_views_filtered_out` count (`total` stays upstream). Full icon outages surface as upstream errors, not misses. Dead code removed, scaffold merge extracted, verify extended.
 
 > **v1.7.0** — 29 tools: 5 pure `aura_inspo_*` mappers (recommend/components/reference/system/compare) bridge Inspo evidence to Aura calls with zero extra deps — strict macro gate (`need_macro`), palette priority brand > Inspo > Aura, enforced tokens-first, mandated image srcset plan, fast preview-URL look gate — plus 2 pure `aura_docs_*` helpers (plan/check) wiring Context7 fresh docs for tailwind/gsap/lenis/iconify, with `docs_stamp` on every install/scaffold and a look-preserving conflict rule (fresh API wins, look stays identical) — plus live `aura_icon` (Font Awesome Free + HackerNoon pixel SVGs, auto-fallback, CC BY 4.0 credit always) — plus `aura_version` (hourly npm check, prefer-latest notice, verdict inside every `aura_status`). `aura_prompt` now asks 6 questions (+macrostructure, +vibe) and leads Pass 2 with `inspo.recommend`. `aura_scaffold_page` refuses explicit Pro ids (`pro_filtered_out`). Build hardened for CRLF checkouts.
 
@@ -190,6 +192,7 @@ Every row carries `page_url` (open it to see the design) and `author` where Aura
 - **Recommend fills the kit.** If components come back `no_match`, `aura_recommend` auto-retries once with `suggested_queries[0]` (`retried:true, retried_from:<query>`), then falls back to human-grade editorial picks (`editorial_fallback:true`). The starter kit is never left empty on a text goal.
 - **Big code in one call.** Search rows are slim excerpts by design. Skip the 3-chunk manual concat: `aura_get_component {id, full:true}` and `aura_scaffold_page {goal, full:true}` return complete bodies (33,897-char component verified in one call). Default stays chunked to protect context.
 - **Counts are live upstream.** `aura_status` counts mirror the Aura catalogue right now; `freshness` shows max `updated_at` per surface. Counts only grow when Aura publishes — a freshness bump with flat counts means metadata moved, not new components.
+- **`total` means upstream matches** (for limit/offset paging), not post-filter rows. Local drops are disclosed, never silent: `min_views_filtered_out`, `negative_theme_filtered_out`, `deduped`, bundle `dropped_refs`.
 
 ---
 
@@ -244,7 +247,7 @@ Prompts that work well are in [SETUP.md](./SETUP.md#prompts-that-work).
 ---
 
 
-There is no auth in this server. No OAuth, no API key to paste, no account to create. Reads go to the same public catalogue endpoints the Aura website uses. The `premium` flag stays on every component row, free-only is the default, and `aura_install_component` refuses Pro ids instead of guessing. If Aura rotates its public key, set `AURA_SUPABASE_ANON_KEY` and rebuild; nothing else changes.
+There is no auth in this server. No OAuth, no API key to paste, no account to create. Reads go to the same public catalogue endpoints the Aura website uses. The `premium` flag stays on every component row, free-only is the default, and Pro rows are refused everywhere — search filters them, and direct ID lookup, install, bundle, and scaffold refuse them (`-32602`, fail-closed) instead of guessing. If Aura rotates its public key, set `AURA_SUPABASE_ANON_KEY` and rebuild; nothing else changes.
 
 Optional tuning (all with defaults):
 

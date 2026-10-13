@@ -183,7 +183,7 @@ export function createHandlers(catalog, icons, version) {
     aura_install_component: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (id === undefined || (typeof id !== 'string' && typeof id !== 'number')) bad('provide id (number) or slug (string)');
       const got = await catalog.getItem('components', id);
-      if (got.item && got.item.premium !== false) bad('that component is Pro (paid). Search with freeOnly or pick a free one.');
+      // Pro refusal enforced centrally in catalog.getItem (fail-closed).
       const compInstall = installGuide('components', got.item);
       return textResult({ item: got.item, install: compInstall, docs_stamp: docsStampFor(compInstall.deps) }); },
     aura_install_skill: async (a) => { a = a || {}; if (typeof a.id !== 'string' || !a.id) bad('id (string) is required');
@@ -238,16 +238,17 @@ export function createHandlers(catalog, icons, version) {
       const compRefs = normRefs(a.components, 'components') || [];
       const full = a.full === undefined ? undefined : bool(a.full, 'full');
       const fullOpt = full === undefined ? {} : { full };
-      const [sys, comps] = await Promise.all([
+      const [sys, bundle] = await Promise.all([
         sysRef ? catalog.getItem('design_systems', sysRef, fullOpt).catch(() => null) : catalog.searchCatalog('design_systems', { query: a.goal, limit: 1 }).then((r) => (r.items[0] ? { item: r.items[0] } : null)),
-        compRefs.length ? catalog.bundleItems('components', compRefs, 5, fullOpt).then((rs) => rs.filter((x) => x.ok).map((x) => x.item)) : catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 3 }).then((r) => r.items),
+        compRefs.length ? catalog.bundleItems('components', compRefs, 8, fullOpt).then((rs) => ({ items: rs.filter((x) => x.ok).map((x) => x.item), dropped: rs.filter((x) => !x.ok).length })) : catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 3 }).then((r) => ({ items: r.items, dropped: 0 })),
       ]);
+      const comps = bundle.items;
       // Pro guard: explicit-id bundles can name Pro rows — free flows never ship them.
       const freeComps = (comps || []).filter((c) => c && c.premium === false);
       const proFiltered = (comps || []).length - freeComps.length;
       const sysItem = sys && sys.item ? sys.item : null;
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
-      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
   };
 };

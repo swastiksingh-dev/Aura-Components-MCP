@@ -163,6 +163,25 @@ export function slimRows(kind, items) {
   });
 }
 
+// Central access policy: only components/assets carry a premium flag, and a
+// row is free ⟺ premium === false (fail-closed: missing or ambiguous
+// entitlement is refused, never assumed public). Skills/design_systems
+// have no premium concept and are always allowed. Every retrieval path
+// (getItem, and therefore bundle/bulk/scaffold/related/install) funnels
+// through assertFreeRow, so callers cannot reach restricted content by ID.
+export function isFreeRow(kind, row) {
+  if (kind !== "components" && kind !== "assets") return true;
+  return !!row && row.premium === false;
+}
+
+export function assertFreeRow(kind, row) {
+  if (isFreeRow(kind, row)) return;
+  const what = kind === "assets" ? "asset" : "component";
+  const e = new Error("that " + what + " is Pro (paid). Search with freeOnly or pick a free one.");
+  e.code = "BAD_ARGS";
+  throw e;
+}
+
 export function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
   if (kind === "skills") return SITE + "/skills/" + row.id;
@@ -247,7 +266,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
   const authorCache = new Map(); // created_by -> profile (shared across searches)
   const inflight = new Map(); // cacheKey -> Promise (coalesce concurrent identical calls)
 
-  const clampLimit = (l) => Math.min(config.maxLimit, Math.max(1, l ?? config.defaultLimit));
+  const clampLimit = (l) => Math.min(config.maxLimit, Math.max(1, Math.floor(l ?? config.defaultLimit)));
 
   async function enrichAuthors(rows) {
     const ids = [...new Set(rows.map((r) => r.created_by).filter(Boolean).filter((id) => !authorCache.has(id)))];
@@ -267,12 +286,15 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     const sort = SORTS[kind][q.sort] ? q.sort : "popular";
     const freeOnly = q.freeOnly ?? config.freeOnlyDefault;
     // Gap 1: negative_theme (exclude a theme) + min_views (quality floor). Both ride
-    // the cache key so filtered/unfiltered variants never collide.
+    // the cache key so filtered/unfiltered variants never collide. Explicit
+    // theme also rides the key: it re-ranks results, so dark/light variants
+    // must never share a cache entry or an in-flight request.
+    const themeKey = q.theme ? String(q.theme).toLowerCase() : "";
     const negTheme = q.negative_theme ? String(q.negative_theme).toLowerCase() : "";
     const minViews = Math.max(0, q.min_views ?? 0);
     const slim = q.slim ?? true;
     const exactFlag = q.exact_match === true ? "exact" : "fuzzy";
-    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, negTheme, minViews, slim ? "slim" : "full", exactFlag].join("|");
+    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, themeKey, negTheme, minViews, slim ? "slim" : "full", exactFlag].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     if (inflight.has(key)) return inflight.get(key);
@@ -377,7 +399,14 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       if (deduped) out.deduped = deduped;
       // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
       // hard exclusion. Both apply before theme re-rank so counts stay honest.
-      if (minViews > 0) out.items = out.items.filter((it) => (it.views || 0) >= minViews);
+      // total keeps its upstream meaning (all matches for limit/offset paging);
+      // local drops are disclosed via min_views_filtered_out / deduped /
+      // negative_theme_filtered_out instead of rewriting total.
+      if (minViews > 0) {
+        const beforeViews = out.items.length;
+        out.items = out.items.filter((it) => (it.views || 0) >= minViews);
+        if (out.items.length < beforeViews) out.min_views_filtered_out = beforeViews - out.items.length;
+      }
       if (negTheme && kind === "components") {
         const before = out.items.length;
         out.items = out.items.filter((it) => !it.facets || it.facets.theme !== negTheme);
@@ -463,6 +492,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&" + filt + "&limit=1";
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
+    assertFreeRow(kind, rows[0]); // before enrich/cache: refusals are never cached
     const enriched = await enrichAuthors(rows);
     const full = enriched[0];
     // Chunked fetch: re-slice full blobs per requested chunk so agents can page
@@ -578,8 +608,10 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
   }
 
   // Bulk fetch: N details in one parallel round (backs aura_bundle + aura_scaffold_page).
-  // Per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
-  async function bundleItems(kind, ids, max = 5, opts = {}) {
+  // Limit is 8 end-to-end (matches normRefs validation and the 2–8 docs):
+  // duplicates collapse to one fetch, order follows the request, and
+  // per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
+  async function bundleItems(kind, ids, max = 8, opts = {}) {
     const list = [...new Set((ids || []).map(String))].slice(0, Math.max(1, Math.min(max, 8)));
     const out = await Promise.all(list.map(async (id) => {
       try { const got = await getItem(kind, id, { full: !!opts.full }); return { ok: true, id, item: got.item }; }

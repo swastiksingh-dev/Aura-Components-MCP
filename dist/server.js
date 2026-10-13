@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v1.7.0 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v1.7.1 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -30,7 +30,7 @@ function loadConfig(env = process.env) {
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     freeOnlyDefault: bool(env.AURA_FREE_ONLY_DEFAULT, true),
-    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.0",
+    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.1",
   };
 }
 
@@ -280,6 +280,25 @@ function slimRows(kind, items) {
   });
 }
 
+// Central access policy: only components/assets carry a premium flag, and a
+// row is free ⟺ premium === false (fail-closed: missing or ambiguous
+// entitlement is refused, never assumed public). Skills/design_systems
+// have no premium concept and are always allowed. Every retrieval path
+// (getItem, and therefore bundle/bulk/scaffold/related/install) funnels
+// through assertFreeRow, so callers cannot reach restricted content by ID.
+function isFreeRow(kind, row) {
+  if (kind !== "components" && kind !== "assets") return true;
+  return !!row && row.premium === false;
+}
+
+function assertFreeRow(kind, row) {
+  if (isFreeRow(kind, row)) return;
+  const what = kind === "assets" ? "asset" : "component";
+  const e = new Error("that " + what + " is Pro (paid). Search with freeOnly or pick a free one.");
+  e.code = "BAD_ARGS";
+  throw e;
+}
+
 function pageUrl(kind, row) {
   if (kind === "components") return SITE + "/component/" + row.slug;
   if (kind === "skills") return SITE + "/skills/" + row.id;
@@ -364,7 +383,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
   const authorCache = new Map(); // created_by -> profile (shared across searches)
   const inflight = new Map(); // cacheKey -> Promise (coalesce concurrent identical calls)
 
-  const clampLimit = (l) => Math.min(config.maxLimit, Math.max(1, l ?? config.defaultLimit));
+  const clampLimit = (l) => Math.min(config.maxLimit, Math.max(1, Math.floor(l ?? config.defaultLimit)));
 
   async function enrichAuthors(rows) {
     const ids = [...new Set(rows.map((r) => r.created_by).filter(Boolean).filter((id) => !authorCache.has(id)))];
@@ -384,12 +403,15 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const sort = CATALOG_SORTS[kind][q.sort] ? q.sort : "popular";
     const freeOnly = q.freeOnly ?? config.freeOnlyDefault;
     // Gap 1: negative_theme (exclude a theme) + min_views (quality floor). Both ride
-    // the cache key so filtered/unfiltered variants never collide.
+    // the cache key so filtered/unfiltered variants never collide. Explicit
+    // theme also rides the key: it re-ranks results, so dark/light variants
+    // must never share a cache entry or an in-flight request.
+    const themeKey = q.theme ? String(q.theme).toLowerCase() : "";
     const negTheme = q.negative_theme ? String(q.negative_theme).toLowerCase() : "";
     const minViews = Math.max(0, q.min_views ?? 0);
     const slim = q.slim ?? true;
     const exactFlag = q.exact_match === true ? "exact" : "fuzzy";
-    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, negTheme, minViews, slim ? "slim" : "full", exactFlag].join("|");
+    const key = ["search", kind, q.query ?? "", q.tag ?? "", q.mediaType ?? "", sort, limit, offset, freeOnly, themeKey, negTheme, minViews, slim ? "slim" : "full", exactFlag].join("|");
     const hit = cacheGet(key);
     if (hit) return { ...hit, cached: true };
     if (inflight.has(key)) return inflight.get(key);
@@ -494,7 +516,14 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
       if (deduped) out.deduped = deduped;
       // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
       // hard exclusion. Both apply before theme re-rank so counts stay honest.
-      if (minViews > 0) out.items = out.items.filter((it) => (it.views || 0) >= minViews);
+      // total keeps its upstream meaning (all matches for limit/offset paging);
+      // local drops are disclosed via min_views_filtered_out / deduped /
+      // negative_theme_filtered_out instead of rewriting total.
+      if (minViews > 0) {
+        const beforeViews = out.items.length;
+        out.items = out.items.filter((it) => (it.views || 0) >= minViews);
+        if (out.items.length < beforeViews) out.min_views_filtered_out = beforeViews - out.items.length;
+      }
       if (negTheme && kind === "components") {
         const before = out.items.length;
         out.items = out.items.filter((it) => !it.facets || it.facets.theme !== negTheme);
@@ -580,6 +609,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&" + filt + "&limit=1";
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
+    assertFreeRow(kind, rows[0]); // before enrich/cache: refusals are never cached
     const enriched = await enrichAuthors(rows);
     const full = enriched[0];
     // Chunked fetch: re-slice full blobs per requested chunk so agents can page
@@ -695,8 +725,10 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
   }
 
   // Bulk fetch: N details in one parallel round (backs aura_bundle + aura_scaffold_page).
-  // Per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
-  async function bundleItems(kind, ids, max = 5, opts = {}) {
+  // Limit is 8 end-to-end (matches normRefs validation and the 2–8 docs):
+  // duplicates collapse to one fetch, order follows the request, and
+  // per-id errors are captured, never thrown: { ok:true, item } or { ok:false, id, error }.
+  async function bundleItems(kind, ids, max = 8, opts = {}) {
     const list = [...new Set((ids || []).map(String))].slice(0, Math.max(1, Math.min(max, 8)));
     const out = await Promise.all(list.map(async (id) => {
       try { const got = await getItem(kind, id, { full: !!opts.full }); return { ok: true, id, item: got.item }; }
@@ -730,7 +762,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.0" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.1" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
@@ -1484,11 +1516,17 @@ function createIcons({ fetcher, now = () => Date.now() }) {
     if (hit) cache.delete(key);
 
     const tried = [];
+    let lastFetchErr = null;
     for (const c of iconCandidates(raw, source, style)) {
       let body = null;
       try {
         body = await fetcher.getText(c.url, {});
-      } catch {
+      } catch (e) {
+        // Network-level failure is not a miss: remember it, keep walking the
+        // chain in case only one host is down, and rethrow at the end if
+        // nothing else explains the failure (never disguise an outage as
+        // "not found").
+        lastFetchErr = e instanceof Error ? e : new Error(String(e));
         tried.push({ url: c.url, ok: false, why: "fetch-error" });
         continue;
       }
@@ -1510,6 +1548,7 @@ function createIcons({ fetcher, now = () => Date.now() }) {
       while (cache.size > ICON_MAX_KEYS) cache.delete(cache.keys().next().value);
       return out;
     }
+    if (lastFetchErr && tried.every((t) => t.why === "fetch-error")) throw lastFetchErr;
     iconMissing("icon not found: '" + raw + "' (" + source + "/" + style + ") — checked " + tried.length + " URLs; check spelling (FA names use dashes, e.g. 'arrow-down')");
   }
 
@@ -1744,7 +1783,7 @@ function createHandlers(catalog, icons, version) {
     aura_install_component: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (id === undefined || (typeof id !== 'string' && typeof id !== 'number')) toolFn_bad('provide id (number) or slug (string)');
       const got = await catalog.getItem('components', id);
-      if (got.item && got.item.premium !== false) toolFn_bad('that component is Pro (paid). Search with freeOnly or pick a free one.');
+      // Pro refusal enforced centrally in catalog.getItem (fail-closed).
       const compInstall = installGuide('components', got.item);
       return textResult({ item: got.item, install: compInstall, docs_stamp: docsStampFor(compInstall.deps) }); },
     aura_install_skill: async (a) => { a = a || {}; if (typeof a.id !== 'string' || !a.id) toolFn_bad('id (string) is required');
@@ -1799,17 +1838,18 @@ function createHandlers(catalog, icons, version) {
       const compRefs = normRefs(a.components, 'components') || [];
       const full = a.full === undefined ? undefined : toolFn_bool(a.full, 'full');
       const fullOpt = full === undefined ? {} : { full };
-      const [sys, comps] = await Promise.all([
+      const [sys, bundle] = await Promise.all([
         sysRef ? catalog.getItem('design_systems', sysRef, fullOpt).catch(() => null) : catalog.searchCatalog('design_systems', { query: a.goal, limit: 1 }).then((r) => (r.items[0] ? { item: r.items[0] } : null)),
-        compRefs.length ? catalog.bundleItems('components', compRefs, 5, fullOpt).then((rs) => rs.filter((x) => x.ok).map((x) => x.item)) : catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 3 }).then((r) => r.items),
+        compRefs.length ? catalog.bundleItems('components', compRefs, 8, fullOpt).then((rs) => ({ items: rs.filter((x) => x.ok).map((x) => x.item), dropped: rs.filter((x) => !x.ok).length })) : catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 3 }).then((r) => ({ items: r.items, dropped: 0 })),
       ]);
+      const comps = bundle.items;
       // Pro guard: explicit-id bundles can name Pro rows — free flows never ship them.
       const freeComps = (comps || []).filter((c) => c && c.premium === false);
       const proFiltered = (comps || []).length - freeComps.length;
       const sysItem = sys && sys.item ? sys.item : null;
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
-      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
   };
 };
 

@@ -71,11 +71,17 @@ export function createIcons({ fetcher, now = () => Date.now() }) {
     if (hit) cache.delete(key);
 
     const tried = [];
+    let lastFetchErr = null;
     for (const c of iconCandidates(raw, source, style)) {
       let body = null;
       try {
         body = await fetcher.getText(c.url, {});
-      } catch {
+      } catch (e) {
+        // Network-level failure is not a miss: remember it, keep walking the
+        // chain in case only one host is down, and rethrow at the end if
+        // nothing else explains the failure (never disguise an outage as
+        // "not found").
+        lastFetchErr = e instanceof Error ? e : new Error(String(e));
         tried.push({ url: c.url, ok: false, why: "fetch-error" });
         continue;
       }
@@ -97,6 +103,7 @@ export function createIcons({ fetcher, now = () => Date.now() }) {
       while (cache.size > ICON_MAX_KEYS) cache.delete(cache.keys().next().value);
       return out;
     }
+    if (lastFetchErr && tried.every((t) => t.why === "fetch-error")) throw lastFetchErr;
     iconMissing("icon not found: '" + raw + "' (" + source + "/" + style + ") — checked " + tried.length + " URLs; check spelling (FA names use dashes, e.g. 'arrow-down')");
   }
 

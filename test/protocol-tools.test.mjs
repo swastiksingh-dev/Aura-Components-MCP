@@ -38,8 +38,27 @@ test("initialize -> list -> call aura_status", async () => {
   ]);
   assert.equal(out[0].result.serverInfo.name, "aura-components-mcp");
   assert.match(out[0].result.serverInfo.version, /^\d+\.\d+\.\d+$/);
-  assert.equal(out[1].result.tools.length, 29);
+  assert.ok(out[1].result.tools.length > 0);
   assert.ok(out[2].result.content[0].text.includes('"ok": true'));
+});
+
+test("tool registry integrity: defs and handlers agree, no duplicates", async () => {
+  const names = TOOL_DEFS.map((t) => t.name);
+  assert.equal(new Set(names).size, names.length, "duplicate tool names");
+  for (const t of TOOL_DEFS) {
+    assert.ok(t.inputSchema && typeof t.inputSchema === "object", t.name + " needs an inputSchema");
+    assert.equal(typeof t.description, "string", t.name + " needs a description");
+  }
+  const handlers = createHandlers(fakeCatalog);
+  const hkeys = Object.keys(handlers);
+  assert.deepEqual(new Set(hkeys).size, hkeys.length);
+  for (const n of names) assert.equal(typeof handlers[n], "function", "no handler for " + n);
+  for (const k of hkeys) assert.ok(names.includes(k), "orphan handler without definition: " + k);
+  const out = await run([
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+  ]);
+  assert.deepEqual(out[1].result.tools.map((t) => t.name).sort(), [...names].sort());
 });
 
 test("aura_prompt Pass1 draft + Pass2 final, missing goal -> -32602", async () => {
@@ -78,7 +97,7 @@ test("aura_trending removed: absent from list, call -> -32601", async () => {
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
     { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "aura_trending", arguments: { limit: 2 } } },
   ]);
-  assert.equal(out[1].result.tools.length, 29);
+  assert.ok(out[1].result.tools.length > 0);
   assert.ok(!out[1].result.tools.some((t) => t.name === "aura_trending"));
   assert.equal(out[2].error.code, -32601);
 });

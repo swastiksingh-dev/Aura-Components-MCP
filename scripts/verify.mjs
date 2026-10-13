@@ -98,7 +98,12 @@ check('bad args -> -32602', ba.error && ba.error.code === -32602, JSON.stringify
 const un = await tool('nope_tool', {});
 check('unknown tool -> -32601', un.error && un.error.code === -32601, JSON.stringify(un).slice(0, 200));
 const li = await call('tools/list', {});
-check('tools/list exposes 28', li && li.result && Array.isArray(li.result.tools) && li.result.tools.length === 28 && li.result.tools.some((t) => t.name === 'aura_icon'), String(li && li.result && li.result.tools && li.result.tools.length));
+{
+  const names = li && li.result && Array.isArray(li.result.tools) ? li.result.tools.map((t) => t.name) : [];
+  const uniq = new Set(names);
+  const schemasOk = li.result.tools.every((t) => t.inputSchema && typeof t.inputSchema === 'object');
+  check('tools/list integrity (unique names, schemas, key tools)', names.length > 0 && uniq.size === names.length && schemasOk && names.includes('aura_status') && names.includes('aura_icon') && names.includes('aura_version'), names.length + ':' + names.slice(0, 3).join(','));
+}
 const ig = J(await tool('aura_inspo_recommend', { brief: 'dark SaaS pricing' }));
 check('inspo macro gate', ig && ig.need_macro === true && ig.inspo_call.tool === 'inspo.recommend', JSON.stringify(ig).slice(0, 200));
 const dp = J(await tool('aura_docs_plan', { library: 'lenis', need: 'GSAP ticker integration' }));
@@ -111,6 +116,14 @@ const vv = J(await tool('aura_version', {}));
 check('version verdict shape', vv && typeof vv.running === 'string' && typeof vv.update_available === 'boolean' && typeof vv.notice === 'string', JSON.stringify(vv).slice(0, 200));
 const st2 = J(await tool('aura_status', {}));
 check('status carries update verdict', st2 && st2.update && typeof st2.update.update_available === 'boolean', JSON.stringify(st2 && st2.update).slice(0, 200));
+const bun8 = J(await tool('aura_search_components', { query: 'hero', limit: 8 }));
+if (bun8 && Array.isArray(bun8.items) && bun8.items.length >= 2) {
+  const ids = bun8.items.slice(0, 8).map((i) => i.id);
+  const bb = J(await tool('aura_bundle', { ids }));
+  check('bundle honors up to 8 refs in order', bb && Array.isArray(bb.results) && bb.results.length === ids.length && bb.results.every((r, n) => String(r.id) === String(ids[n])), JSON.stringify(bb && bb.results && bb.results.map((r) => r.id)).slice(0, 200));
+} else {
+  check('bundle honors up to 8 refs in order', false, 'not enough search hits for a live 8-bundle');
+}
 console.log('VERIFY pass=' + pass + ' fail=' + fail + ' ms=' + (Date.now() - t0));
 child.kill();
 setTimeout(() => process.exit(fail ? 1 : 0), 500);

@@ -26,6 +26,6 @@ export function loadConfig(env = process.env) {
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     freeOnlyDefault: bool(env.AURA_FREE_ONLY_DEFAULT, true),
-    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.0",
+    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.1",
   };
 }

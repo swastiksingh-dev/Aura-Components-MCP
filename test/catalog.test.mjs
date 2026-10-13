@@ -67,6 +67,83 @@ test("concurrent identical searches coalesce to one fetch", async () => {
   assert.equal(calls, 1);
 });
 
+test("cache isolates explicit theme: dark vs light never share entries", async () => {
+  let calls = 0;
+  const stub = { getJson: async () => { calls++; return { rows: [{ id: 1, title: "t", slug: "S", code: "<div></div>", background: "fff", views: 1, created_by: null }], total: 1 }; } };
+  const { facets: f } = await import("../src/guide.mjs");
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: f });
+  const dark1 = await cat.searchCatalog("components", { query: "hero", theme: "dark", limit: 3 });
+  const dark2 = await cat.searchCatalog("components", { query: "hero", theme: "dark", limit: 3 });
+  assert.equal(calls, 1, "identical theme reuses cache");
+  assert.equal(dark2.cached, true);
+  assert.equal(dark1.theme_hint, "dark");
+  const light = await cat.searchCatalog("components", { query: "hero", theme: "light", limit: 3 });
+  assert.equal(calls, 2, "different theme must refetch, not reuse dark ordering");
+  assert.equal(light.theme_hint, "light");
+  const plain = await cat.searchCatalog("components", { query: "hero", limit: 3 });
+  assert.equal(calls, 3, "unthemed query isolated from themed entries");
+  assert.ok(!("theme_hint" in plain), "no theme signal, no theme fields");
+});
+
+test("cache isolates filters and limits; concurrent mixed queries stay apart", async () => {
+  let calls = 0;
+  const stub = { getJson: async () => { calls++; await new Promise((r) => setTimeout(r, 10)); return { rows: [], total: 0 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  await Promise.all([
+    cat.searchCatalog("components", { query: "x", limit: 3 }),
+    cat.searchCatalog("components", { query: "x", limit: 5 }),
+    cat.searchCatalog("components", { query: "x", limit: 3, min_views: 10 }),
+    cat.searchCatalog("components", { query: "x", limit: 3 }),
+  ]);
+  assert.equal(calls, 3, "limit/filter variants isolated; identical pair coalesced");
+});
+
+test("failed searches are not cached and can be retried", async () => {
+  let calls = 0;
+  const stub = { getJson: async () => { calls++; if (calls === 1) throw new Error("boom"); return { rows: [], total: 0 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  await assert.rejects(() => cat.searchCatalog("components", { query: "x" }), /boom/);
+  const r = await cat.searchCatalog("components", { query: "x" });
+  assert.equal(r.total, 0);
+  assert.equal(calls, 2, "failure left no poisoned cache entry");
+});
+
+test("total keeps upstream meaning; local drops are disclosed, not silent", async () => {
+  const stub = { getJson: async () => ({ rows: [
+    { id: 1, title: "t1", slug: "S1", code: "x", views: 50, created_by: null },
+    { id: 2, title: "t2", slug: "S2", code: "x", views: 1, created_by: null },
+  ], total: 2 }) };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "t", limit: 5, min_views: 10 });
+  assert.equal(r.total, 2, "total still counts upstream matches for paging");
+  assert.equal(r.items.length, 1);
+  assert.equal(r.min_views_filtered_out, 1);
+});
+
+test("bundleItems honors 8 refs in order; duplicates collapse deliberately", async () => {
+  const stub = { getJson: async (url) => {
+    const m = url.match(/id=eq\.(\d+)/);
+    const id = m ? m[1] : "0";
+    return { rows: [{ id: Number(id), title: "t" + id, slug: "S" + id, code: "x", premium: false, created_by: null }], total: 1 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const ids = ["1", "2", "3", "4", "5", "6", "7", "8"];
+  const out = await cat.bundleItems("components", ids);
+  assert.equal(out.length, 8, "all 8 refs returned, none silently dropped");
+  assert.deepEqual(out.map((r) => r.id), ids, "request order preserved");
+  assert.ok(out.every((r) => r.ok));
+  const dup = await cat.bundleItems("components", ["1", "1", "2"]);
+  assert.equal(dup.length, 2, "duplicates collapse to one fetch each");
+});
+
+test("clampLimit floors floats and bounds", async () => {
+  const seen = [];
+  const stub = { getJson: async (url) => { seen.push(url); return { rows: [], total: 0 }; } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  await cat.searchCatalog("components", { query: "x", limit: 2.9 });
+  assert.ok(/limit=2(&|$)/.test(seen[0]), "float limit floored, got: " + seen[0]);
+});
+
 test("queryTokens strips stop-words, keeps significant terms", () => {
   assert.deepEqual(queryTokens("dark cinematic portfolio"), ["cinematic", "portfolio"]);
   assert.deepEqual(queryTokens("hero"), ["hero"]);
@@ -98,7 +175,7 @@ test("empty AND-phrase falls back to OR tokens", async () => {
 });
 
 test("facets ride on search + get (theme/weight/download)", async () => {
-  const stub = { getJson: async (url) => (url.includes("assets") ? { rows: [{ id: 9, title: "t", image_800w: "u800", image_original: "uorig", created_by: null }], total: 1 } : { rows: [{ id: 1, title: "t", slug: "S", code: "<div class=x bg-black></div>", background: "000000", created_by: null }], total: 1 }) };
+  const stub = { getJson: async (url) => (url.includes("assets") ? { rows: [{ id: 9, title: "t", premium: false, image_800w: "u800", image_original: "uorig", created_by: null }], total: 1 } : { rows: [{ id: 1, title: "t", slug: "S", code: "<div class=x bg-black></div>", background: "000000", created_by: null }], total: 1 }) };
   const { facets } = await import("../src/guide.mjs");
   const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
   const s = await cat.searchCatalog("components", { query: "x", limit: 2 });
@@ -108,7 +185,7 @@ test("facets ride on search + get (theme/weight/download)", async () => {
 });
 
 test("parity: search facets equal detail facets (ISS1-3)", async () => {
-  const stub = { getJson: async () => ({ rows: [{ id: 7, title: "t", slug: "S", code: "<div class=x><svg></svg></div>", background: "000000", tags: [], created_by: null }], total: 1 }) };
+  const stub = { getJson: async () => ({ rows: [{ id: 7, title: "t", slug: "S", code: "<div class=x><svg></svg></div>", background: "000000", tags: [], premium: false, created_by: null }], total: 1 }) };
   const { facets } = await import("../src/guide.mjs");
   const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
   const s = await cat.searchCatalog("components", { query: "x", limit: 1 });
@@ -118,7 +195,7 @@ test("parity: search facets equal detail facets (ISS1-3)", async () => {
 
 test("related defaults freeOnly (ISS10)", async () => {
   const seen = [];
-  const stub = { getJson: async (url) => { seen.push(url); if (url.includes("id=eq.1") && !url.includes("neq")) return { rows: [{ id: 1, title: "one two three", description: "x", tags: ["hero"], code: "x", background: "fff", created_by: null }], total: 1 }; return { rows: [], total: 0 }; } };
+  const stub = { getJson: async (url) => { seen.push(url); if (url.includes("id=eq.1") && !url.includes("neq")) return { rows: [{ id: 1, title: "one two three", description: "x", tags: ["hero"], code: "x", background: "fff", premium: false, created_by: null }], total: 1 }; return { rows: [], total: 0 }; } };
   const cat = createCatalog({ fetcher: stub, config: cfg });
   await cat.relatedItems("components", 1, 3);
   assert.ok(seen.some((u) => u.includes("premium=eq.false")));
@@ -190,7 +267,7 @@ test("chunkText paginates + getItem chunk param (payloads)", async () => {
   const c = chunkText("abcdefghij", 4, 1);
   assert.equal(c.text, "efgh…[truncated]");
   assert.deepEqual([c.chunk, c.chunks, c.full_length, c.truncated], [1, 3, 10, true]);
-  const stub = { getJson: async () => ({ rows: [{ id: 9, title: "t", slug: "S", code: "x".repeat(300), background: "fff", created_by: null }], total: 1 }) };
+  const stub = { getJson: async () => ({ rows: [{ id: 9, title: "t", slug: "S", code: "x".repeat(300), background: "fff", premium: false, created_by: null }], total: 1 }) };
   const { facets } = await import("../src/guide.mjs");
   const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
   const g0 = await cat.getItem("components", 9);
@@ -217,7 +294,7 @@ test("slim lists exclude blobs (payload guard)", () => {
 
 test("bundle captures per-id errors, related excludes self", async () => {
   const stub = { getJson: async (url) => {
-    if (url.includes("id=eq.1")) return { rows: [{ id: 1, title: "one two three", description: "four five", tags: ["hero"], code: "x", background: "fff", created_by: null }], total: 1 };
+    if (url.includes("id=eq.1")) return { rows: [{ id: 1, title: "one two three", description: "four five", tags: ["hero"], code: "x", background: "fff", premium: false, created_by: null }], total: 1 };
     if (url.includes("id=eq.2")) return { rows: [], total: 0 };
     return { rows: [{ id: 3, title: "one two", description: "three", tags: ["hero"], code: "x", background: "fff", created_by: null }], total: 1 };
   } };
@@ -392,7 +469,7 @@ test("DS OR fallback includes content+preview_html", async () => {
 });
 
 test("getItem full returns whole code chunks:1", async () => {
-  const stub = { getJson: async () => ({ rows: [{ id: 9, title: "t", slug: "S", code: "x".repeat(300), background: "fff", created_by: null }], total: 1 }) };
+  const stub = { getJson: async () => ({ rows: [{ id: 9, title: "t", slug: "S", code: "x".repeat(300), background: "fff", premium: false, created_by: null }], total: 1 }) };
   const { facets: f } = await import("../src/guide.mjs");
   const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: f });
   const g = await cat.getItem("components", 9, { full: true });
