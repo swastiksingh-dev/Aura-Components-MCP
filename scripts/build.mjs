@@ -43,7 +43,7 @@ function prep(name, src) {
   return s;
 }
 
-const order = ["config.mjs", "http.mjs", "catalog.mjs", "protocol.mjs", "guide.mjs", "icons.mjs", "version.mjs", "tools.mjs"];
+const order = ["config.mjs", "http.mjs", "catalog.mjs", "protocol.mjs", "guide.mjs", "icons.mjs", "version.mjs", "awards.mjs", "awards-index.mjs", "browser-cdp.mjs", "tools.mjs"];
 const pkgVer = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 let out = "#!/usr/bin/env node\n// aura-components-mcp v" + pkgVer + " — bundled (zero deps). Built by swastiksingh-dev.\n";
 for (const f of order) out += "\n// ---- " + f + " ----\n" + prep(f, readFileSync(join(root, "src", f), "utf8"));

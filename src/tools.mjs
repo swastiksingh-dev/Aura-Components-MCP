@@ -3,6 +3,9 @@
 // (except aura_recommend's single bounded auto-retry + editorial fill).
 import { textResult } from './protocol.mjs';
 import { installGuide, tokenHints, buildPrompt, buildInspoRecommend, buildInspoComponents, buildInspoReference, buildInspoSystem, buildInspoCompare, buildDocsPlan, buildDocsCheck, docsStampFor, combineScaffold, INSPO_MACROS, INSPO_VIBES, INSPO_MODES } from './guide.mjs';
+import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementGallery, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, createAwardClient } from './awards.mjs';
+import { createAwardIndex } from './awards-index.mjs';
+import { cdpResolveViewport, cdpCollapseBands, cdpBandsFromHtml, createCdpConn, findChromeExecutable, findFfmpeg, createBrowserAdapter, reduceCdpScan } from './browser-cdp.mjs';
 const SORTS = ['popular', 'recent', 'trending', 'updated'];
 const CATS = ['hero','section','button','card','background','header','logo','feature','pricing','testimonial','footer','form','heading'];
 function bad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
@@ -69,8 +72,14 @@ export const TOOL_DEFS = [
   { name: 'aura_docs_check', description: 'Check pasted code against fresh docs (pure). library + code_excerpt (under 20000 chars, excerpts not full pages) + optional docs_note -> verdict current|needs-update, look-preserving fixes, version-pin needs_check. Fresh API wins, look stays identical.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, code_excerpt: { type: 'string' }, docs_note: { type: 'string' } }, required: ['library', 'code_excerpt'], additionalProperties: false } },
   { name: 'aura_icon', description: 'Fetch one free icon as ready-to-paste SVG (live). name in kebab-case (bolt, arrow-down). source auto|fontawesome|pixel, style auto|solid|regular|brands. Auto-fallback across styles then libraries; every hit carries license + credit (CC BY 4.0, credit always) plus a font/CSS alternative. 24h icon cache.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string', enum: ['auto', 'fontawesome', 'pixel'] }, style: { type: 'string', enum: ['solid', 'regular', 'brands', 'auto'] } }, required: ['name'], additionalProperties: false } },
   { name: 'aura_version', description: 'Running vs npm-published version (live, hourly cache). Returns update_available + notice telling the agent to prefer latest (npm i -g aura-components-mcp@latest) when behind. Never fails — offline registries return latest:null. aura_status already carries this verdict on every call.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'aura_award_search', description: 'Search award-winning website references (Awwwards). Modes: sites (ranked refs with preview links), categories (real taxonomy from the index/source), elements (hero/nav/pricing/footer examples), motion (previously recorded motion studies). Local index first, one polite live refresh when empty.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['sites', 'categories', 'elements', 'motion'] }, query: { type: 'string' }, slug: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, category: { type: 'string' }, color: { type: 'string' }, technology: { type: 'string' }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, studio: { type: 'string' }, limit: { type: 'number' }, offset: { type: 'number' }, full: { type: 'boolean' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_award_inspect', description: 'Inspect award refs: site_details (palette/tech/awards/evidence), site_elements (section visuals with media URLs), element (one gallery record), compare_sites (2-3 refs: shared vs gaps, missing marked unknown).', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['site_details', 'site_elements', 'element', 'compare_sites'] }, slug: { type: 'string' }, elementSlug: { type: 'string' }, slugs: { type: 'array', items: { type: 'string' } } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_design_blueprint', description: 'Evidence-backed build plan from 2-5 award refs + goal: Markdown brief + versioned JSON, mapped to real free Aura components/systems (free-only enforced, failures marked unavailable). Never copies third-party source.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, references: { type: 'array', items: { type: 'string' } }, technology: { type: 'string' }, visualDirection: { type: 'string' }, responsive: { type: 'string' }, constraints: { type: 'array', items: { type: 'string' } }, includeStructure: { type: 'boolean' } }, required: ['goal', 'references'], additionalProperties: false } },
+  { name: 'aura_visual_audit', description: 'Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), compare (reference vs build mismatches). Needs Chrome for live capture; honest BROWSER_UNAVAILABLE otherwise. Loopback only with allowLocal:true.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['capture', 'structure', 'compare'] }, url: { type: 'string' }, referenceUrl: { type: 'string' }, buildUrl: { type: 'string' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, waitStrategy: { type: 'string', enum: ['load', 'networkidle'] }, settleMs: { type: 'number' }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_motion_study', description: 'Evidence-backed motion guidance. Modes: inspect (live runtime scan: libs/easing/scroll), record (bounded frame study; .webm only when ffmpeg present), search (stored studies by library/easing/scroll). Never claims unobserved library state.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['inspect', 'record', 'search'] }, url: { type: 'string' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' }, frames: { type: 'number' }, durationMs: { type: 'number' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_award_index', description: 'Local award corpus: status (counts/freshness/lock), rebuild/resume/refresh (bounded polite crawl), new_winners (baseline then delta), watch_add/list/remove (studio/tag/url watches). Never auto-crawls on startup.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'] }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, maxPages: { type: 'number' }, kind: { type: 'string', enum: ['studio', 'tag', 'url'] }, pattern: { type: 'string' } }, required: ['action'], additionalProperties: false } },
 ];
-export function createHandlers(catalog, icons, version) {
+export function createHandlers(catalog, icons, version, awardDeps) {
   // Automatic update notice: every aura_status carries the cached version
   // verdict (hourly npm re-check), so agents learn about updates unprompted.
   const versionNote = async () => {
@@ -79,6 +88,75 @@ export function createHandlers(catalog, icons, version) {
     } catch { /* status must never fail on version check */ }
     return null;
   };
+  // Award subsystem deps (optional for old callers): client (live fetch),
+  // index (persistent JSON store), browser (native CDP). Missing pieces stay
+  // honest: local-empty results + unavailable notes, never invented data.
+  const awardClient = (awardDeps && awardDeps.awardClient) || null;
+  const awardBrowser = (awardDeps && awardDeps.browser) || null;
+  const awardIndex = (awardDeps && awardDeps.awardIndex) || awardFallbackIndex();
+  function awardFallbackIndex() {
+    const sites = new Map(); const elements = new Map(); const motions = [];
+    let tax = { colors: [], filters: [] }; let watches = [];
+    return {
+      root: "(memory)", files: [],
+      getStatus: () => ({ dir: "(memory)", version: 1, counts: { sites: sites.size, elements: elements.size, motion: motions.length, taxonomyFilters: tax.filters.length, taxonomyColors: tax.colors.length, watches: watches.length }, freshness: null, stale: true, progress: null, pendingPages: [], lock: { held: false } }),
+      listSites: (n) => [...sites.values()].slice(0, n || 50),
+      getSite: (slug) => { try { return sites.get(String(slug).toLowerCase()) || null; } catch { return null; } },
+      upsertSites: (rows) => { let added = 0; for (const s of (rows || [])) { if (s && s.slug && !sites.has(String(s.slug).toLowerCase())) added++; if (s && s.slug) sites.set(String(s.slug).toLowerCase(), s); } return { added, updated: 0, total: sites.size }; },
+      getTaxonomy: () => ({ version: 1, colors: tax.colors, filters: tax.filters }),
+      setTaxonomy: (t) => { tax = { colors: (t.colors || []).slice(0, 100), filters: (t.filters || []).slice(0, 400) }; return { colors: tax.colors.length, filters: tax.filters.length }; },
+      upsertElements: (rows) => { let added = 0; for (const e of (rows || [])) { if (e && e.slug && !elements.has(String(e.slug))) added++; if (e && e.slug) elements.set(String(e.slug), e); } return { added, total: elements.size }; },
+      listElements: (n) => [...elements.values()].slice(0, n || 50),
+      getElement: (slug) => elements.get(String(slug)) || null,
+      recordMotion: (s) => { const i = motions.findIndex((m) => m.url === s.url); if (i >= 0) motions.splice(i, 1); motions.unshift(s); return s; },
+      searchMotion: (f) => {
+        let items = [...motions];
+        if (f.library) items = items.filter((m) => JSON.stringify(m).toLowerCase().includes(String(f.library).toLowerCase()));
+        if (f.easing) items = items.filter((m) => JSON.stringify(m.easingVocab || []).toLowerCase().includes(String(f.easing).toLowerCase()));
+        if (f.scrollModel) items = items.filter((m) => String((m.stack && m.stack.scrollModel) || "").toLowerCase() === String(f.scrollModel).toLowerCase());
+        return { total: items.length, items: items.slice(0, 10), empty: motions.length === 0 };
+      },
+      newWinners: async () => { throw awardErr("UNSUPPORTED_OPERATION", "new_winners needs a persistent index + award client; wire the server default"); },
+      rebuild: async () => { throw awardErr("UNSUPPORTED_OPERATION", "rebuild needs a persistent index + award client"); },
+      resume: async () => { throw awardErr("UNSUPPORTED_OPERATION", "resume needs a persistent index + award client"); },
+      refresh: async () => { throw awardErr("UNSUPPORTED_OPERATION", "refresh needs a persistent index + award client"); },
+      watchAdd: (w) => { if (watches.some((x) => x.kind === w.kind && x.pattern === w.pattern)) throw awardErr("BAD_ARGS", "duplicate watch"); if (watches.length >= 50) throw awardErr("BAD_ARGS", "too many watches"); const r = { ...w, createdAt: new Date().toISOString(), lastCheckedAt: null, lastSlugs: null }; watches.push(r); return r; },
+      watchList: () => watches,
+      watchRemove: ({ kind, pattern }) => { const b = watches.length; watches = watches.filter((w) => !(w.kind === kind && w.pattern === String(pattern).toLowerCase())); return { removed: watches.length < b }; },
+      checkWatches: () => [],
+    };
+  }
+  function awardMode(v, allowed, name) { if (v === undefined) bad(name + ' is required'); if (!allowed.includes(v)) bad(name + ' must be one of ' + allowed.join('|')); return v; }
+  function awardLimit(v, def, max) { if (v === undefined) return def; if (typeof v !== 'number' || !Number.isFinite(v)) bad('limit must be a number'); return Math.max(1, Math.min(Math.floor(v), max)); }
+  function awardStrArr(v, name, max) { if (v === undefined) return undefined; if (!Array.isArray(v)) bad(name + ' must be an array of strings'); if (v.length > max) bad(name + ' holds max ' + max + ' entries'); for (const e of v) if (typeof e !== 'string' || !e.trim()) bad(name + ' must hold non-empty strings'); return v.map((e) => e.trim()); }
+  async function awardDetailFor(slug) {
+    const norm = awardNormalizeSlug(slug);
+    const cached = awardIndex.getSite(norm);
+    if (!awardClient) return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: 'award client not wired' };
+    try {
+      const { html } = await awardClient.getAwardHtml('/sites/' + norm);
+      const detail = awardParseDetail(html, norm);
+      const cachedTags = (cached && cached.tags) || [];
+      // Tags vs Technologies consistency (#5): listing tags (WebGL, 3D, …)
+      // exist even when the page has no Technologies section. Backfill from
+      // tags and LABEL it inferred — never present it as parsed section data.
+      if ((!detail.technologies || !detail.technologies.length) && cachedTags.length) {
+        detail.technologies = [...new Set(cachedTags.map((t) => String(t)))].slice(0, 12);
+        detail.technologiesInferred = true;
+        detail.technologyEvidence = "inferred from listing tags; page has no Technologies section";
+      }
+      const summary = { slug: norm, title: detail.title || (cached && cached.title) || norm, createdAt: (cached && cached.createdAt) || 0, tags: (cached && cached.tags) || [], thumbnailPath: (cached && cached.thumbnailPath) || "", liveUrl: detail.liveUrl || (cached && cached.liveUrl) || null, detailPath: "/sites/" + norm, awards: (detail.awards || []).map((a) => a.title), studio: (cached && cached.studio) || null, source: "awwwards", sourceUrl: detail.sourceUrl };
+      try { awardIndex.upsertSites([summary]); } catch { /* memory fallback never fails */ }
+      try {
+        const media = awardParseElementsSection(html);
+        if (media && media.length) awardIndex.upsertElements(media.map((m) => ({ slug: 'site-' + norm + '-' + String(m.title || 'element').toLowerCase().replace(/\W+/g, '-').slice(0, 60), title: m.title || 'Element', author: summary.studio || summary.title, builtWith: [], related: [], mediaPath: m.mediaPath, mediaType: String(m.mediaPath).endsWith('.mp4') ? 'video' : 'image', mediaUrl: awardElementUrl(m.mediaPath), category: 'uncategorized', siteSlug: norm, source: 'site', sourceUrl: summary.sourceUrl })));
+      } catch { /* backfill best-effort */ }
+      return { slug: norm, summary, detail, detailStatus: 'fetched', liveError: null };
+    } catch (e) {
+      if (e && e.code === 'NOT_FOUND') throw e;
+      return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: String((e && e.message) || e).slice(0, 220) };
+    }
+  }
   return {
     aura_status: async () => {
       const [status, update] = await Promise.all([catalog.getStatus(), versionNote()]);
@@ -250,5 +328,347 @@ export function createHandlers(catalog, icons, version) {
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
       return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+    aura_award_search: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['sites', 'categories', 'elements', 'motion'], 'mode');
+      const limit = awardLimit(a.limit, 5, 25); const offset = Math.max(0, a.offset ?? 0); const full = a.full === undefined ? false : bool(a.full, 'full');
+      if (mode === 'categories') {
+        let tax = awardIndex.getTaxonomy();
+        let source = 'local-index';
+        if ((!tax.filters.length && !tax.colors.length) && awardClient) {
+          try { const { html } = await awardClient.getAwardHtml('/websites/'); const parsed = awardParseCategories(html); awardIndex.setTaxonomy(parsed); tax = awardIndex.getTaxonomy(); source = 'live'; }
+          catch (e) { return textResult({ mode, colors: [], filters: [], source: 'unavailable', liveError: String((e && e.message) || e).slice(0, 220), note: 'taxonomy unavailable; rebuild the index or retry later' }); }
+        }
+        // Paginated: colors are few (return all); filters page with limit/offset.
+        const allFilters = tax.filters || [];
+        return textResult({ mode, colors: tax.colors || [], filters: allFilters.slice(offset, offset + limit), filtersTotal: allFilters.length, limit, offset, source, updatedAt: tax.updatedAt || null, note: allFilters.length > limit ? 'filters paged — raise offset for more' : undefined });
+      }
+      if (mode === 'motion') {
+        const r = awardIndex.searchMotion({ library: str(a.library, 'library'), easing: str(a.easing, 'easing'), scrollModel: a.scrollModel === undefined ? undefined : String(a.scrollModel), limit });
+        if (r.empty) return textResult({ mode, total: 0, items: [], emptyCorpus: true, note: 'no motion studies recorded yet — run aura_motion_study {mode:inspect|record} first' });
+        return textResult({ mode, total: r.total, items: r.items, emptyCorpus: false });
+      }
+      if (mode === 'elements') {
+        const q = str(a.query, 'query') || ''; const cat = str(a.category, 'category');
+        let pool = awardIndex.listElements(500);
+        if (!pool.length && awardClient && q) {
+          // Honest empty: element gallery needs per-item fetches; point at winners backfill instead of scraping blindly.
+          return textResult({ mode, total: 0, items: [], note: 'element corpus is empty; fetch site elements via aura_award_inspect {mode:site_elements} or record new_winners to backfill' });
+        }
+        let items = pool;
+        if (cat) items = items.filter((e) => String(e.category || '').toLowerCase() === cat.toLowerCase() || String(e.title || '').toLowerCase().includes(cat.toLowerCase()));
+        if (q) {
+          const toks = awardTokens(q);
+          items = items.map((e) => { const hay = (String(e.title || '') + ' ' + String(e.author || '') + ' ' + String(e.category || '')).toLowerCase(); let s = 0; for (const t of toks) if (hay.includes(t)) s++; return { e, s }; }).filter((x) => x.s > 0).sort((x, y) => y.s - x.s || String(x.e.title).localeCompare(String(y.e.title))).map((x) => x.e);
+        } else items = [...items].sort((x, y) => String(x.title).localeCompare(String(y.title)));
+        const page = items.slice(offset, offset + limit).map((e) => ({ slug: e.slug, title: e.title, author: e.author || null, category: e.category || null, mediaUrl: e.mediaUrl || (e.mediaPath ? awardElementUrl(e.mediaPath) : null), mediaType: e.mediaType || null, siteSlug: e.siteSlug || null, sourceUrl: e.sourceUrl || null, evidence: { source: 'awwwards' } }));
+        return textResult({ mode, query: q || null, total: items.length, limit, offset, items: page, ...(page.length ? {} : { suggestions: awardSuggestQueries(q || 'hero', awardIndex.getTaxonomy()) }) });
+      }
+      // sites
+      const query = str(a.query, 'query') || ''; const slugQ = a.slug === undefined ? undefined : awardNormalizeSlug(a.slug);
+      const tech = str(a.technology, 'technology'); const color = str(a.color, 'color'); const awardF = a.award; const studio = str(a.studio, 'studio');
+      if (awardF !== undefined && !['sotd', 'developer', 'honorable'].includes(awardF)) bad('award must be sotd|developer|honorable');
+      if (color !== undefined && !/^#?[0-9a-fA-F]{6}$/.test(color.trim())) bad('color must be a hex like #FF5733');
+      let pool = awardIndex.listSites(2000);
+      let liveError = null, liveRefreshed = false;
+      if (!pool.length && awardClient) {
+        try {
+          const { html } = await awardClient.getAwardHtml(awardFilterUrl({ color: color ? '#' + String(color).replace('#', '') : undefined, tags: a.tags, technology: tech, award: awardF }));
+          const parsed = awardParseListing(html);
+          if (parsed.length) { awardIndex.upsertSites(parsed); pool = awardIndex.listSites(2000); liveRefreshed = true; }
+        } catch (e) { liveError = String((e && e.message) || e).slice(0, 220); }
+      }
+      let filtered = pool;
+      if (slugQ) filtered = filtered.filter((s) => s.slug === slugQ);
+      if (tech) filtered = filtered.filter((s) => (s.tags || []).map((t) => String(t).toLowerCase()).includes(tech.toLowerCase()) || JSON.stringify(s).toLowerCase().includes(tech.toLowerCase()));
+      if (studio) filtered = filtered.filter((s) => String(s.studio || '').toLowerCase().includes(studio.toLowerCase()));
+      if (Array.isArray(a.tags) && a.tags.length) {
+        const want = a.tags.map((t) => String(t).toLowerCase());
+        filtered = filtered.filter((s) => want.some((w) => (s.tags || []).map((t) => String(t).toLowerCase()).includes(w)));
+      }
+      const { tokens, scored } = awardScoreSites(filtered, query || slugQ || '', { technology: tech, color });
+      const ranked = query ? scored.filter((x) => x.score > 0).map((x) => ({ s: x.site, score: x.score, reasons: x.reasons })) : scored.map((x) => ({ s: x.site, score: x.score, reasons: x.reasons }));
+      const total = ranked.length;
+      const page = ranked.slice(offset, offset + limit);
+      const items = [];
+      for (const r of page) {
+        if (full) {
+          try { const d = await awardDetailFor(r.s.slug); items.push(awardFullSite(d.summary || r.s, d.detail, { score: r.score, reasons: r.reasons })); }
+          catch { items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons })); }
+        } else items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons }));
+      }
+      const out = { mode, query: query || null, tokens, total, limit, offset, items, source: liveRefreshed ? 'live' : 'local-index', ...(liveError ? { liveError } : {}),
+        corpusNote: liveRefreshed ? 'local index was empty; seeded from one polite live listing fetch (rebuild the index for depth)' : 'ranked from the local index; rebuild/refresh the index when stale' };
+      if (!items.length && !liveError) { out.suggestions = awardSuggestQueries(query || 'portfolio', awardIndex.getTaxonomy()); out.note = 'zero-match (not a failure): try a suggestion'; }
+      if (!items.length && liveError) out.note = 'upstream fetch failed; local index also empty — retry later, do not treat as zero-match';
+      return textResult(out); },
+    aura_award_inspect: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['site_details', 'site_elements', 'element', 'compare_sites'], 'mode');
+      if (mode === 'element') {
+        const slug = awardNormalizeSlug(a.elementSlug || bad('elementSlug (string) is required'));
+        let rec = awardIndex.getElement(slug);
+        if (!rec && awardClient) {
+          try { const { html } = await awardClient.getAwardHtml('/inspiration/' + slug); const parsed = awardParseElementPage(html); if (parsed) { awardIndex.upsertElements([{ ...parsed }]); rec = awardIndex.getElement(slug) || parsed; } } catch (e) { if (e && e.code === 'NOT_FOUND') throw e; }
+        }
+        if (!rec) { const e = new Error('element not found: ' + slug); e.code = 'NOT_FOUND'; throw e; }
+        return textResult({ mode, element: rec });
+      }
+      if (mode === 'compare_sites') {
+        const slugs = awardStrArr(a.slugs, 'slugs', 3) || bad('slugs (array of 2-3) is required');
+        if (slugs.length < 2) bad('compare_sites needs 2-3 slugs');
+        const normed = slugs.map((s) => awardNormalizeSlug(s));
+        const entries = [];
+        for (const s of normed) {
+          const d = await awardDetailFor(s);
+          let motion = null;
+          try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(s)) || null; } catch { motion = null; }
+          entries.push({ slug: s, detail: d.detail, motion });
+        }
+        const cmp = awardCompareSites(entries);
+        return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
+      }
+      const slug = awardNormalizeSlug(a.slug || bad('slug (string) is required'));
+      const d = await awardDetailFor(slug);
+      if (!d.summary && !d.detail) { const e = new Error('site not found: ' + slug); e.code = 'NOT_FOUND'; throw e; }
+      if (mode === 'site_details') {
+        let motion = null;
+        try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(slug)) || null; } catch { motion = null; }
+        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
+      }
+      // site_elements
+      let elements = [];
+      if (d.detail && d.detail.elements) {
+        const media = awardParseElementsSection((await (async () => { try { const r = await awardClient.getAwardHtml('/sites/' + slug); return r.html; } catch { return ''; } })())) || [];
+        elements = (media.length ? media : d.detail.elements.map((t) => ({ title: t, mediaPath: null }))).map((m) => ({ title: m.title, mediaUrl: m.mediaPath ? awardElementUrl(m.mediaPath) : null, mediaType: m.mediaPath ? (String(m.mediaPath).endsWith('.mp4') ? 'video' : 'image') : null, siteSlug: slug, sourceUrl: awardSiteUrl(slug), evidence: { source: 'awwwards' } }));
+      } else {
+        const pool = awardIndex.listElements(500).filter((e) => e.siteSlug === slug);
+        elements = pool.map((e) => ({ title: e.title, mediaUrl: e.mediaUrl || (e.mediaPath ? awardElementUrl(e.mediaPath) : null), mediaType: e.mediaType, siteSlug: slug, sourceUrl: e.sourceUrl || awardSiteUrl(slug), evidence: { source: 'awwwards' } }));
+      }
+      return textResult({ mode, slug, sourceUrl: awardSiteUrl(slug), elements, ...(elements.length ? {} : { note: 'no Elements section on this page (legitimate empty) or detail unavailable' }) }); },
+    aura_design_blueprint: async (a) => { a = a || {}; const goal = typeof a.goal === 'string' ? a.goal.trim() : bad('goal (string) is required');
+      if (!goal) bad('goal (string) is required');
+      const refs = awardStrArr(a.references, 'references', 5) || bad('references (array of 2-5 slugs) is required');
+      if (refs.length < 2 || refs.length > 5) bad('references must hold 2-5 slugs — got ' + refs.length);
+      const normed = refs.map((s) => awardNormalizeSlug(s));
+      const technology = str(a.technology, 'technology'); const visualDirection = str(a.visualDirection, 'visualDirection'); const responsive = str(a.responsive, 'responsive');
+      const constraints = Array.isArray(a.constraints) ? a.constraints.filter((c) => typeof c === 'string').map((c) => c.slice(0, 200)).slice(0, 8) : [];
+      const includeStructure = a.includeStructure === undefined ? false : bool(a.includeStructure, 'includeStructure');
+      const details = [];
+      for (const s of normed) { try { details.push(await awardDetailFor(s)); } catch (e) { if (e && e.code === 'NOT_FOUND') throw e; details.push({ slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) }); } }
+      // Aura catalogue matches (real rows only; failures stay unavailable).
+      // One query PER proposed section so every section gets a candidate —
+      // theme words from the goal ride along (dark/light re-rank server-side).
+      const auraMatches = []; let auraUnavailable = null;
+      const SECTIONS = ['hero', 'proof', 'features', 'showcase', 'pricing', 'testimonials', 'faq', 'cta', 'footer'];
+      try {
+        if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
+        const themeWord = /\b(dark|light)\b/i.test(goal + ' ' + (visualDirection || '')) ? goal.match(/\b(dark|light)\b/i)[1].toLowerCase() : undefined;
+        const seen = new Set();
+        const queries = [];
+        for (const sec of SECTIONS) {
+          const refWords = [];
+          for (const d of details) {
+            const toks = awardTokens(((d.detail && d.detail.title) || '') + ' ' + ((d.detail && (d.detail.elements || []).join(' ')) || '')).slice(0, 2);
+            if (toks.length) refWords.push(toks[0]);
+          }
+          const q = [...new Set([sec, ...refWords.slice(0, 1), themeWord].filter(Boolean))].join(' ');
+          queries.push({ section: sec, q });
+        }
+        for (const { section, q } of queries) {
+          if (auraMatches.length >= 12) break;
+          try {
+            const r = await catalog.searchCatalog('components', { query: q, freeOnly: true, limit: 2, ...(themeWord ? { theme: themeWord } : {}) });
+            for (const it of (r.items || []).slice(0, 1)) {
+              if (!it || it.premium !== false) continue;
+              const key = String(it.id || it.slug);
+              if (seen.has(key)) continue;
+              seen.add(key);
+              auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
+            }
+          } catch { /* per-section failure tolerated, recorded below */ }
+        }
+        try {
+          const sys = await catalog.searchCatalog('design_systems', { query: goal, limit: 1 });
+          if (sys.items && sys.items[0]) auraMatches.unshift({ section: 'tokens', componentId: sys.items[0].slug || sys.items[0].id, componentTitle: sys.items[0].title, pageUrl: sys.items[0].page_url, why: 'design-system tokens first' });
+        } catch { /* optional */ }
+        const covered = new Set(auraMatches.map((m) => m.section));
+        const uncovered = SECTIONS.filter((s) => !covered.has(s));
+        if (uncovered.length) auraUnavailable = (auraUnavailable ? auraUnavailable + '; ' : '') + 'no free catalogue match for sections: ' + uncovered.join(', ') + ' — build these from tokens + closest matched section';
+      } catch (e) { auraUnavailable = String((e && e.message) || e).slice(0, 200); }
+      let structureNotes = null;
+      if (includeStructure) {
+        if (!awardBrowser) structureNotes = 'structure not captured: browser unavailable (install Chrome or set AURA_CHROME_PATH)';
+        else {
+          const parts = [];
+          for (const s of normed.slice(0, 3)) {
+            const d = details.find((x) => x.slug === s);
+            const live = d && d.detail && d.detail.liveUrl;
+            if (!live) { parts.push(s + ': no live URL in evidence'); continue; }
+            try { const st = await awardBrowser.structure(live, { viewport: 'desktop' }); parts.push(s + ': ' + st.bands.length + ' bands over ' + st.totalHeight + 'px (live-dom)'); }
+            catch (e) { parts.push(s + ': structure unavailable (' + String((e && e.message) || e).slice(0, 120) + ')'); }
+          }
+          structureNotes = parts.join('; ');
+        }
+      }
+      let motionNotes = null;
+      const gaps = [];
+      for (const d of details) {
+        if (!d.detail) gaps.push(d.slug + ': reference detail unavailable' + (d.liveError ? ' (' + d.liveError + ')' : ''));
+      }
+      try {
+        const mr = awardIndex.searchMotion({ limit: 25 });
+        const hits = (mr.items || []).filter((m) => normed.some((s) => String(m.url || '').toLowerCase().includes(s)));
+        if (hits.length) motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; ');
+        else gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
+      } catch { /* ignore */ }
+      if (!includeStructure) gaps.push('structure: not requested (pass includeStructure:true for measured band evidence)');
+      if (auraUnavailable) gaps.push('catalogue: ' + auraUnavailable);
+      // Requested palette synthesis: hexes named in the goal/direction become
+      // PROPOSED tokens (never presented as observed ref evidence), mapped
+      // against the refs' observed luminance bands.
+      const requestedPalette = [...new Set([...String(goal + ' ' + (visualDirection || '')).matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)].map((m) => { const h = m[1]; return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toUpperCase(); }))].slice(0, 6);
+      const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
+      return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
+    aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'compare'], 'mode');
+      const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
+      const waitStrategy = a.waitStrategy === undefined ? 'load' : awardMode(a.waitStrategy, ['load', 'networkidle'], 'waitStrategy');
+      const settleMs = a.settleMs === undefined ? 1500 : num(a.settleMs, 'settleMs');
+      if (typeof settleMs !== 'number' || settleMs < 0 || settleMs > 8000) bad('settleMs must be 0-8000');
+      const allowLocal = a.allowLocal === undefined ? false : bool(a.allowLocal, 'allowLocal');
+      // Local-file audit (P0-2): a file:// build path or plain local path is
+      // readable WITHOUT a browser when allowLocal:true — parsed as labeled
+      // static-html estimates (source:local-file). Screenshots still need http.
+      const readLocalSource = async (raw, label) => {
+        if (!allowLocal) { const e = new Error(label + ' is a local path: pass allowLocal:true to audit local builds (structure mode reads the file directly; capture needs a served http URL)'); e.code = 'UNSUPPORTED_OPERATION'; throw e; }
+        let fs, path;
+        try {
+          const g = globalThis.process && globalThis.process.getBuiltinModule ? globalThis.process.getBuiltinModule : null;
+          if (typeof g !== "function") throw new Error("needs Node 22+");
+          fs = g.call(globalThis.process, "node:fs"); path = g.call(globalThis.process, "node:path");
+        } catch { const e = new Error('local file audit needs Node 22+'); e.code = 'UNSUPPORTED_OPERATION'; throw e; }
+        let file = String(raw);
+        if (/^file:\/\//i.test(file)) { try { file = new URL(file).pathname; } catch { bad(label + ' is not a readable file URL'); } if (/^\/[A-Za-z]:\//.test(file)) file = file.slice(1); }
+        if (/[\0]/.test(file) || file.length > 1000) bad(label + ' is not a readable local file');
+        let html;
+        try { html = fs.readFileSync(file, "utf8"); }
+        catch { const e = new Error(label + ' not found or unreadable: ' + String(file).slice(0, 160)); e.code = 'NOT_FOUND'; throw e; }
+        if (html.length > 1500000) html = html.slice(0, 1500000);
+        const bands = cdpBandsFromHtml(html, raw);
+        return { ...bands, source: 'local-file', note: 'local file estimate — tags/landmarks only, no measured layout; serve over http + allowLocal:true for live-dom bands' };
+      };
+      const isLocalInput = (raw) => typeof raw === 'string' && (/^file:\/\//i.test(raw) || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || /^[^/:?#]+\.html?([?#]|$)/i.test(raw));
+      const fetchStatic = async (target) => {
+        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.1' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        if (res.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
+        if (!res.ok) throw awardErr('UPSTREAM_ERROR', 'HTTP ' + res.status + ' for ' + target);
+        const text = await res.text();
+        return text.slice(0, 1500000);
+      };
+      const structureOf = async (rawTarget, label) => {
+        if (isLocalInput(rawTarget)) return readLocalSource(rawTarget, label || 'url');
+        const target = rawTarget;
+        if (awardBrowser) {
+          try { return await awardBrowser.structure(target, { viewport, allowLocal }); }
+          catch (e) {
+            // Any live-dom failure degrades to labeled static estimates —
+            // the audit stays usable, and the downgrade is disclosed.
+            if (e && (e.code === 'BROWSER_UNAVAILABLE' || e.code === 'CAPTURE_TIMEOUT' || e.code === 'UPSTREAM_ERROR')) {
+              try {
+                const html = await fetchStatic(target);
+                return { ...cdpBandsFromHtml(html, target), fallbackFrom: 'live-dom', fallbackWhy: String((e && e.message) || e).slice(0, 200) };
+              } catch { throw e; }
+            }
+            throw e;
+          }
+        }
+        const html = await fetchStatic(target);
+        return cdpBandsFromHtml(html, target);
+      };
+      if (mode === 'capture') {
+        if (typeof a.url === 'string' && isLocalInput(a.url) && !/^https?:\/\//i.test(a.url)) bad('capture needs an http(s) URL — screenshots require a browser navigating a served page. Serve the build (e.g. npx serve) and pass its http://127.0.0.1:PORT URL with allowLocal:true.');
+        const target = awardValidateHttpUrl(a.url || bad('url (string) is required'), { allowLocal });
+        if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'capture needs Chrome: install it or set AURA_CHROME_PATH. Fallback: aura_visual_audit {mode:structure} estimates sections from static HTML without a browser.');
+        try { return textResult(await awardBrowser.capture(target, { viewport, waitStrategy, settleMs, allowLocal })); }
+        catch (e) {
+          if (e && e.code === 'BROWSER_UNAVAILABLE') throw e;
+          throw awardErr('UPSTREAM_ERROR', 'capture failed: ' + String((e && e.message) || e).slice(0, 220) + ' — retry, or use mode:structure for a static estimate');
+        }
+      }
+      if (mode === 'structure') {
+        const raw = a.url || bad('url (string) is required');
+        const target = isLocalInput(raw) ? raw : awardValidateHttpUrl(raw, { allowLocal });
+        return textResult({ mode, ...(await structureOf(target, 'url')) });
+      }
+      const rawRef = a.referenceUrl || bad('referenceUrl (string) is required');
+      const rawBuild = a.buildUrl || bad('buildUrl (string) is required');
+      const normRef = isLocalInput(rawRef) ? rawRef : awardValidateHttpUrl(rawRef, { allowLocal });
+      const normBuild = isLocalInput(rawBuild) ? rawBuild : awardValidateHttpUrl(rawBuild, { allowLocal });
+      const [rs, bs] = await Promise.all([structureOf(normRef, 'referenceUrl'), structureOf(normBuild, 'buildUrl')]);
+      const mismatches = [];
+      if (rs.bands.length !== bs.bands.length) mismatches.push({ kind: 'section-count', detail: 'reference has ' + rs.bands.length + ' bands, build has ' + bs.bands.length });
+      const seq = (x) => x.bands.map((b) => b.tag + ':' + (b.label || '')).join(' > ');
+      if (seq(rs) !== seq(bs)) mismatches.push({ kind: 'section-order', detail: 'band tag sequence differs', reference: seq(rs).slice(0, 300), build: seq(bs).slice(0, 300) });
+      if (rs.totalHeight && bs.totalHeight) {
+        const ratio = bs.totalHeight / Math.max(1, rs.totalHeight);
+        if (ratio < 0.7 || ratio > 1.4) mismatches.push({ kind: 'page-height', detail: 'build height ' + bs.totalHeight + 'px vs reference ' + rs.totalHeight + 'px (ratio ' + ratio.toFixed(2) + ')' });
+      }
+      const pal = (x) => new Set(x.bands.map((b) => String(b.background || '').toLowerCase()).filter(Boolean));
+      const rp = pal(rs), bp = pal(bs);
+      const onlyRef = [...rp].filter((c) => ![...bp].some((d) => d === c));
+      if (onlyRef.length >= 2) mismatches.push({ kind: 'palette', detail: onlyRef.length + ' reference backgrounds absent in build: ' + onlyRef.slice(0, 4).join(', ') });
+      return textResult({ mode, reference: rs, build: bs, mismatches, manualJudgment: ['imagery tone and spacing rhythm need human eyes', 'motion/interaction parity is not covered here — see aura_motion_study'], metrics: { refBands: rs.bands.length, buildBands: bs.bands.length }, sources: [rs.source, bs.source], ...((rs.source !== 'live-dom' || bs.source !== 'live-dom') ? { estimateNote: 'one or both sides are layout estimates (no measured offsets) — counts/order still comparable, heights are not' } : {}) }); },
+    aura_motion_study: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['inspect', 'record', 'search'], 'mode');
+      if (mode === 'search') {
+        const r = awardIndex.searchMotion({ library: str(a.library, 'library'), easing: str(a.easing, 'easing'), scrollModel: a.scrollModel === undefined ? undefined : String(a.scrollModel), limit: awardLimit(a.frames, 10, 25) });
+        if (r.empty) return textResult({ mode, total: 0, items: [], emptyCorpus: true, note: 'no motion studies stored yet' });
+        return textResult({ mode, total: r.total, items: r.items, emptyCorpus: false });
+      }
+      const allowLocal = a.allowLocal === undefined ? false : bool(a.allowLocal, 'allowLocal');
+      const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
+      const target = awardValidateHttpUrl(a.url || bad('url (string) is required'), { allowLocal });
+      if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'motion ' + mode + ' needs Chrome: install it or set AURA_CHROME_PATH.');
+      if (mode === 'inspect') {
+        const study = await awardBrowser.motionInspect(target, { viewport, allowLocal });
+        try { awardIndex.recordMotion(study); } catch { /* memory fallback never fails */ }
+        return textResult({ mode, study });
+      }
+      const frames = a.frames === undefined ? 8 : num(a.frames, 'frames');
+      if (typeof frames !== 'number' || frames < 2 || frames > 16) bad('frames must be 2-16');
+      const durationMs = a.durationMs === undefined ? 12000 : num(a.durationMs, 'durationMs');
+      if (typeof durationMs !== 'number' || durationMs < 4000 || durationMs > 30000) bad('durationMs must be 4000-30000');
+      const rec = await awardBrowser.recordFrames(target, { frames: Math.floor(frames), viewport, allowLocal, durationMs: Math.floor(durationMs) });
+      if (rec.study) { try { awardIndex.recordMotion(rec.study); } catch { /* ignore */ } }
+      let video = null, videoAvailable = false, videoHint = null;
+      try {
+        const enc = await awardBrowser.encodeWebm(rec.frames, {});
+        video = enc.video; videoAvailable = !!enc.available; videoHint = enc.hint || null;
+      } catch (e) { videoHint = String((e && e.message) || e).slice(0, 160); }
+      if (!videoAvailable && !videoHint) videoHint = 'ffmpeg not found; install ffmpeg or set AURA_FFMPEG_PATH for .webm output — frame JPEGs retained';
+      return textResult({ mode, url: target, study: rec.study, frames: rec.frames, frameCount: rec.frameCount, video, video_available: videoAvailable, ...(videoHint ? { videoHint } : {}) }); },
+    aura_award_index: async (a) => { a = a || {}; const action = awardMode(a.action, ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'], 'action');
+      if (action === 'status') return textResult({ action, ...awardIndex.getStatus() });
+      if (action === 'watch_list') return textResult({ action, watches: awardIndex.watchList() });
+      if (action === 'watch_add') {
+        const kind = awardMode(a.kind, ['studio', 'tag', 'url'], 'kind');
+        if (typeof a.pattern !== 'string' || !a.pattern.trim()) bad('pattern (string) is required');
+        return textResult({ action, watch: awardIndex.watchAdd({ kind, pattern: a.pattern, award: a.award }) });
+      }
+      if (action === 'watch_remove') {
+        const kind = awardMode(a.kind, ['studio', 'tag', 'url'], 'kind');
+        if (typeof a.pattern !== 'string' || !a.pattern.trim()) bad('pattern (string) is required');
+        return textResult({ action, ...awardIndex.watchRemove({ kind, pattern: a.pattern }) });
+      }
+      if (action === 'new_winners') {
+        if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', 'new_winners needs an award client (server wiring)');
+        const r = await awardIndex.newWinners({ client: awardClient, award: a.award || 'sotd' });
+        let deltas = [];
+        try { deltas = awardIndex.checkWatches ? awardIndex.checkWatches() : []; } catch { deltas = []; }
+        return textResult({ action, ...r, watchDeltas: deltas });
+      }
+      if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', action + ' needs an award client (server wiring)');
+      const maxPages = a.maxPages === undefined ? 5 : num(a.maxPages, 'maxPages');
+      if (typeof maxPages !== 'number' || maxPages < 1 || maxPages > 20) bad('maxPages must be 1-20 (bounded crawl per call; resume for more)');
+      // Bounded crawl: cap the taxonomy to maxPages per call, keep resume state.
+      const tax = awardIndex.getTaxonomy();
+      const tags = (tax.filters || []).slice(0, Math.floor(maxPages));
+      const r = action === 'refresh' ? await awardIndex.refresh({ client: awardClient, tags }) : action === 'resume' ? await awardIndex.resume({ client: awardClient, tags: tags.length ? tags : undefined }) : await awardIndex.rebuild({ client: awardClient, tags: tags.length ? tags : undefined });
+      return textResult({ action, ...r, note: 'bounded per call (maxPages); call resume to continue' }); },
   };
 };

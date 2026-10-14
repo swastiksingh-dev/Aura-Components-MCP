@@ -169,6 +169,19 @@ function detectThemeHint(q) {
   if (light && !dark) return "light";
   return null;
 }
+// Light suffix stemming so inflected query words still hit literal titles
+// (glassy→glass, magazines→magazine). Same rule family as the award ranker;
+// applied symmetrically to query tokens AND haystacks, so counts only grow
+// when both sides agree on the stem — honest-empty behavior preserved.
+function stemTok(t) {
+  let s = String(t ?? "").toLowerCase();
+  if (s.length > 5 && s.endsWith("ing")) s = s.slice(0, -3);
+  else if (s.length > 4 && s.endsWith("ies")) s = s.slice(0, -3) + "y";
+  else if (s.length > 4 && s.endsWith("es") && /(ses|xes|zes|ches|shes)$/.test(s)) s = s.slice(0, -2);
+  else if (s.length > 4 && s.endsWith("s") && !s.endsWith("ss")) s = s.slice(0, -1);
+  else if (s.length > 4 && s.endsWith("y")) s = s.slice(0, -1);
+  return s;
+}
 // Rank rows: +2 per matched token in title, +1 in description/tags, theme match first.
 // Returns { rows, scored } where scored explains the top pick for fallback_score.
 function scoreRows(kind, rows, toks, themeHint) {
@@ -177,7 +190,11 @@ function scoreRows(kind, rows, toks, themeHint) {
     const desc = String(r.description || "").toLowerCase();
     const tags = ((r.tags || []).map((x) => String(x).toLowerCase()).join(" "));
     let s = 0;
-    for (const t of toks) { if (title.includes(t)) s += 2; else if (desc.includes(t) || tags.includes(t)) s += 1; }
+    for (const raw of toks) {
+      const t = stemTok(raw);
+      if (title.includes(raw) || (t !== raw && title.includes(t))) s += 2;
+      else if (desc.includes(raw) || tags.includes(raw) || (t !== raw && (desc.includes(t) || tags.includes(t)))) s += 1;
+    }
     const th = r.facets && r.facets.theme;
     const themeOk = !themeHint || th === themeHint || th === "mixed" || th === "unknown";
     if (themeHint && th === themeHint) s += 3;
@@ -198,7 +215,8 @@ function matchOverlap(kind, toks, item) {
     let n = 0;
     for (const t of list) {
       const tok = String(t ?? "").toLowerCase();
-      if (tok && title.includes(tok)) n++;
+      const stem = stemTok(tok);
+      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)))) n++;
     }
     return n;
   }
@@ -211,7 +229,8 @@ function matchOverlap(kind, toks, item) {
   let n = 0;
   for (const t of list) {
     const tok = String(t ?? "").toLowerCase();
-    if (tok && hay.includes(tok)) n++;
+    const stem = stemTok(tok);
+    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)))) n++;
   }
   return n;
 }
@@ -1630,6 +1649,1416 @@ function createVersion({ fetcher, running, now = () => Date.now() }) {
   return { getVersion };
 }
 
+// ---- awards.mjs ----
+// Module: awards — award-website discovery, retrieval, parsing, ranking.
+// Reimplements the useful Awwwards-mcp behaviors (site discovery, detail
+// design-DNA, elements, taxonomy, winners) in Aura's native zero-dep style:
+// pure parsers + polite fetch client + deterministic local ranking.
+// Upstream inspiration: INSANE0777/Awwwards-mcp (MIT, (c) 2026 Afjal) —
+// behavior reimplemented here, not copied; see THIRD_PARTY_NOTICES.md.
+// No invented metadata: every record carries source/evidence fields.
+
+const AWARD_SCHEMA_VERSION = 1;
+const AWARD_BASE_URL = "https://www.awwwards.com";
+const AWARD_ASSETS_URL = "https://assets.awwwards.com";
+const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.1";
+const AWARD_ALLOWED_HOSTS = ["www.awwwards.com", "awwwards.com", "assets.awwwards.com"];
+const AWARD_TIMEOUT_MS = 10000;
+const AWARD_MAX_BYTES = 2 * 1024 * 1024;
+const AWARD_RATE_MS = 1000;
+const AWARD_FILTERS = { sotd: "websites/sites_of_the_day", developer: "websites/developer", honorable: "websites/honorable" };
+const AWARD_FILTER_NAMES = ["sotd", "developer", "honorable"];
+const AWARD_ELEMENT_CATS = ["hero", "navigation", "pricing", "footer", "features", "contact", "cta", "testimonial", "faq", "about", "gallery", "menu"];
+const AWARD_SCORE_VERSION = 1;
+
+function awardErr(code, message) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+function awardBad(message) { return awardErr("BAD_ARGS", message); }
+function awardNotFound(message) { return awardErr("NOT_FOUND", message); }
+function awardUpstream(message) { return awardErr("UPSTREAM_ERROR", message); }
+
+const AWARD_ENTITIES = { "&quot;": '"', "&amp;": "&", "&#039;": "'", "&#39;": "'", "&lt;": "<", "&gt;": ">", "&nbsp;": " " };
+function awardDecodeEntities(s) {
+  return String(s ?? "").replace(/&(?:quot|amp|#0?39|lt|gt|nbsp);/g, (e) => AWARD_ENTITIES[e] ?? e);
+}
+function awardStripTags(s) {
+  return awardDecodeEntities(String(s ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+function awardNormalizeSlug(s) {
+  const v = String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  if (!v || v.length > 120) throw awardBad("slug must be 1-120 chars of [a-z0-9-], got: " + String(s).slice(0, 80));
+  return v;
+}
+function awardNormalizeUrl(u) {
+  if (typeof u !== "string" || !u) return null;
+  try {
+    const p = new URL(u);
+    if (p.protocol !== "http:" && p.protocol !== "https:") return null;
+    return p.toString();
+  } catch { return null; }
+}
+
+// ---- URL safety (SSRF guard) ----
+const AWARD_BLOCKED_HOST_RES = [/^localhost$/i, /^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^169\.254\./, /^0\.0\.0\.0$/, /^\[?::1\]?$/, /\.local$/i, /^metadata\.google\.internal$/i];
+function awardIsBlockedHost(hostname) {
+  const h = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  for (const re of AWARD_BLOCKED_HOST_RES) if (re.test(h)) return true;
+  return false;
+}
+function awardValidateHttpUrl(raw, { allowLocal = false } = {}) {
+  if (typeof raw !== "string" || !raw.trim()) throw awardBad("url must be a non-empty http(s) string");
+  if (raw.length > 2000) throw awardBad("url too long (max 2000 chars)");
+  let u;
+  try { u = new URL(raw.trim()); } catch { throw awardBad("url is not parseable: " + raw.slice(0, 120)); }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw awardBad("only http/https urls are allowed, got: " + u.protocol);
+  if (u.username || u.password) throw awardBad("urls with credentials are not allowed");
+  if (awardIsBlockedHost(u.hostname) && !allowLocal) {
+    const e = new Error("private/local target blocked (pass allowLocal:true for loopback dev builds): " + u.hostname);
+    e.code = "UNSUPPORTED_OPERATION";
+    throw e;
+  }
+  if (u.hostname === "169.254.169.254" || /metadata/i.test(u.hostname)) {
+    const e = new Error("cloud metadata endpoints are never fetched");
+    e.code = "UNSUPPORTED_OPERATION";
+    throw e;
+  }
+  return u.toString();
+}
+function awardValidateAwardPath(pathOrUrl) {
+  const s = String(pathOrUrl ?? "");
+  if (/^https?:\/\//i.test(s)) {
+    const u = new URL(s);
+    if (!AWARD_ALLOWED_HOSTS.includes(u.hostname.toLowerCase())) throw awardBad("award source host not allowed: " + u.hostname);
+    return u.pathname + (u.search || "");
+  }
+  if (!s.startsWith("/")) throw awardBad("award path must start with / (e.g. /sites/slug)");
+  if (s.includes("..") || s.includes("\\") || /[\s<>"]/.test(s)) throw awardBad("unsafe award path");
+  return s;
+}
+
+// ---- Filter URL builder (one filter per URL; rest applied client-side) ----
+function awardFilterUrl(filters = {}) {
+  if (filters.color) {
+    const c = String(filters.color).replace("#", "").toUpperCase();
+    if (!/^[0-9A-F]{6}$/.test(c)) throw awardBad("color must be a hex like #FF5733");
+    return AWARD_BASE_URL + "/websites/%23" + c + "/";
+  }
+  if (filters.award) {
+    if (!AWARD_FILTERS[filters.award]) throw awardBad("award must be one of " + AWARD_FILTER_NAMES.join("|"));
+    return AWARD_BASE_URL + "/" + AWARD_FILTERS[filters.award] + "/";
+  }
+  const tag = filters.technology ?? (Array.isArray(filters.tags) ? filters.tags[0] : null);
+  if (tag) {
+    const t = String(tag).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
+    if (!t || t.length > 60) throw awardBad("tag/technology must be 2-60 chars");
+    return AWARD_BASE_URL + "/websites/" + encodeURIComponent(t) + "/";
+  }
+  return AWARD_BASE_URL + "/websites/";
+}
+function awardSiteUrl(slug) { return AWARD_BASE_URL + "/sites/" + awardNormalizeSlug(slug); }
+function awardThumbnailUrl(thumbPath, size = 880) {
+  const dim = size === 440 ? "440_330" : "880_660";
+  return AWARD_ASSETS_URL + "/awards/media/cache/thumb_" + dim + "/" + String(thumbPath).replace(/^\/+/, "");
+}
+function awardElementUrl(mediaPath) { return AWARD_ASSETS_URL + "/awards/" + String(mediaPath).replace(/^\/+/, ""); }
+
+// ---- Parsers (scoped, fixture-driven, resilient to missing fields) ----
+const AWARD_LABELS = { sotd: "Site of the Day", dev: "Developer Award", hm: "Honorable Mention", sotm: "Site of the Month", mobile: "Mobile Excellence", ecom: "E-Commerce Award" };
+function awardParseListing(html) {
+  const src = String(html || "");
+  if (!src) return [];
+  const sites = [];
+  const seen = new Set();
+  const parts = src.split('data-collectable-model-value="');
+  const blobParts = parts.slice(1);
+  for (const part of blobParts) {
+    const end = part.indexOf('">');
+    if (end < 0 || end > 20000) continue;
+    let meta;
+    try { meta = JSON.parse(awardDecodeEntities(part.slice(0, end))); } catch { continue; }
+    if (!meta || !meta.slug || !meta.title) continue;
+    if (meta.type && meta.type !== "submission") continue;
+    const slug = String(meta.slug).toLowerCase();
+    if (seen.has(slug)) continue;
+    const card = part.slice(end, end + 8000);
+    const detailMatch = card.match(/href="(\/sites\/[^"#?]+)"/);
+    if (!detailMatch) continue;
+    const liveMatch = card.match(/class="figure-rollover__bt"[^>]*href="(https?:\/\/[^"]+)"/);
+    const awards = [...new Set([...card.matchAll(/budget-tag--([a-z-]+)/g)].map((m) => AWARD_LABELS[m[1]] ?? m[1]))];
+    const studioMatch = card.match(/avatar-name__title">([^<]+)</);
+    seen.add(slug);
+    sites.push({
+      slug,
+      title: awardDecodeEntities(meta.title).trim(),
+      createdAt: Number(meta.createdAt) || 0,
+      tags: Array.isArray(meta.tags) ? meta.tags.map((t) => awardDecodeEntities(t)).filter(Boolean) : [],
+      thumbnailPath: (meta.images && meta.images.thumbnail) ? String(meta.images.thumbnail) : "",
+      liveUrl: liveMatch ? awardDecodeEntities(liveMatch[1]) : null,
+      detailPath: detailMatch[1],
+      awards,
+      studio: studioMatch ? awardDecodeEntities(studioMatch[1]).trim() : null,
+      source: "awwwards",
+      sourceUrl: AWARD_BASE_URL + detailMatch[1],
+    });
+  }
+  // Fallback: plain /sites/ anchors only when the blob scheme is entirely
+  // absent (true drift). Filtered blobs (collections, untitled) mean the
+  // parser saw the page correctly and found no sites — return empty.
+  if (!sites.length && !blobParts.length) {
+    const anchors = [...src.matchAll(/href="\/sites\/([a-z0-9-]{1,120})\/?"[^>]*>([^<]{1,120})</gi)];
+    for (const m of anchors) {
+      const slug = m[1].toLowerCase();
+      if (seen.has(slug)) continue;
+      seen.add(slug);
+      sites.push({ slug, title: awardStripTags(m[2]) || slug, createdAt: 0, tags: [], thumbnailPath: "", liveUrl: null, detailPath: "/sites/" + slug, awards: [], studio: null, source: "awwwards", sourceUrl: AWARD_BASE_URL + "/sites/" + slug });
+      if (sites.length >= 50) break;
+    }
+  }
+  return sites;
+}
+function awardIsNomineePage(html) { return /<h2 class="text-default">\s*Nominee\b/.test(String(html || "")); }
+function awardParseScore(html) {
+  const m = /c-heading-score__note[^>]*>[^<]*?([\d]+(?:\.\d{1,2})?)/.exec(String(html || ""));
+  return m ? parseFloat(m[1]) : null;
+}
+function awardParseDetail(html, slug) {
+  const src = String(html || "");
+  const norm = awardNormalizeSlug(slug);
+  const palette = [...new Set([...src.matchAll(/<strong>HEX<\/strong>\s*#([0-9A-Fa-f]{6})/g)].map((m) => "#" + m[1].toUpperCase()))];
+  const techIdx = src.indexOf("Technologies & Tools</h2>");
+  const techSection = techIdx >= 0 ? src.slice(techIdx, techIdx + 6000) : "";
+  const technologies = [...new Set([...techSection.matchAll(/class="button button--tag"[^>]*>([^<]+)</g)].map((m) => awardStripTags(m[1])))].filter(Boolean);
+  const elStart = src.indexOf(">Elements</h2>");
+  const elEnd = elStart >= 0 ? src.indexOf(">Color Palette</h2>", elStart) : -1;
+  const elSection = elStart >= 0 && elEnd > elStart ? src.slice(elStart, elEnd) : "";
+  const elements = [...elSection.matchAll(/collectableTitle&quot;:&quot;(.+?)&quot;/g)].map((m) => awardDecodeEntities(m[1])).filter(Boolean);
+  const awards = [...src.matchAll(/(Site of the Day|Developer Award|Honorable Mention|Site of the Month|Mobile Excellence|E-Commerce Award)\s*[-–]\s*([A-Z][a-z]+ \d{1,2}, \d{4})/g)].map((m) => ({ title: m[1], date: m[2] }));
+  const descIdx = src.indexOf(">Description</h2>");
+  const descMatch = descIdx >= 0 ? src.slice(descIdx, descIdx + 3000).match(/<h3 class="heading-6">([\s\S]{0,2000}?)<\/h3>/) : null;
+  const curated = descMatch ? awardStripTags(descMatch[1]) || null : null;
+  const ogDesc = (src.match(/property="og:description" content="([^"]*)"/) || [])[1];
+  const ogImage = (src.match(/property="og:image" content="([^"]+)"/) || [])[1];
+  const h1 = src.match(/<h1 class="heading-1[^"]*">\s*<a href="(https?:\/\/(?!www\.awwwards\.com|assets\.awwwards\.com)[^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+  const liveFallback = h1 ? null : src.match(/href="(https?:\/\/(?!www\.awwwards\.com|assets\.awwwards\.com)[^"]+)"[^>]*target="_blank" rel="noopener"/);
+  const titleMatch = src.match(/property="og:title" content="([^"]+)"/);
+  return {
+    slug: norm,
+    title: titleMatch ? awardDecodeEntities(titleMatch[1]) : (h1 ? awardStripTags(h1[2]) : null),
+    description: curated ?? (ogDesc ? awardDecodeEntities(ogDesc).trim() || null : null),
+    palette, technologies, elements, awards,
+    nominee: awardIsNomineePage(src),
+    score: awardParseScore(src),
+    ogImage: ogImage ? awardDecodeEntities(ogImage) : null,
+    liveUrl: (h1 && h1[1]) || (liveFallback && liveFallback[1]) ? awardDecodeEntities((h1 && h1[1]) || liveFallback[1]) : null,
+    source: "awwwards",
+    sourceUrl: awardSiteUrl(norm),
+    retrievedAt: new Date().toISOString(),
+  };
+}
+function awardParseCategories(html) {
+  const src = String(html || "");
+  const colors = [...new Set([...src.matchAll(/href="\/websites\/%23([0-9A-Fa-f]{6})\/"/g)].map((m) => "#" + m[1].toUpperCase()))].sort();
+  const filters = [...new Set([...src.matchAll(/href="\/websites\/([a-z0-9-]{2,60})\/"/g)].map((m) => m[1]))].filter((s) => s !== "sites_of_the_day").sort();
+  return { colors, filters };
+}
+function awardParseElementsSection(html) {
+  const src = String(html || "");
+  const start = src.indexOf(">Elements</h2>");
+  if (start < 0) return null;
+  const end = src.indexOf(">Color Palette</h2>", start);
+  const section = end > start ? src.slice(start, end) : src.slice(start);
+  const out = [];
+  for (const part of section.split('data-collectable-model-value="').slice(1)) {
+    const stop = part.indexOf('">');
+    if (stop < 0) continue;
+    let blob;
+    try { blob = JSON.parse(awardDecodeEntities(part.slice(0, stop))); } catch { continue; }
+    const mp = blob && blob.collectableImage;
+    if (typeof mp === "string" && /^(element|external)\//.test(mp)) out.push({ title: awardDecodeEntities(String(blob.collectableTitle ?? "")), mediaPath: mp });
+  }
+  return out;
+}
+function awardParseElementGallery(html) {
+  const src = String(html || "");
+  const slugs = [...new Set([...src.matchAll(/href="\/inspiration\/([\w-]{1,120})\/?"/g)].map((m) => m[1]))];
+  return slugs;
+}
+function awardParseElementPage(html) {
+  const src = String(html || "");
+  const slug = (src.match(/rel="canonical" href="[^"]*?\/inspiration\/([\w-]{1,120})\/?"/) || [])[1] ?? awardParseElementGallery(src)[0] ?? null;
+  if (!slug) return null;
+  const titleRaw = (src.match(/<h1[^>]*>\s*([\s\S]{2,200}?)\s*(?:<small>from<\/small>|<\/h1>)/) || [])[1];
+  const authorRaw = (src.match(/from<\/small>\s*<a(?:[^>"']|"[^"]*"|'[^']*')*>\s*([\s\S]{2,120}?)<\/a>/) || [])[1];
+  const siteSlug = (src.match(/from<\/small>\s*<a[^>]*?href="\/sites\/([\w-]{1,120})"/) || [])[1] ?? null;
+  const builtI = src.indexOf("was built with...</p>");
+  const builtWith = [];
+  if (builtI >= 0) for (const t of src.slice(builtI, builtI + 2000).matchAll(/button--tag[^>]*>([^<]{2,30})</g)) {
+    const v = t[1].trim();
+    if (v && !builtWith.includes(v)) builtWith.push(v);
+  }
+  let mediaPath = null;
+  for (const part of src.split('data-collectable-model-value="').slice(1)) {
+    const stop = part.indexOf('"');
+    if (stop < 0) continue;
+    try {
+      const blob = JSON.parse(awardDecodeEntities(part.slice(0, stop)));
+      if (blob && blob.collectableImage) { mediaPath = blob.collectableImage; break; }
+    } catch { /* ignore */ }
+  }
+  const category = (src.match(/href="\/elements\/([\w-]{1,60})\/"/) || [])[1] ?? null;
+  return {
+    slug,
+    title: titleRaw ? awardStripTags(titleRaw) : slug,
+    author: authorRaw ? awardStripTags(authorRaw) : null,
+    siteSlug, builtWith,
+    related: awardParseElementGallery(src).filter((s) => s !== slug).slice(0, 12),
+    mediaPath, mediaType: mediaPath ? (mediaPath.endsWith(".mp4") ? "video" : "image") : null,
+    mediaUrl: mediaPath ? awardElementUrl(mediaPath) : null,
+    category,
+    source: "awwwards",
+    sourceUrl: AWARD_BASE_URL + "/inspiration/" + slug,
+  };
+}
+
+// ---- Deterministic local ranking (token + prefix + BM25-style idf) ----
+const AWARD_STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,also,that,this,from,into,plus,vs,top,best,up,site,website,web,design".split(","));
+function awardTokens(q, max = 6) {
+  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/[\s-]+/).map((t) => t.trim()).filter((t) => t.length > 1 && !AWARD_STOP.has(t)).slice(0, max);
+}
+// Theme words are rank signals, not just match tokens: a "dark …" query
+// boosts dark-tagged sites even when no title literally says "dark".
+function awardThemeHint(q) {
+  const t = String(q ?? "").toLowerCase();
+  const dark = /\bdark\b|\bmidnight\b|\bnoir\b|\bblack\b|\bmoody\b|\bcinematic\b/.test(t);
+  const light = /\blight\b|\bbright\b|\bairy\b|\bwhite\b|\bpastel\b/.test(t);
+  if (dark && !light) return "dark";
+  if (light && !dark) return "light";
+  return null;
+}
+// Design-vocabulary aliases: "glassy" should find glassmorphism-tagged sites,
+// "3d" should find webgl/three.js ones. Aliases only ADD candidates — the
+// reason string always names the original query word, never the alias.
+const AWARD_ALIASES = {
+  glassy: ["glass", "glassmorphism"], glass: ["glassmorphism"], neon: ["glow", "fluorescent"],
+  "3d": ["webgl", "three", "threejs", "3-d"], minimal: ["minimalist", "minimalism"],
+  bold: ["brutalist", "brutalism"], playful: ["fun", "quirky"], luxury: ["luxe", "premium", "elegant"],
+  dark: ["black", "noir", "midnight", "moody"], light: ["white", "airy", "bright", "pastel"],
+};
+function awardExpandToken(tok) {
+  const t = String(tok).toLowerCase();
+  return [t, ...(AWARD_ALIASES[t] || [])];
+}
+function awardStemLite(tok) {
+  let t = String(tok).toLowerCase();
+  if (t.length > 5 && t.endsWith("ing")) t = t.slice(0, -3);
+  else if (t.length > 4 && t.endsWith("ies")) t = t.slice(0, -3) + "y";
+  else if (t.length > 4 && t.endsWith("es") && /(ses|xes|zes|ches|shes)$/.test(t)) t = t.slice(0, -2);
+  else if (t.length > 3 && t.endsWith("s")) t = t.slice(0, -1);
+  return t;
+}
+function awardFieldHay(site) {
+  return {
+    title: String(site.title || "").toLowerCase(),
+    tags: (Array.isArray(site.tags) ? site.tags : []).map((t) => String(t).toLowerCase()),
+    awards: (Array.isArray(site.awards) ? site.awards : []).map((t) => String(t).toLowerCase()),
+    studio: String(site.studio || "").toLowerCase(),
+  };
+}
+function awardScoreSites(sites, query, { technology, color } = {}) {
+  const toks = awardTokens(query).map(awardStemLite);
+  const n = Math.max(1, sites.length);
+  const df = new Map();
+  for (const t of toks) {
+    let c = 0;
+    for (const s of sites) {
+      const h = awardFieldHay(s);
+      const hay = (h.title + " " + h.tags.join(" ") + " " + h.studio).toLowerCase();
+      if (hay.includes(t)) c++;
+    }
+    df.set(t, c);
+  }
+  const scored = (sites || []).map((s) => {
+    const h = awardFieldHay(s);
+    let score = 0;
+    const reasons = [];
+    const hint = awardThemeHint(query);
+    for (const raw of awardTokens(query)) {
+      const variants = awardExpandToken(awardStemLite(raw));
+      const idf = Math.log(1 + n / (1 + (df.get(awardStemLite(raw)) || 0)));
+      const titleHit = variants.some((v) => h.title.toLowerCase().includes(v));
+      const tagHit = variants.some((v) => h.tags.some((g) => g === v || g.startsWith(v) || awardStemLite(g) === v));
+      if (titleHit) { score += 3 * idf; reasons.push("title:" + raw); }
+      else if (tagHit) { score += 2 * idf; reasons.push("tag:" + raw); }
+      else if (variants.some((v) => (h.title + " " + h.tags.join(" ")).toLowerCase().includes(v))) { score += 1 * idf; reasons.push("text:" + raw); }
+      else if (h.studio.includes(raw)) { score += 1.2 * idf; reasons.push("studio:" + raw); }
+    }
+    // Theme-hint boost (dark/light): tag-level signal, labeled as such.
+    if (hint && (h.tags.includes(hint) || h.tags.some((g) => (AWARD_ALIASES[hint] || []).includes(g)))) {
+      if (reasons.length > 0 || !toks.length) { score += 1.2; reasons.push("theme:" + hint); }
+    }
+    // Award/filter bonuses are tie-breakers for matched rows only: they must
+    // never rescue a zero-token row into a "match" (honest-empty stays honest).
+    const matched = reasons.length > 0 || !toks.length;
+    if (technology && h.tags.includes(String(technology).toLowerCase()) && matched) { score += 1.5; reasons.push("tech-filter"); }
+    if (color && JSON.stringify(s).toLowerCase().includes(String(color).toLowerCase()) && matched) { score += 0.5; reasons.push("color-hint"); }
+    if (Array.isArray(s.awards) && s.awards.length && matched) score += 0.3;
+    return { site: s, score: Math.round(score * 100) / 100, reasons: [...new Set(reasons)].slice(0, 6) };
+  });
+  scored.sort((a, b) => (b.score - a.score) || String(a.site.title).localeCompare(String(b.site.title)) || String(a.site.slug).localeCompare(String(b.site.slug)));
+  return { tokens: awardTokens(query), scored };
+}
+function awardSuggestQueries(query, taxonomy) {
+  const toks = awardTokens(query);
+  const out = [];
+  if (toks.length > 1) out.push(toks.slice(0, Math.min(3, toks.length)).join(" "));
+  for (const t of toks.slice(0, 3)) out.push(t);
+  const filters = (taxonomy && taxonomy.filters) || [];
+  for (const t of toks) {
+    const hit = filters.find((f) => f.startsWith(t.slice(0, 4)));
+    if (hit && !out.includes(hit)) out.push(hit);
+  }
+  for (const fb of ["portfolio", "hero", "minimal"]) if (!out.includes(fb) && out.length < 5) out.push(fb);
+  return [...new Set(out)].slice(0, 5);
+}
+function awardCompactSite(s, scoreInfo) {
+  return {
+    slug: s.slug, title: s.title,
+    sourceUrl: s.sourceUrl || awardSiteUrl(s.slug),
+    liveUrl: s.liveUrl || null,
+    tags: (s.tags || []).slice(0, 8),
+    awards: s.awards || [],
+    studio: s.studio || null,
+    previewUrl: s.thumbnailPath ? awardThumbnailUrl(s.thumbnailPath, 880) : (s.ogImage || null),
+    ...(scoreInfo ? { relevance: scoreInfo.score, matchReasons: scoreInfo.reasons } : {}),
+    evidence: { source: "awwwards", detailPath: s.detailPath || ("/sites/" + s.slug) },
+  };
+}
+function awardFullSite(s, detail, scoreInfo) {
+  const base = awardCompactSite(s, scoreInfo);
+  return { ...base, description: (detail && detail.description) || null, palette: (detail && detail.palette) || [], technologies: (detail && detail.technologies) || [], elements: (detail && detail.elements) || [], awardHistory: (detail && detail.awards) || [], score: (detail && detail.score) ?? null, nominee: !!(detail && detail.nominee), retrievedAt: (detail && detail.retrievedAt) || null };
+}
+
+// ---- Polite fetch client (1 req/s, bounded, distinct errors) ----
+function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rateMs = AWARD_RATE_MS, userAgent = AWARD_USER_AGENT } = {}) {
+  const fetchFn = fetchImpl || globalThis.fetch;
+  if (typeof fetchFn !== "function") throw new Error("fetchImpl must be a function");
+  let last = 0;
+  let chain = Promise.resolve();
+  const acquire = () => {
+    const next = chain.then(async () => {
+      const wait = last + rateMs - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      last = Date.now();
+    });
+    chain = next.catch(() => {});
+    return next;
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function fetchOnce(url, label) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new Error("timeout after " + timeoutMs + "ms fetching " + label)), timeoutMs);
+    try {
+      const res = await fetchFn(url, { headers: { "user-agent": userAgent, accept: "text/html,*/*" }, redirect: "manual", signal: ctrl.signal });
+      return res;
+    } finally { clearTimeout(timer); }
+  }
+  async function readBounded(res, label) {
+    const len = res.headers && typeof res.headers.get === "function" ? Number(res.headers.get("content-length")) : NaN;
+    if (Number.isFinite(len) && len > AWARD_MAX_BYTES) throw awardUpstream(label + " exceeds " + AWARD_MAX_BYTES + " bytes");
+    const text = await res.text();
+    if (text && text.length > AWARD_MAX_BYTES) throw awardUpstream(label + " exceeds " + AWARD_MAX_BYTES + " bytes");
+    return text || "";
+  }
+  async function getAwardHtml(pathOrUrl) {
+    const path = awardValidateAwardPath(pathOrUrl);
+    const startUrl = AWARD_BASE_URL + path;
+    let url = startUrl;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await acquire();
+      let res;
+      try { res = await fetchOnce(url, "awwwards page"); }
+      catch (e) {
+        if (e && e.name === "AbortError") throw awardUpstream("timeout fetching " + url);
+        lastErr = e;
+        if (attempt < 1) { await sleep(300); continue; }
+        throw awardUpstream("network error fetching " + url + ": " + String((e && e.message) || e).slice(0, 200));
+      }
+      if (res.status === 301 || res.status === 302 || res.status === 303 || res.status === 307 || res.status === 308) {
+        const loc = res.headers && res.headers.get ? res.headers.get("location") : null;
+        if (!loc || attempt === 1) throw awardUpstream("redirect without location for " + url);
+        try {
+          const next = new URL(loc, url).toString();
+          const nu = new URL(next);
+          if (!AWARD_ALLOWED_HOSTS.includes(nu.hostname.toLowerCase())) throw awardUpstream("redirect leaves award hosts: " + nu.hostname);
+          url = next;
+          continue;
+        } catch (e) { if (e && e.code === "UPSTREAM_ERROR") throw e; throw awardUpstream("bad redirect for " + url); }
+      }
+      if (res.status === 404) throw awardNotFound("awwwards page not found: " + url);
+      if (res.status === 403 || res.status === 429) {
+        const e = awardUpstream("awwwards is blocking requests (HTTP " + res.status + " on " + url + "). Try again later; blocks are never retried.");
+        e.blocked = true;
+        e.status = res.status;
+        throw e;
+      }
+      if (res.status >= 500 && res.status < 600) {
+        lastErr = awardUpstream("transient awwwards status " + res.status + " on " + url);
+        if (attempt < 1) { await sleep(400); continue; }
+        throw lastErr;
+      }
+      if (!res.ok) throw awardUpstream("awwwards HTTP " + res.status + " on " + url);
+      return { html: await readBounded(res, "awwwards page"), finalUrl: url };
+    }
+    throw lastErr instanceof Error ? lastErr : awardUpstream("fetch failed for " + startUrl);
+  }
+  return { getAwardHtml };
+}
+
+// ---- Design-brief builder (pure): observed facts vs patterns vs proposals ----
+const AWARD_BLUEPRINT_VERSION = 1;
+function awardFreq(rows) {
+  const by = new Map();
+  for (const r of rows) for (const v of new Set((r.values || []).map((x) => String(x).toLowerCase()).filter(Boolean))) {
+    if (!by.has(v)) by.set(v, new Set());
+    by.get(v).add(r.slug);
+  }
+  return [...by].map(([value, slugs]) => ({ value, frequency: slugs.size, sourceSlugs: [...slugs].sort() }))
+    .sort((a, b) => (b.frequency - a.frequency) || a.value.localeCompare(b.value));
+}
+function awardLuminance(hex) {
+  try {
+    const ch = hex.slice(1).match(/.{2}/g).map((p) => parseInt(p, 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  } catch { return 0.5; }
+}
+function awardCompareSites(entries) {
+  // entries: [{ slug, detail|null, motion|null }]
+  const usable = entries.filter((e) => e.detail);
+  const tech = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.technologies || [] })));
+  const elements = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.elements || [] })));
+  const palette = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.palette || [] })));
+  // Fuzzy element overlap: "Hero Section" and "hero banner" share the keyword
+  // hero even when full strings differ — reported as keyword overlap, and the
+  // exact strings stay visible per site so nothing is overstated.
+  const elemKeywords = awardFreq(usable.map((e) => {
+    const words = new Set();
+    for (const el of (e.detail.elements || [])) for (const w of String(el).toLowerCase().split(/[^a-z0-9]+/)) if (w.length > 3) words.add(w);
+    return { slug: e.slug, values: [...words] };
+  }));
+  const bandOf = (hex) => (awardLuminance(String(hex).toUpperCase()) >= 0.7 ? "light" : awardLuminance(String(hex).toUpperCase()) <= 0.3 ? "dark" : "mid");
+  const bands = usable.map((e) => ({ slug: e.slug, bands: [...new Set((e.detail.palette || []).map(bandOf))] }));
+  const bandVotes = {};
+  for (const b of bands) for (const x of b.bands) bandVotes[x] = (bandVotes[x] || 0) + 1;
+  const direction = [];
+  const topBand = Object.entries(bandVotes).sort((a, b) => b[1] - a[1])[0];
+  if (topBand && topBand[1] >= 2) direction.push("all refs skew " + topBand[0] + " — keep that value range for backgrounds");
+  const sharedTech = tech.filter((t) => t.frequency >= 2);
+  if (sharedTech.length) direction.push("shared stack (" + sharedTech.slice(0, 3).map((t) => t.value).join(", ") + ") — safe default for the build");
+  const per = entries.map((e) => ({
+    slug: e.slug,
+    title: (e.detail && e.detail.title) || e.slug,
+    sourceUrl: (e.detail && e.detail.sourceUrl) || awardSiteUrl(e.slug),
+    palette: (e.detail && e.detail.palette) || [],
+    luminanceBands: (e.detail && [...new Set((e.detail.palette || []).map(bandOf))]) || [],
+    technologies: (e.detail && e.detail.technologies) || [],
+    technologiesInferred: !!(e.detail && e.detail.technologiesInferred),
+    elements: (e.detail && e.detail.elements) || [],
+    awards: (e.detail && e.detail.awards) || [],
+    score: (e.detail && e.detail.score) ?? null,
+    motion: e.motion ? { libs: e.motion.stack.libs, scrollModel: e.motion.stack.scrollModel } : null,
+    gaps: [...(e.detail ? [] : ["detail unavailable"]), ...(e.motion ? [] : ["motion not recorded"])],
+  }));
+  return { per, sharedTech, sharedElements: elements.filter((t) => t.frequency >= 2), sharedElementKeywords: elemKeywords.filter((t) => t.frequency >= 2), sharedPalette: palette.filter((t) => t.frequency >= 2), sharedBands: bands, directionHints: direction };
+}
+function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes, motionNotes, constraints = [], technology = null, visualDirection = null, responsive = null, requestedPalette = [], gaps: extraGaps = [] }) {
+  if (!goal || !String(goal).trim()) throw awardBad("goal is required");
+  const usable = (details || []).filter((d) => d && d.detail);
+  const threshold = usable.length === 2 ? 2 : usable.length >= 3 ? Math.ceil(usable.length / 2) : Infinity;
+  const tech = awardFreq(usable.map((d) => ({ slug: d.slug, values: d.detail.technologies || [] })));
+  const elements = awardFreq(usable.map((d) => ({ slug: d.slug, values: d.detail.elements || [] })));
+  const paletteRaw = awardFreq(usable.map((d) => ({ slug: d.slug, values: (d.detail.palette || []).map((c) => String(c).toUpperCase()) })));
+  const palette = paletteRaw.map((p) => ({ ...p, luminanceBand: awardLuminance(p.value) >= 0.7 ? "light" : awardLuminance(p.value) <= 0.3 ? "dark" : "mid" }));
+  const tagged = [...tech.map((s) => ({ ...s, kind: "technology" })), ...elements.map((s) => ({ ...s, kind: "element" })), ...palette.map((s) => ({ ...s, kind: "palette" }))];
+  const shared = tagged.filter((s) => s.frequency >= threshold).sort((a, b) => (b.frequency - a.frequency) || a.value.localeCompare(b.value));
+  const outliers = usable.length >= 2 ? tagged.filter((s) => s.frequency === 1).sort((a, b) => a.value.localeCompare(b.value)).slice(0, 12) : [];
+  const gaps = [];
+  for (const r of (refs || [])) {
+    const hit = usable.find((d) => d.slug === r);
+    if (!hit) gaps.push(r + ": reference detail unavailable (upstream fetch failed or slug unknown)");
+  }
+  for (const g of (extraGaps || [])) if (!gaps.includes(g)) gaps.push(g);
+  if (!usable.length) gaps.push("no reference details available; brief is goal-only and low confidence");
+  const sections = ["hero", "proof", "features", "showcase", "pricing", "testimonials", "faq", "cta", "footer"];
+  const lines = [];
+  lines.push("# Design brief — " + String(goal).slice(0, 120));
+  lines.push("");
+  lines.push("_Goal:_ " + goal);
+  if (technology) lines.push("_Stack:_ " + technology);
+  if (visualDirection) lines.push("_Direction:_ " + visualDirection);
+  if (responsive) lines.push("_Responsive:_ " + responsive);
+  lines.push("");
+  lines.push("## References (evidence)");
+  for (const d of (details || [])) {
+    const t = d.detail;
+    lines.push("- `" + d.slug + "` — " + ((t && t.title) || d.slug) + " — " + ((t && t.sourceUrl) || awardSiteUrl(d.slug)) + (t ? "" : " (detail unavailable)"));
+  }
+  lines.push("");
+  lines.push("## Direction");
+  lines.push(shared.length ? "Build on what " + shared.length + " shared signals agree on; treat the outliers below as one-site flavor, not rules." : "No cross-reference consensus; follow the goal and the strongest single reference, and mark choices as proposed.");
+  if (shared.length) { lines.push(""); lines.push("### Shared patterns (observed)"); for (const s of shared.slice(0, 12)) lines.push("- " + s.kind + " `" + s.value + "` — " + s.frequency + "/" + usable.length + " refs (" + s.sourceSlugs.join(", ") + ")"); }
+  if (outliers.length) { lines.push(""); lines.push("### One-site details (do not generalize)"); for (const s of outliers.slice(0, 8)) lines.push("- " + s.kind + " `" + s.value + "` — only in " + s.sourceSlugs.join(", ")); }
+  if (palette.length) { lines.push(""); lines.push("### Palette evidence"); for (const p of palette.slice(0, 8)) lines.push("- `" + p.value + "` (" + p.luminanceBand + ") — " + p.frequency + "/" + usable.length + " refs"); }
+  if (requestedPalette.length) {
+    lines.push("");
+    lines.push("### Requested palette (proposed, not observed)");
+    lines.push("Named in your goal/direction — apply as CSS tokens; verify contrast before shipping:");
+    for (const c of requestedPalette) lines.push("- `" + c + "` (" + (awardLuminance(c) >= 0.7 ? "light" : awardLuminance(c) <= 0.3 ? "dark" : "mid") + ", proposed)");
+    const observedBands = [...new Set(palette.map((p) => p.luminanceBand))];
+    if (observedBands.length) lines.push("- Refs skew " + observedBands.join("/") + "; keep their layout rhythm, recolor to the proposed tokens above.");
+  }
+  lines.push("");
+  lines.push("## Aura matches (free-only, real catalogue rows)");
+  const matches = (auraMatches && auraMatches.length ? auraMatches : []);
+  if (!matches.length) lines.push("- Catalogue lookup unavailable or matched nothing — proceed with tokens only; do not invent component IDs.");
+  for (const m of matches.slice(0, 10)) lines.push("- [" + m.section + "] `" + m.componentTitle + "` (" + m.componentId + ") — " + m.pageUrl + " — " + m.why);
+  lines.push("");
+  lines.push("## Sections (proposed order)");
+  sections.forEach((s, i) => lines.push((i + 1) + ". " + s));
+  lines.push("");
+  lines.push("## Motion guidance (evidence-backed only)");
+  lines.push(motionNotes || "No recorded motion for these refs; keep entrances <500ms, honor prefers-reduced-motion, add scroll reveals only if a study supports them.");
+  if (structureNotes) lines.push("");
+  if (structureNotes) lines.push("## Structure evidence");
+  if (structureNotes) lines.push(structureNotes);
+  lines.push("");
+  lines.push("## Accessibility & performance");
+  lines.push("- Keyboard: all interactive sections reachable; visible focus; no hover-only content.");
+  lines.push("- Contrast: verify palette pairs at 4.5:1 before shipping.");
+  lines.push("- Reduced motion: disable/parallax-off under prefers-reduced-motion; content stays readable without JS.");
+  lines.push("- Performance: prefer system/Aura assets; lazy-load below-fold media; keep animation <500ms.");
+  if (constraints.length) { lines.push(""); lines.push("## Constraints"); for (const c of constraints) lines.push("- Honor constraint: " + c); }
+  lines.push("");
+  lines.push("## Checklist");
+  lines.push("- [ ] Tokens first (palette/type/spacing as CSS vars)");
+  lines.push("- [ ] Sections in the order above, responsive at 390/768/1024+");
+  lines.push("- [ ] Aura components pasted per match list, CSS scoped");
+  lines.push("- [ ] Motion only from evidence; reduced-motion path tested");
+  lines.push("- [ ] Contrast + keyboard pass; no copied third-party source");
+  lines.push("");
+  lines.push("## Evidence gaps");
+  if (gaps.length) { for (const g of gaps) lines.push("- " + g); }
+  else lines.push("- None material: refs, motion/structure evidence as cited above, catalogue matches listed.");
+  const spec = {
+    version: AWARD_BLUEPRINT_VERSION, goal,
+    refs: (refs || []).map((slug) => ({ slug, sourceUrl: awardSiteUrl(slug) })),
+    sharedPatterns: shared, outliers: outliers.slice(0, 12), palette,
+    requestedPalette: requestedPalette.map((c) => ({ value: c, status: "proposed" })),
+    auraMatches: matches.slice(0, 10),
+    sections, constraints,
+    confidence: usable.length >= 3 ? "medium" : usable.length === 2 ? "low-medium" : "low",
+    gaps,
+  };
+  return { markdown: lines.join("\n"), spec };
+}
+
+// ---- awards-index.mjs ----
+// Module: awards-index — persistent local award-reference store.
+// File-based JSON (no sqlite dep): atomic writes, versioned schema,
+// corrupt recovery, stale-lock single-writer, resume checkpoints, bounded
+// growth, winner baselines, watches, motion records. No auto-crawl on boot.
+
+const AWARD_INDEX_VERSION = 1;
+const AWARD_INDEX_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const AWARD_LOCK_STALE_MS = 30 * 60 * 1000;
+const AWARD_MAX_SITES = 5000;
+const AWARD_MAX_ELEMENTS = 5000;
+const AWARD_MAX_MOTION = 200;
+const AWARD_FILES = ["sites.json", "elements.json", "taxonomy.json", "motion.json", "meta.json"];
+
+function awardIdxBuiltins() {
+  const g = globalThis.process && globalThis.process.getBuiltinModule ? globalThis.process.getBuiltinModule : null;
+  if (typeof g !== "function") throw awardErr("UNSUPPORTED_OPERATION", "file persistence needs Node 22+ (process.getBuiltinModule)");
+  const fs = g.call(globalThis.process, "node:fs");
+  const path = g.call(globalThis.process, "node:path");
+  const os = g.call(globalThis.process, "node:os");
+  return { fs, path, os };
+}
+function awardResolveDir(override) {
+  const { path, os } = awardIdxBuiltins();
+  if (override && String(override).trim()) {
+    const p = String(override);
+    if (p.includes("..")) throw awardErr("BAD_ARGS", "awards dir must not contain ..");
+    return p;
+  }
+  const env = globalThis.process && globalThis.process.env ? globalThis.process.env.AURA_AWARDS_DIR : null;
+  if (env && String(env).trim()) {
+    if (String(env).includes("..")) throw awardErr("BAD_ARGS", "AURA_AWARDS_DIR must not contain ..");
+    return String(env);
+  }
+  return path.join(os.homedir(), ".aura-mcp", "awards");
+}
+function awardIdxBad(m) { return awardErr("BAD_ARGS", m); }
+
+function createAwardIndex({ dir, now = () => Date.now() } = {}) {
+  const { fs, path } = awardIdxBuiltins();
+  const root = awardResolveDir(dir);
+  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(path.join(root, "captures"), { recursive: true });
+
+  const fp = (name) => {
+    if (!AWARD_FILES.includes(name) && name !== "lock.json") throw awardIdxBad("unknown index file: " + name);
+    const full = path.join(root, name);
+    if (path.relative(root, full).startsWith("..")) throw awardIdxBad("path traversal blocked");
+    return full;
+  };
+  function readJson(name, fallback) {
+    try {
+      if (!fs.existsSync(fp(name))) return fallback;
+      const raw = fs.readFileSync(fp(name), "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && parsed.version !== undefined && parsed.version !== AWARD_INDEX_VERSION && name !== "lock.json") {
+        return { ...fallback, version: AWARD_INDEX_VERSION, migratedFrom: parsed.version, updatedAt: new Date(now()).toISOString() };
+      }
+      return parsed;
+    } catch (e) {
+      // Corrupt file: quarantine + safe empty (never throw away the session).
+      try {
+        const bad = fp(name) + ".corrupt-" + now();
+        fs.renameSync(fp(name), bad);
+      } catch { /* ignore */ }
+      const err = awardErr("INDEX_CORRUPT", name + " was corrupt and was quarantined; index rebuilt empty (" + String((e && e.message) || e).slice(0, 120) + ")");
+      return { ...fallback, corrupt: err.message, recoveredAt: new Date(now()).toISOString() };
+    }
+  }
+  function writeAtomic(name, obj) {
+    const full = fp(name);
+    const tmp = full + ".tmp-" + now() + "-" + Math.floor(Math.random() * 1e6);
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 1), "utf8");
+    fs.renameSync(tmp, full);
+  }
+  const emptySites = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items: [] });
+  const emptyElements = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items: [] });
+  const emptyTax = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), colors: [], filters: [] });
+  const emptyMotion = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items: [] });
+  const emptyMeta = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), indexStatus: null, progress: [], baselines: {}, watches: [] });
+
+  function siteMap() {
+    const doc = readJson("sites.json", emptySites());
+    const map = new Map();
+    for (const s of (doc.items || [])) if (s && s.slug) map.set(String(s.slug).toLowerCase(), s);
+    return { doc, map };
+  }
+  function acquireLock() {
+    const lockFile = path.join(root, "lock.json");
+    try {
+      if (fs.existsSync(lockFile)) {
+        const prev = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+        if (prev && (now() - (prev.startedAt || 0)) < AWARD_LOCK_STALE_MS) {
+          const e = awardErr("INDEX_BUSY", "another index run is in progress (lock held since " + new Date(prev.startedAt).toISOString() + ")");
+          throw e;
+        }
+      }
+    } catch (e) { if (e && e.code === "INDEX_BUSY") throw e; /* corrupt lock treated as stale */ }
+    fs.writeFileSync(lockFile, JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 }), "utf8");
+  }
+  function releaseLock() { try { fs.rmSync(path.join(root, "lock.json"), { force: true }); } catch { /* never mask */ } }
+
+  return {
+    root,
+    files: AWARD_FILES,
+    getStatus() {
+      const meta = readJson("meta.json", emptyMeta());
+      const sites = readJson("sites.json", emptySites());
+      const elements = readJson("elements.json", emptyElements());
+      const motion = readJson("motion.json", emptyMotion());
+      const tax = readJson("taxonomy.json", emptyTax());
+      let lock = null;
+      try {
+        const lockFile = path.join(root, "lock.json");
+        if (fs.existsSync(lockFile)) lock = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+      } catch { lock = { unreadable: true }; }
+      const finishedAt = meta.indexStatus && meta.indexStatus.finishedAt;
+      const freshness = finishedAt ? new Date(finishedAt).toISOString() : null;
+      return {
+        dir: root, version: AWARD_INDEX_VERSION,
+        counts: { sites: (sites.items || []).length, elements: (elements.items || []).length, motion: (motion.items || []).length, taxonomyFilters: (tax.filters || []).length, taxonomyColors: (tax.colors || []).length, watches: (meta.watches || []).length },
+        freshness, stale: !finishedAt || (now() - finishedAt >= AWARD_INDEX_STALE_MS),
+        progress: meta.indexStatus || null, pendingPages: meta.progress || [],
+        lock: lock ? { held: true, since: lock.startedAt ? new Date(lock.startedAt).toISOString() : null } : { held: false },
+        ...(sites.corrupt ? { sitesCorrupt: sites.corrupt } : {}),
+        ...(meta.corrupt ? { metaCorrupt: meta.corrupt } : {}),
+      };
+    },
+    listSites(limit = 50) {
+      const { map } = siteMap();
+      return [...map.values()].slice(0, Math.max(1, Math.min(limit, 200)));
+    },
+    getSite(slug) {
+      const n = awardNormalizeSlug(slug);
+      const { map } = siteMap();
+      return map.get(n) || null;
+    },
+    upsertSites(sites) {
+      const { doc, map } = siteMap();
+      let added = 0, updated = 0;
+      for (const s of (sites || [])) {
+        if (!s || !s.slug) continue;
+        const k = String(s.slug).toLowerCase();
+        if (map.has(k)) { map.set(k, { ...map.get(k), ...s }); updated++; }
+        else { map.set(k, s); added++; }
+      }
+      let items = [...map.values()];
+      if (items.length > AWARD_MAX_SITES) items = items.slice(items.length - AWARD_MAX_SITES);
+      writeAtomic("sites.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items });
+      return { added, updated, total: items.length };
+    },
+    getTaxonomy() { return readJson("taxonomy.json", emptyTax()); },
+    setTaxonomy(tax) {
+      const colors = Array.isArray(tax.colors) ? [...new Set(tax.colors.map(String))].slice(0, 100) : [];
+      const filters = Array.isArray(tax.filters) ? [...new Set(tax.filters.map(String))].slice(0, 400) : [];
+      writeAtomic("taxonomy.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), colors, filters });
+      return { colors: colors.length, filters: filters.length };
+    },
+    upsertElements(items) {
+      const doc = readJson("elements.json", emptyElements());
+      const map = new Map((doc.items || []).map((e) => [String(e.slug), e]));
+      let added = 0;
+      for (const e of (items || [])) {
+        if (!e || !e.slug) continue;
+        if (!map.has(String(e.slug))) added++;
+        map.set(String(e.slug), e);
+      }
+      let list = [...map.values()];
+      if (list.length > AWARD_MAX_ELEMENTS) list = list.slice(list.length - AWARD_MAX_ELEMENTS);
+      writeAtomic("elements.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items: list });
+      return { added, total: list.length };
+    },
+    listElements(limit = 50) {
+      const doc = readJson("elements.json", emptyElements());
+      return (doc.items || []).slice(0, Math.max(1, Math.min(limit, 200)));
+    },
+    getElement(slug) {
+      const doc = readJson("elements.json", emptyElements());
+      return (doc.items || []).find((e) => String(e.slug) === String(slug)) || null;
+    },
+    recordMotion(study) {
+      if (!study || !study.url) throw awardIdxBad("motion study needs a url");
+      const doc = readJson("motion.json", emptyMotion());
+      const items = (doc.items || []).filter((m) => m.url !== study.url);
+      items.unshift({ ...study, storedAt: new Date(now()).toISOString() });
+      writeAtomic("motion.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items: items.slice(0, AWARD_MAX_MOTION) });
+      return study;
+    },
+    searchMotion({ library, easing, scrollModel, limit = 10 } = {}) {
+      const doc = readJson("motion.json", emptyMotion());
+      let items = (doc.items || []);
+      if (library) items = items.filter((m) => JSON.stringify(m).toLowerCase().includes(String(library).toLowerCase()));
+      if (easing) items = items.filter((m) => JSON.stringify(m.easingVocab || m.easings || []).toLowerCase().includes(String(easing).toLowerCase()));
+      if (scrollModel) items = items.filter((m) => String((m.stack && m.stack.scrollModel) || m.scrollModel || "").toLowerCase() === String(scrollModel).toLowerCase());
+      return { total: items.length, items: items.slice(0, Math.max(1, Math.min(limit || 10, 25))), empty: (doc.items || []).length === 0 };
+    },
+    // Index lifecycle: crawl tag pages via client, resumable, bounded.
+    async rebuild({ client, tags, log = () => {} } = {}) {
+      if (!client || typeof client.getAwardHtml !== "function") throw awardIdxBad("rebuild needs an award client");
+      acquireLock();
+      const startedAt = now();
+      try {
+        let meta = readJson("meta.json", emptyMeta());
+        let tax = readJson("taxonomy.json", emptyTax());
+        if ((!tax.filters || !tax.filters.length)) {
+          const { html } = await client.getAwardHtml("/websites/");
+          tax = { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), ...awardParseCategories(html) };
+          if (!(tax.filters || []).length) throw awardErr("UPSTREAM_ERROR", "awwwards layout may have changed: parsed 0 categories");
+          writeAtomic("taxonomy.json", tax);
+        }
+        const wanted = Array.isArray(tags) && tags.length ? tags.map(String).slice(0, 200) : (tax.filters || []).slice(0, 200);
+        if (!wanted.length) throw awardErr("UPSTREAM_ERROR", "no taxonomy to crawl; index has no filters");
+        const done = new Set(meta.progress || []);
+        // Completed checkpoint from a prior cycle is not resumable work.
+        if (meta.indexStatus && meta.indexStatus.finishedAt && done.size >= (meta.indexStatus.pagesTotal || 0)) { meta.progress = []; done.clear(); }
+        let pagesDone = 0, sitesIndexed = 0;
+        const skipped = [...wanted].filter((t) => done.has(t)).length;
+        for (const tag of wanted) {
+          if (done.has(tag)) continue;
+          const { html } = await client.getAwardHtml("/websites/" + encodeURIComponent(tag) + "/");
+          const sites = awardParseListing(html);
+          if (!sites.length) throw awardErr("UPSTREAM_ERROR", "awwwards layout may have changed: 0 cards on /websites/" + tag + "/");
+          this.upsertSites(sites.map((s) => ({ ...s, tags: [...new Set([...(s.tags || []), tag])] })));
+          sitesIndexed += sites.length;
+          pagesDone++;
+          done.add(tag);
+          meta = readJson("meta.json", emptyMeta());
+          meta.progress = [...done];
+          meta.updatedAt = new Date(now()).toISOString();
+          writeAtomic("meta.json", meta);
+          log("[" + done.size + "/" + wanted.length + "] " + tag + ": " + sites.length + " sites");
+        }
+        meta = readJson("meta.json", emptyMeta());
+        meta.indexStatus = { startedAt, finishedAt: now(), pagesDone: done.size, pagesTotal: wanted.length, sitesIndexed };
+        meta.progress = [];
+        meta.updatedAt = new Date(now()).toISOString();
+        writeAtomic("meta.json", meta);
+        return { pagesDone, pagesTotal: wanted.length, sitesIndexed, skipped };
+      } catch (e) {
+        try {
+          const meta = readJson("meta.json", emptyMeta());
+          meta.indexStatus = { ...(meta.indexStatus || {}), lastError: String((e && e.message) || e).slice(0, 300) };
+          writeAtomic("meta.json", meta);
+        } catch { /* never mask */ }
+        throw e;
+      } finally { releaseLock(); }
+    },
+    async resume(args) { return this.rebuild(args); },
+    async refresh(args) {
+      const meta = readJson("meta.json", emptyMeta());
+      meta.progress = [];
+      writeAtomic("meta.json", meta);
+      return this.rebuild(args);
+    },
+    // Winners: baseline seed then delta (never fabricate dates).
+    async newWinners({ client, award = "sotd" } = {}) {
+      if (!client || typeof client.getAwardHtml !== "function") throw awardIdxBad("newWinners needs an award client");
+      if (!AWARD_FILTERS[award]) throw awardIdxBad("award must be sotd|developer|honorable");
+      const { html } = await client.getAwardHtml("/" + AWARD_FILTERS[award] + "/");
+      const parsed = awardParseListing(html);
+      const meta = readJson("meta.json", emptyMeta());
+      const key = "baseline_" + award;
+      const prev = meta.baselines && meta.baselines[key];
+      const day = new Date(now()).toISOString().slice(0, 10);
+      if (!prev) {
+        meta.baselines = { ...(meta.baselines || {}), [key]: { slugs: parsed.map((s) => s.slug), at: new Date(now()).toISOString() } };
+        writeAtomic("meta.json", meta);
+        this.upsertSites(parsed);
+        return { day, seeded: true, newWinners: [], totalInListing: parsed.length, note: "baseline seeded; no historical delta available yet" };
+      }
+      const seen = new Set(prev.slugs || []);
+      const fresh = parsed.filter((s) => !seen.has(s.slug));
+      meta.baselines[key] = { slugs: parsed.map((s) => s.slug), at: new Date(now()).toISOString() };
+      writeAtomic("meta.json", meta);
+      if (parsed.length) this.upsertSites(parsed);
+      return { day, seeded: false, newWinners: fresh, totalInListing: parsed.length };
+    },
+    watchAdd({ kind, pattern, award } = {}) {
+      if (!["studio", "tag", "url"].includes(kind)) throw awardIdxBad("watch kind must be studio|tag|url");
+      if (typeof pattern !== "string" || !pattern.trim() || pattern.length > 120) throw awardIdxBad("watch pattern must be 1-120 chars");
+      const clean = pattern.trim().toLowerCase();
+      if (kind === "url") awardNormalizeSlug(clean);
+      if (kind === "tag" && !/^[a-z0-9-]{2,60}$/.test(clean)) throw awardIdxBad("tag watch must be a slug like 'webgl'");
+      if (award !== undefined && !["sotd", "developer", "honorable"].includes(award)) throw awardIdxBad("watch award must be sotd|developer|honorable");
+      const meta = readJson("meta.json", emptyMeta());
+      const watches = meta.watches || [];
+      if (watches.some((w) => w.kind === kind && w.pattern === clean)) throw awardIdxBad("duplicate watch: " + kind + ":" + clean);
+      if (watches.length >= 50) throw awardIdxBad("too many watches (max 50)");
+      const rec = { kind, pattern: clean, award: award || null, createdAt: new Date(now()).toISOString(), lastCheckedAt: null, lastSlugs: null };
+      meta.watches = [...watches, rec];
+      writeAtomic("meta.json", meta);
+      return rec;
+    },
+    watchList() {
+      const meta = readJson("meta.json", emptyMeta());
+      return meta.watches || [];
+    },
+    watchRemove({ kind, pattern } = {}) {
+      const meta = readJson("meta.json", emptyMeta());
+      const clean = String(pattern || "").trim().toLowerCase();
+      const before = (meta.watches || []).length;
+      meta.watches = (meta.watches || []).filter((w) => !(w.kind === kind && w.pattern === clean));
+      writeAtomic("meta.json", meta);
+      return { removed: (meta.watches.length < before) };
+    },
+    checkWatches() {
+      const meta = readJson("meta.json", emptyMeta());
+      const { map } = siteMap();
+      const rows = [...map.values()];
+      const out = [];
+      const watches = (meta.watches || []).map((w) => ({ ...w }));
+      for (const w of watches) {
+        const hits = rows.filter((s) => {
+          if (w.kind === "url") return String(s.slug) === w.pattern;
+          if (w.kind === "studio") return String(s.studio || "").toLowerCase().includes(w.pattern);
+          return (s.tags || []).some((t) => String(t).toLowerCase().replace(/\W+/g, "-") === w.pattern);
+        });
+        const slugs = hits.map((s) => s.slug).sort();
+        if (w.lastSlugs === null || w.lastSlugs === undefined) {
+          w.lastCheckedAt = new Date(now()).toISOString();
+          w.lastSlugs = slugs;
+          continue;
+        }
+        const prev = new Set(w.lastSlugs || []);
+        const fresh = hits.filter((s) => !prev.has(s.slug));
+        w.lastCheckedAt = new Date(now()).toISOString();
+        w.lastSlugs = slugs;
+        if (fresh.length) out.push({ watch: { kind: w.kind, pattern: w.pattern }, matches: fresh.map((s) => ({ slug: s.slug, title: s.title, sourceUrl: s.sourceUrl })) });
+      }
+      meta.watches = watches;
+      writeAtomic("meta.json", meta);
+      return out;
+    },
+  };
+}
+
+// ---- browser-cdp.mjs ----
+// Module: browser-cdp — optional native Chrome DevTools Protocol adapter.
+// Zero npm deps: finds system Chrome/Chromium, launches an isolated profile,
+// drives it over global WebSocket CDP (navigate, viewport, evaluate,
+// screenshot), cleans up. Missing browser => BROWSER_UNAVAILABLE, never fake.
+
+const CDP_VIEWPORTS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true } };
+const CDP_CAPTURE_TIMEOUT_MS = 45000;
+const CDP_NAV_TIMEOUT_MS = 30000;
+const CDP_MAX_SETTLE_MS = 8000;
+const CDP_MAX_FRAMES = 16;
+const CDP_MAX_RECORD_MS = 30000;
+
+function cdpBuiltins() {
+  const g = globalThis.process && globalThis.process.getBuiltinModule ? globalThis.process.getBuiltinModule : null;
+  if (typeof g !== "function") throw awardErr("UNSUPPORTED_OPERATION", "browser capture needs Node 22+");
+  return {
+    fs: g.call(globalThis.process, "node:fs"),
+    path: g.call(globalThis.process, "node:path"),
+    os: g.call(globalThis.process, "node:os"),
+    cp: g.call(globalThis.process, "node:child_process"),
+    crypto: g.call(globalThis.process, "node:crypto"),
+  };
+}
+function cdpBad(m) { return awardErr("BAD_ARGS", m); }
+function cdpUnavailable(detail) {
+  const e = awardErr("BROWSER_UNAVAILABLE", "no Chrome/Chromium found. Install Chrome or set AURA_CHROME_PATH to its executable. " + (detail || ""));
+  return e;
+}
+// Normalize ANY CDP setup failure (socket refused, attach hang, first-frame
+// timeout) to BROWSER_UNAVAILABLE with operation-specific fallback guidance.
+// A hung Target.* handshake must never surface as a raw upstream timeout.
+function cdpSetupFailed(op, err) {
+  const why = String((err && err.message) || err).slice(0, 180);
+  const fallback = op === "structure"
+    ? " Fallback: aura_visual_audit {mode:structure} retries automatically over static HTML (source:static-html, no measured offsets)."
+    : op === "motion"
+      ? " Fallback: aura_motion_study {mode:search} still works over stored studies; otherwise write <500ms entrances + prefers-reduced-motion by hand."
+      : " Fallback: aura_visual_audit {mode:structure} can still estimate sections from static HTML; screenshots need a working browser.";
+  const e = awardErr("BROWSER_UNAVAILABLE", "browser control failed during " + op + " (" + why + "). Check that Chrome is installed and no firewall blocks 127.0.0.1 remote debugging." + fallback);
+  return e;
+}
+function cdpResolveViewport(name) {
+  if (name === undefined || name === null) return CDP_VIEWPORTS.desktop;
+  if (!CDP_VIEWPORTS[name]) throw cdpBad("viewport must be desktop|mobile");
+  return CDP_VIEWPORTS[name];
+}
+// Self-contained page snippets (no closures; run via Runtime.evaluate).
+const CDP_SCAN_JS = `(() => { const doc = document; const out = { title: doc.title, totalHeight: Math.round(doc.documentElement.scrollHeight), candidates: [] }; const bodyW = (doc.body.getBoundingClientRect().width || 1); const push = (tag, label, bg, top, height, textStart) => out.candidates.push({ tag, label, bg, top: Math.round(top), height: Math.round(height), textStart }); push("body", "body", getComputedStyle(doc.body).backgroundColor, 0, out.totalHeight, ""); const seen = new Set(); const visit = (el, depth) => { if (depth > 6 || out.candidates.length >= 300 || seen.has(el)) return; seen.add(el); try { const r = el.getBoundingClientRect(); if (el !== doc.body && r.width >= 0.6 * bodyW && r.height >= 120) { const bg = getComputedStyle(el).backgroundColor || ""; const m = /rgba?\\(([^)]+)\\)/.exec(bg); let a = 0; if (m) { const parts = m[1].replace(/\\//g, " ").trim().split(/[\\s,]+/).filter(Boolean); const raw = parts.length >= 4 ? parts[3] : "1"; a = raw.endsWith("%") ? parseFloat(raw) / 100 : parseFloat(raw); if (Number.isNaN(a)) a = 0; } else if (/^(oklch|oklab|lab|lch|hwb|color)\\(/.test(bg.trim())) a = 1; if (a > 0) push(el.tagName.toLowerCase(), (el.id ? "#" + el.id : "") + (el.classList.length ? "." + el.classList[0] : ""), bg, r.top + window.scrollY, r.height, (el.textContent || "").trim().slice(0, 60)); } } catch {} for (const ch of el.children) visit(ch, depth + 1); }; visit(doc.body, 0); return out; })()`;
+const CDP_MOTION_JS = `(() => { const g = window; const libs = []; const add = (s) => { if (!libs.includes(s)) libs.push(s); }; try { if (g.gsap || g.TweenMax) add("gsap"); if (g.ScrollTrigger && g.ScrollTrigger.getAll) add("scrolltrigger"); if (g.Lenis || (document.documentElement.classList && document.documentElement.classList.contains("lenis"))) add("lenis"); if (document.querySelector("[data-scroll-container]")) add("locomotive"); if (document.querySelector("[data-aos]")) add("aos"); if (g.Swiper || document.querySelector(".swiper")) add("swiper"); } catch {} const render = []; try { const cs = [...document.querySelectorAll("canvas")]; if (g.THREE) render.push("three"); if (g.PIXI) render.push("pixi"); if (cs.length && !render.length) render.push("webgl"); } catch {} let st = { count: 0, scrub: 0, pin: 0, sample: [] }; try { if (g.ScrollTrigger && g.ScrollTrigger.getAll) { const all = g.ScrollTrigger.getAll(); st.count = all.length; for (const s of all.slice(0, 20)) { const v = (s.vars || {}); if (v.scrub) st.scrub++; if (v.pin) st.pin++; st.sample.push({ start: v.start != null ? String(v.start) : null, end: v.end != null ? String(v.end) : null, scrub: !!v.scrub, pin: !!v.pin, duration: null, ease: null }); } } } catch {} const tweens = { durations: [], eases: [] }; try { const kids = (g.gsap && g.gsap.globalTimeline && g.gsap.globalTimeline.getChildren(true, true, true)) || []; for (const k of kids.slice(0, 100)) { try { const d = typeof k.duration === "function" ? k.duration() : k.vars && k.vars.duration; if (typeof d === "number") tweens.durations.push(d); if (k.vars && k.vars.ease) tweens.eases.push(String(k.vars.ease)); } catch {} } } catch {} let css = []; try { const anims = (document.getAnimations && document.getAnimations()) || []; for (const a of anims.slice(0, 200)) { try { const t = a.effect && a.effect.getComputedTiming && a.effect.getComputedTiming(); if (t && t.easing && String(t.easing).includes("bezier")) css.push(String(t.easing)); if (t && typeof t.duration === "number") tweens.durations.push(t.duration / 1000); } catch {} } } catch {} return { libs, render, scrollTrigger: st, tweens, cssBeziers: css }; })()`;
+
+// Pure band reducer (mirrors upstream sweep; tested with fixture DOM).
+function cdpCollapseBands(cands, totalHeight, maxBands = 40) {
+  const usable = (cands || []).map((c) => ({ ...c, top: Math.round(c.top || 0), height: Math.round(c.height || 0) })).filter((c) => c.height > 0);
+  const STEP = 8;
+  const bgAt = (y) => {
+    let best = null;
+    for (const c of usable) if (c.top <= y && y < c.top + c.height && (!best || c.height < best.height)) best = c;
+    return best;
+  };
+  const runs = [];
+  let y = 0, cur = null;
+  while (y < totalHeight) {
+    const c = bgAt(y);
+    if (cur && c && c.bg === cur.cand.bg) { /* continue */ }
+    else {
+      if (cur) runs.push({ cand: cur.cand, top: cur.top, height: y - cur.top });
+      cur = c ? { cand: c, top: y } : null;
+    }
+    y += STEP;
+  }
+  if (cur) runs.push({ cand: cur.cand, top: cur.top, height: totalHeight - cur.top });
+  const merged = [];
+  for (const r of runs) {
+    const prev = merged[merged.length - 1];
+    if (prev && !prev.sealed && prev.cand.bg === r.cand.bg) prev.height = r.top + r.height - prev.top;
+    else if (r.height < 40 && prev) { prev.height = r.top + r.height - prev.top; prev.sealed = true; }
+    else merged.push({ ...r });
+  }
+  while (merged.length > maxBands && merged.length > 1) {
+    let idx = 1;
+    for (let i = 1; i < merged.length; i++) if (merged[i].height < merged[idx].height) idx = i;
+    merged[idx - 1].height += merged[idx].height;
+    merged.splice(idx, 1);
+  }
+  return merged.map((r, i) => ({ index: i, tag: r.cand.tag, label: r.cand.label, background: r.cand.bg, offsetTop: Math.round(r.top), height: Math.round(r.height), textStart: r.cand.textStart || "" }));
+}
+// Static-HTML fallback bands (no layout): honest estimated source label.
+function cdpBandsFromHtml(html, url) {
+  const src = String(html || "");
+  const bands = [];
+  const re = /<(section|header|footer|nav|main|div|article)[^>]*>/gi;
+  let m, i = 0;
+  while ((m = re.exec(src)) && bands.length < 40) {
+    const tag = m[1].toLowerCase();
+    const chunk = src.slice(m.index, m.index + 2000);
+    const h = (chunk.match(/<h[1-3][^>]*>([^<]{1,80})/i) || [])[1];
+    const bg = (m[0].match(/background(?:-color)?:\s*([^;"']{1,30})/i) || [])[1] || null;
+    const hasImg = /<img|<video/i.test(chunk);
+    bands.push({ index: i++, tag, label: tag, background: bg, offsetTop: null, height: null, textStart: h ? String(h).trim().slice(0, 60) : "", media: hasImg });
+  }
+  return { url, title: (src.match(/<title>([^<]{1,120})<\/title>/i) || [])[1] || url, totalHeight: null, bands, source: "static-html", note: "offsets/heights unavailable without layout; use capture/structure via browser for measured bands" };
+}
+
+// CDP connection: id-keyed commands over a WebSocket-like transport.
+// Messages without an id are domain events (Page.loadEventFired, ...)
+// dispatched to onEvent subscribers.
+function createCdpConn(socket) {
+  let nextId = 1;
+  const pending = new Map();
+  const listeners = new Map();
+  const route = (raw) => {
+    let msg;
+    try { msg = JSON.parse(typeof raw === "string" ? raw : raw.data); } catch { return; }
+    if (msg && msg.id !== undefined && pending.has(msg.id)) {
+      const { resolve, reject } = pending.get(msg.id);
+      pending.delete(msg.id);
+      if (msg.error) reject(awardErr("UPSTREAM_ERROR", "CDP " + (msg.error.message || "error")));
+      else resolve(msg.result);
+    } else if (msg && typeof msg.method === "string" && listeners.has(msg.method)) {
+      for (const cb of listeners.get(msg.method)) { try { cb(msg.params || {}); } catch { /* listener never breaks routing */ } }
+    }
+  };
+  // Always install (never guard on a read: setter-only transports report
+  // onmessage as undefined on read, which previously left responses unrouted
+  // so EVERY command timed out even against a healthy browser).
+  try { socket.onmessage = (evt) => route(typeof evt === "string" ? evt : evt.data); } catch { /* send-only test doubles */ }
+  return {
+    pendingCount: () => pending.size,
+    onEvent: (method, cb) => {
+      if (!listeners.has(method)) listeners.set(method, new Set());
+      listeners.get(method).add(cb);
+      return () => { try { listeners.get(method).delete(cb); } catch { /* ignore */ } };
+    },
+    command(method, params = {}, timeoutMs = 10000) {
+      const id = nextId++;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { pending.delete(id); reject(awardErr("CAPTURE_TIMEOUT", "CDP " + method + " timed out")); }, timeoutMs);
+        pending.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
+        try { socket.send(JSON.stringify({ id, method, params })); }
+        catch (e) { clearTimeout(timer); pending.delete(id); reject(e); }
+      });
+    },
+    // Test seam: deliver an inbound message (out-of-order safe).
+    deliver(msg) {
+      if (msg && msg.id !== undefined && pending.has(msg.id)) {
+        const { resolve, reject } = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.error) reject(awardErr("UPSTREAM_ERROR", "CDP error"));
+        else resolve(msg.result);
+      } else if (msg && typeof msg.method === "string" && listeners.has(msg.method)) {
+        for (const cb of listeners.get(msg.method)) { try { cb(msg.params || {}); } catch { /* ignore */ } }
+      }
+    },
+  };
+}
+
+function findChromeExecutable({ envPath, exists = null, platform = null } = {}) {
+  const { fs } = cdpBuiltins();
+  const has = exists || ((p) => { try { return fs.existsSync(p); } catch { return false; } });
+  const env = globalThis.process && globalThis.process.env ? globalThis.process.env : {};
+  const plat = platform || (globalThis.process ? globalThis.process.platform : "linux");
+  const candidates = [];
+  const configured = envPath || env.AURA_CHROME_PATH;
+  if (configured) candidates.push(configured);
+  if (plat === "win32") {
+    candidates.push("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files\\Chromium\\Application\\chrome.exe");
+    const pf = env["PROGRAMFILES"] || "C:\\Program Files";
+    candidates.push(pf + "\\Google\\Chrome\\Application\\chrome.exe");
+  } else if (plat === "darwin") {
+    candidates.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium");
+  } else {
+    candidates.push("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium");
+  }
+  for (const c of candidates) if (c && has(c)) return c;
+  // PATH lookup (which/where) as last resort.
+  try {
+    const { cp } = cdpBuiltins();
+    const cmd = plat === "win32" ? "where chrome" : "which google-chrome chromium chromium-browser chrome";
+    const out = cp.spawnSync(plat === "win32" ? "where" : "which", plat === "win32" ? ["chrome"] : ["google-chrome", "chromium", "chromium-browser", "chrome"], { encoding: "utf8", timeout: 5000 });
+    const first = String((out && out.stdout) || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
+    if (first && has(first)) return first;
+  } catch { /* ignore */ }
+  return null;
+}
+function findFfmpeg({ envPath } = {}) {
+  const env = globalThis.process && globalThis.process.env ? globalThis.process.env : {};
+  const configured = envPath || env.AURA_FFMPEG_PATH;
+  if (configured) return configured;
+  try {
+    const { cp } = cdpBuiltins();
+    const out = cp.spawnSync(globalThis.process && globalThis.process.platform === "win32" ? "where" : "which", ["ffmpeg"], { encoding: "utf8", timeout: 5000 });
+    const first = String((out && out.stdout) || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
+    return first || null;
+  } catch { return null; }
+}
+
+function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl = null, spawnImpl = null, now = () => Date.now() } = {}) {
+  const { fs, path, os, cp } = cdpBuiltins();
+  const fetchFn = fetchImpl || globalThis.fetch;
+  const WS = socketImpl || globalThis.WebSocket;
+  const spawn = (spawnImpl && spawnImpl.spawn) || cp.spawn;
+
+  function executable() {
+    const { fs: fss } = cdpBuiltins();
+    if (chromePath) {
+      try { if (fss.existsSync(chromePath)) return chromePath; } catch { /* fall through */ }
+      throw cdpUnavailable("configured chrome not found: " + chromePath);
+    }
+    return findChromeExecutable({});
+  }
+  async function launchIsolated(port) {
+    const exe = executable();
+    if (!exe) throw cdpUnavailable("");
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), "aura-cdp-"));
+    const args = ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--disable-dev-shm-usage", "--user-data-dir=" + profile, "--remote-debugging-port=" + port, "--remote-allow-origins=*", "about:blank"];
+    const child = (() => {
+      try { return spawn(exe, args, { stdio: "ignore", windowsHide: true, detached: false }); }
+      catch (e) { throw cdpUnavailable("launch failed: " + String((e && e.message) || e).slice(0, 160)); }
+    })();
+    // A bad executable surfaces as an async ENOENT 'error' event, not a
+    // throw: record it so the port poll below fails fast with an honest code.
+    let spawnErr = null;
+    try { child.once("error", (e) => { spawnErr = e; }); } catch { /* ignore */ }
+    const cleanup = () => { try { child.kill(); } catch { /* ignore */ } try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ } };
+    // Wait for /json/version (up to 15s).
+    const deadline = Date.now() + 15000;
+    let err = null;
+    while (Date.now() < deadline) {
+      if (spawnErr) { cleanup(); throw cdpUnavailable("launch failed: " + String((spawnErr && spawnErr.message) || spawnErr).slice(0, 160)); }
+      try {
+        const res = await fetchFn("http://127.0.0.1:" + port + "/json/version", { signal: AbortSignal.timeout(2000) });
+        if (res && res.ok) {
+          const j = await res.json();
+          return { child, profile, cleanup, wsUrl: j.webSocketDebuggerUrl };
+        }
+      } catch (e) { err = e; }
+      await new Promise((r) => setTimeout(r, 300));
+      if (child.exitCode !== null && child.exitCode !== undefined) break;
+    }
+    cleanup();
+    throw awardErr("BROWSER_UNAVAILABLE", "Chrome did not open a debug port (" + String((err && err.message) || "launch failed").slice(0, 160) + ")");
+  }
+  // Attach to a real page target via /json/list (stable across Chrome
+  // builds). Target.createTarget over the browser endpoint hangs on several
+  // headless=new builds, so it is only a last-resort fallback here.
+  async function pageWsUrl(port) {
+    const listUrl = "http://127.0.0.1:" + port + "/json/list";
+    const read = async () => {
+      const res = await fetchFn(listUrl, { signal: AbortSignal.timeout(3000) });
+      if (!res || !res.ok) throw new Error("target list HTTP " + (res && res.status));
+      return res.json();
+    };
+    let targets = await read();
+    let page = (targets || []).find((t) => t && t.type === "page" && t.webSocketDebuggerUrl);
+    if (!page) {
+      try { await fetchFn("http://127.0.0.1:" + port + "/json/new?about:blank", { method: "PUT", signal: AbortSignal.timeout(5000) }); } catch { /* fall through to error below */ }
+      targets = await read();
+      page = (targets || []).find((t) => t && t.type === "page" && t.webSocketDebuggerUrl);
+    }
+    if (!page) throw new Error("no page target in " + listUrl);
+    return page.webSocketDebuggerUrl;
+  }
+  // Bounded load wait: resolves on Page.loadEventFired, on network-idle
+  // (no Page.lifecycleEvent for 2s after load when asked), or on timeout —
+  // never hangs the tool call.
+  function waitForSettled(conn, send, waitStrategy) {
+    return new Promise((resolve) => {
+      const cap = setTimeout(resolve, waitStrategy === "networkidle" ? 12000 : 15000);
+      let lastActivity = Date.now();
+      const idleTimer = waitStrategy === "networkidle" ? setInterval(() => {
+        if (Date.now() - lastActivity > 2000) { clearInterval(idleTimer); clearTimeout(cap); resolve(); }
+      }, 500) : null;
+      const off = conn.onEvent("Page.loadEventFired", () => {
+        lastActivity = Date.now();
+        if (waitStrategy !== "networkidle") { if (idleTimer) clearInterval(idleTimer); clearTimeout(cap); off(); resolve(); }
+      });
+      conn.onEvent("Page.lifecycleEvent", () => { lastActivity = Date.now(); });
+    });
+  }
+  async function withPage({ viewport, fn, timeoutMs = CDP_CAPTURE_TIMEOUT_MS, op = "capture" }) {
+    const vp = cdpResolveViewport(viewport);
+    const port = 19222 + Math.floor(Math.random() * 2000);
+    const { child, cleanup } = await launchIsolated(port);
+    const stopTimer = setTimeout(() => { try { child.kill(); } catch { /* ignore */ } }, timeoutMs + 15000);
+    try {
+      if (!WS) throw cdpUnavailable("WebSocket unavailable in this Node build.");
+      let wsUrl;
+      try { wsUrl = await pageWsUrl(port); }
+      catch (e) { throw cdpSetupFailed(op, e); }
+      const ws = new WS(wsUrl, []);
+      try {
+        await new Promise((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error("CDP socket connect timed out")), 10000);
+          ws.onopen = () => { clearTimeout(t); resolve(); };
+          ws.onerror = () => { clearTimeout(t); reject(new Error("CDP socket error")); };
+        });
+      } catch (e) { try { ws.close(); } catch { /* ignore */ } throw cdpSetupFailed(op, e); }
+      const conn = createCdpConn({ send: (s) => ws.send(s), set onmessage(v) { ws.onmessage = (e) => v(e.data); } });
+      const send = (method, params, t) => conn.command(method, params, t);
+      try {
+        await send("Page.enable", {}, 8000);
+        await send("Emulation.setDeviceMetricsOverride", { width: vp.width, height: vp.height, deviceScaleFactor: vp.deviceScaleFactor || 1, mobile: !!vp.isMobile }, 8000);
+      } catch (e) { try { ws.close(); } catch { /* ignore */ } throw cdpSetupFailed(op, e); }
+      const out = await fn({ send, conn });
+      try { ws.close(); } catch { /* ignore */ }
+      return out;
+    } finally { clearTimeout(stopTimer); cleanup(); }
+  }
+  return {
+    status() {
+      let exe = null;
+      try { exe = executable(); } catch { exe = null; }
+      return { available: !!exe, executable: exe, ffmpeg: findFfmpeg({}), viewports: Object.keys(CDP_VIEWPORTS) };
+    },
+    async capture(url, { viewport = "desktop", waitStrategy = "load", settleMs = 1500, allowLocal = false, saveDir = null } = {}) {
+      const target = awardValidateHttpUrl(url, { allowLocal });
+      if (!["load", "networkidle"].includes(waitStrategy)) throw cdpBad("waitStrategy must be load|networkidle");
+      const settle = Math.max(0, Math.min(settleMs ?? 1500, CDP_MAX_SETTLE_MS));
+      const exe = executable();
+      if (!exe) throw cdpUnavailable("");
+      const startedAt = new Date(now()).toISOString();
+      const shot = await withPage({
+        viewport, op: "capture",
+        async fn({ send, conn }) {
+          const settled = waitForSettled(conn, send, waitStrategy);
+          await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
+          await settled;
+          await new Promise((r) => setTimeout(r, settle));
+          // Pre-scroll for lazy sections (bounded).
+          try { await send("Runtime.evaluate", { expression: "(async()=>{for(let y=0;y<Math.min(document.documentElement.scrollHeight,10800);y+=450){scrollTo(0,y);await new Promise(r=>setTimeout(r,40));}scrollTo(0,0);await new Promise(r=>setTimeout(r,150));})()", awaitPromise: true }, 8000); } catch { /* best-effort */ }
+          const meta = await send("Runtime.evaluate", { expression: "({title:document.title,w:innerWidth,h:innerHeight,total:Math.round(document.documentElement.scrollHeight)})", returnByValue: true }, 8000).catch(() => ({ result: { value: {} } }));
+          const snap = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true }, 15000);
+          return { meta: (meta && meta.result && meta.result.value) || {}, png: snap.data };
+        },
+      });
+      const dir = saveDir || path.join(os.tmpdir(), "aura-captures");
+      try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+      const name = "capture-" + String(now()) + ".png";
+      const file = path.join(dir, name);
+      try { fs.writeFileSync(file, Buffer.from(shot.png, "base64")); } catch { /* return inline only */ }
+      return { url: target, viewport, viewportPx: cdpResolveViewport(viewport), capturedAt: startedAt, artifactPath: file, bytes: Buffer.from(shot.png, "base64").length, page: shot.meta, limitations: ["lazy-loaded sections below the fold may still be placeholders", "blocked third-party resources are not retried"], source: "live-browser" };
+    },
+    async structure(url, { viewport = "desktop", allowLocal = false } = {}) {
+      const target = awardValidateHttpUrl(url, { allowLocal });
+      const exe = executable();
+      if (!exe) throw cdpUnavailable("");
+      const bands = await withPage({
+        viewport, op: "structure",
+        async fn({ send, conn }) {
+          const settled = waitForSettled(conn, send, "load");
+          await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
+          await settled;
+          const res = await send("Runtime.evaluate", { expression: CDP_SCAN_JS, returnByValue: true }, 10000);
+          return (res && res.result && res.result.value) || { title: target, totalHeight: 0, candidates: [] };
+        },
+      });
+      const collapsed = cdpCollapseBands(bands.candidates || [], bands.totalHeight || 0);
+      return { url: target, title: bands.title || target, totalHeight: bands.totalHeight || 0, bands: collapsed, viewport, viewportPx: cdpResolveViewport(viewport), source: "live-dom" };
+    },
+    async motionInspect(url, { viewport = "desktop", allowLocal = false } = {}) {
+      const target = awardValidateHttpUrl(url, { allowLocal });
+      const exe = executable();
+      if (!exe) throw cdpUnavailable("");
+      const scan = await withPage({
+        viewport, op: "motion",
+        async fn({ send, conn }) {
+          const settled = waitForSettled(conn, send, "load");
+          await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
+          await settled;
+          await new Promise((r) => setTimeout(r, 1500));
+          const res = await send("Runtime.evaluate", { expression: CDP_MOTION_JS, returnByValue: true }, 10000);
+          return (res && res.result && res.result.value) || { libs: [], render: [], scrollTrigger: { count: 0 }, tweens: { durations: [], eases: [] }, cssBeziers: [] };
+        },
+      });
+      return reduceCdpScan(target, scan, now(), viewport);
+    },
+    // Bounded motion record: one session, N screenshots across a scroll tour.
+    // Returns frame files + inspect evidence; webm only when ffmpeg exists.
+    async recordFrames(url, { frames = 8, viewport = "desktop", allowLocal = false, saveDir = null, durationMs = 12000 } = {}) {
+      const target = awardValidateHttpUrl(url, { allowLocal });
+      const n = Math.max(2, Math.min(frames || 8, CDP_MAX_FRAMES));
+      const budget = Math.max(4000, Math.min(durationMs || 12000, CDP_MAX_RECORD_MS));
+      const exe = executable();
+      if (!exe) throw cdpUnavailable("");
+      const dir = saveDir || fs.mkdtempSync(path.join(os.tmpdir(), "aura-motion-"));
+      try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+      const startedAt = new Date(now()).toISOString();
+      const stepMs = Math.floor(budget / (n + 2));
+      const out = await withPage({
+        viewport, timeoutMs: budget + 30000, op: "motion",
+        async fn({ send, conn }) {
+          const settled = waitForSettled(conn, send, "load");
+          await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
+          await settled;
+          await new Promise((r) => setTimeout(r, Math.min(4000, stepMs)));
+          const files = [];
+          for (let i = 0; i < n; i++) {
+            try {
+              await send("Runtime.evaluate", { expression: "scrollTo(0, Math.round(document.documentElement.scrollHeight * " + (i / Math.max(1, n - 1)) + "))", returnByValue: true }, 5000);
+            } catch { /* ignore */ }
+            await new Promise((r) => setTimeout(r, Math.min(stepMs, 3000)));
+            try {
+              const snap = await send("Page.captureScreenshot", { format: "jpeg", quality: 70 }, 10000);
+              const file = path.join(dir, "frame-" + String(i).padStart(2, "0") + ".jpg");
+              fs.writeFileSync(file, Buffer.from(snap.data, "base64"));
+              files.push(file);
+            } catch { /* partial capture: keep what we have */ }
+          }
+          let inspect = null;
+          try {
+            const res = await send("Runtime.evaluate", { expression: CDP_MOTION_JS, returnByValue: true }, 10000);
+            inspect = (res && res.result && res.result.value) || null;
+          } catch { inspect = null; }
+          return { files, inspect };
+        },
+      });
+      const study = out.inspect ? reduceCdpScan(target, out.inspect, now(), viewport) : null;
+      return { url: target, viewport, startedAt, frames: out.files, frameCount: out.files.length, study, dir };
+    },
+    async encodeWebm(frameFiles, { ffmpegPath = null } = {}) {
+      const bin = ffmpegPath || findFfmpeg({});
+      if (!bin) return { video: null, available: false, hint: "ffmpeg not found; install ffmpeg or set AURA_FFMPEG_PATH for .webm output" };
+      if (!Array.isArray(frameFiles) || !frameFiles.length) throw cdpBad("no frames to encode");
+      const dir = path.dirname(frameFiles[0]);
+      const video = path.join(dir, "motion.webm");
+      const args = ["-y", "-framerate", "2", "-i", path.join(dir, "frame-%02d.jpg"), "-c:v", "libvpx", "-pix_fmt", "yuv420p", video];
+      const res = cp.spawnSync(bin, args, { timeout: 60000, windowsHide: true });
+      if (res && res.status === 0 && fs.existsSync(video)) return { video, available: true, bytes: fs.statSync(video).size };
+      return { video: null, available: false, hint: "ffmpeg encode failed (" + String(res && res.status) + "); frame JPEGs retained" };
+    },
+  };
+}
+function reduceCdpScan(url, scan, t, viewport) {
+  const libs = Array.isArray(scan.libs) ? scan.libs : [];
+  const render = Array.isArray(scan.render) ? scan.render : [];
+  const st = scan.scrollTrigger || { count: 0, scrub: 0, pin: 0, sample: [] };
+  const durations = ((scan.tweens && scan.tweens.durations) || []).filter((d) => typeof d === "number");
+  const eases = ((scan.tweens && scan.tweens.eases) || []).concat(scan.cssBeziers || []).filter(Boolean);
+  const agg = new Map();
+  for (const raw of eases) {
+    if (raw === "none" || raw === "linear") continue;
+    const e = agg.get(raw) || { token: raw, uses: 0 };
+    e.uses++;
+    agg.set(raw, e);
+  }
+  const ms = durations.map((d) => d * 1000).sort((a, b) => a - b);
+  const q = (p) => { if (!ms.length) return null; const i = p * (ms.length - 1); const lo = Math.floor(i), hi = Math.ceil(i); return Math.round(ms[lo] + (ms[hi] - ms[lo]) * (i - lo)); };
+  return {
+    url, viewport: viewport || "desktop",
+    stack: { libs, render, scrollModel: libs.includes("lenis") ? "lenis" : libs.includes("locomotive") ? "locomotive" : libs.length ? "native" : "unknown" },
+    scroll: { triggerCount: st.count || 0, scrubCount: st.scrub || 0, pinCount: st.pin || 0, scrubRatio: st.count ? (st.scrub || 0) / st.count : 0, sample: (st.sample || []).slice(0, 20) },
+    easingVocab: [...agg.values()].sort((a, b) => b.uses - a.uses).slice(0, 15),
+    durationVocab: ms.length ? { p25: q(0.25), median: q(0.5), p75: q(0.75) } : null,
+    capturedAt: t, toolVersion: "aura/1.7.1", source: "live-browser",
+  };
+}
+
 // ---- tools.mjs ----
 // Module: tools — thin adapters. Each tool validates args at the seam,
 // calls one catalog/guide method, wraps textResult. No retries/caching here
@@ -1700,8 +3129,14 @@ const TOOL_DEFS = [
   { name: 'aura_docs_check', description: 'Check pasted code against fresh docs (pure). library + code_excerpt (under 20000 chars, excerpts not full pages) + optional docs_note -> verdict current|needs-update, look-preserving fixes, version-pin needs_check. Fresh API wins, look stays identical.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, code_excerpt: { type: 'string' }, docs_note: { type: 'string' } }, required: ['library', 'code_excerpt'], additionalProperties: false } },
   { name: 'aura_icon', description: 'Fetch one free icon as ready-to-paste SVG (live). name in kebab-case (bolt, arrow-down). source auto|fontawesome|pixel, style auto|solid|regular|brands. Auto-fallback across styles then libraries; every hit carries license + credit (CC BY 4.0, credit always) plus a font/CSS alternative. 24h icon cache.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string', enum: ['auto', 'fontawesome', 'pixel'] }, style: { type: 'string', enum: ['solid', 'regular', 'brands', 'auto'] } }, required: ['name'], additionalProperties: false } },
   { name: 'aura_version', description: 'Running vs npm-published version (live, hourly cache). Returns update_available + notice telling the agent to prefer latest (npm i -g aura-components-mcp@latest) when behind. Never fails — offline registries return latest:null. aura_status already carries this verdict on every call.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'aura_award_search', description: 'Search award-winning website references (Awwwards). Modes: sites (ranked refs with preview links), categories (real taxonomy from the index/source), elements (hero/nav/pricing/footer examples), motion (previously recorded motion studies). Local index first, one polite live refresh when empty.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['sites', 'categories', 'elements', 'motion'] }, query: { type: 'string' }, slug: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, category: { type: 'string' }, color: { type: 'string' }, technology: { type: 'string' }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, studio: { type: 'string' }, limit: { type: 'number' }, offset: { type: 'number' }, full: { type: 'boolean' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_award_inspect', description: 'Inspect award refs: site_details (palette/tech/awards/evidence), site_elements (section visuals with media URLs), element (one gallery record), compare_sites (2-3 refs: shared vs gaps, missing marked unknown).', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['site_details', 'site_elements', 'element', 'compare_sites'] }, slug: { type: 'string' }, elementSlug: { type: 'string' }, slugs: { type: 'array', items: { type: 'string' } } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_design_blueprint', description: 'Evidence-backed build plan from 2-5 award refs + goal: Markdown brief + versioned JSON, mapped to real free Aura components/systems (free-only enforced, failures marked unavailable). Never copies third-party source.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, references: { type: 'array', items: { type: 'string' } }, technology: { type: 'string' }, visualDirection: { type: 'string' }, responsive: { type: 'string' }, constraints: { type: 'array', items: { type: 'string' } }, includeStructure: { type: 'boolean' } }, required: ['goal', 'references'], additionalProperties: false } },
+  { name: 'aura_visual_audit', description: 'Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), compare (reference vs build mismatches). Needs Chrome for live capture; honest BROWSER_UNAVAILABLE otherwise. Loopback only with allowLocal:true.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['capture', 'structure', 'compare'] }, url: { type: 'string' }, referenceUrl: { type: 'string' }, buildUrl: { type: 'string' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, waitStrategy: { type: 'string', enum: ['load', 'networkidle'] }, settleMs: { type: 'number' }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_motion_study', description: 'Evidence-backed motion guidance. Modes: inspect (live runtime scan: libs/easing/scroll), record (bounded frame study; .webm only when ffmpeg present), search (stored studies by library/easing/scroll). Never claims unobserved library state.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['inspect', 'record', 'search'] }, url: { type: 'string' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' }, frames: { type: 'number' }, durationMs: { type: 'number' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_award_index', description: 'Local award corpus: status (counts/freshness/lock), rebuild/resume/refresh (bounded polite crawl), new_winners (baseline then delta), watch_add/list/remove (studio/tag/url watches). Never auto-crawls on startup.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'] }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, maxPages: { type: 'number' }, kind: { type: 'string', enum: ['studio', 'tag', 'url'] }, pattern: { type: 'string' } }, required: ['action'], additionalProperties: false } },
 ];
-function createHandlers(catalog, icons, version) {
+function createHandlers(catalog, icons, version, awardDeps) {
   // Automatic update notice: every aura_status carries the cached version
   // verdict (hourly npm re-check), so agents learn about updates unprompted.
   const versionNote = async () => {
@@ -1710,6 +3145,75 @@ function createHandlers(catalog, icons, version) {
     } catch { /* status must never fail on version check */ }
     return null;
   };
+  // Award subsystem deps (optional for old callers): client (live fetch),
+  // index (persistent JSON store), browser (native CDP). Missing pieces stay
+  // honest: local-empty results + unavailable notes, never invented data.
+  const awardClient = (awardDeps && awardDeps.awardClient) || null;
+  const awardBrowser = (awardDeps && awardDeps.browser) || null;
+  const awardIndex = (awardDeps && awardDeps.awardIndex) || awardFallbackIndex();
+  function awardFallbackIndex() {
+    const sites = new Map(); const elements = new Map(); const motions = [];
+    let tax = { colors: [], filters: [] }; let watches = [];
+    return {
+      root: "(memory)", files: [],
+      getStatus: () => ({ dir: "(memory)", version: 1, counts: { sites: sites.size, elements: elements.size, motion: motions.length, taxonomyFilters: tax.filters.length, taxonomyColors: tax.colors.length, watches: watches.length }, freshness: null, stale: true, progress: null, pendingPages: [], lock: { held: false } }),
+      listSites: (n) => [...sites.values()].slice(0, n || 50),
+      getSite: (slug) => { try { return sites.get(String(slug).toLowerCase()) || null; } catch { return null; } },
+      upsertSites: (rows) => { let added = 0; for (const s of (rows || [])) { if (s && s.slug && !sites.has(String(s.slug).toLowerCase())) added++; if (s && s.slug) sites.set(String(s.slug).toLowerCase(), s); } return { added, updated: 0, total: sites.size }; },
+      getTaxonomy: () => ({ version: 1, colors: tax.colors, filters: tax.filters }),
+      setTaxonomy: (t) => { tax = { colors: (t.colors || []).slice(0, 100), filters: (t.filters || []).slice(0, 400) }; return { colors: tax.colors.length, filters: tax.filters.length }; },
+      upsertElements: (rows) => { let added = 0; for (const e of (rows || [])) { if (e && e.slug && !elements.has(String(e.slug))) added++; if (e && e.slug) elements.set(String(e.slug), e); } return { added, total: elements.size }; },
+      listElements: (n) => [...elements.values()].slice(0, n || 50),
+      getElement: (slug) => elements.get(String(slug)) || null,
+      recordMotion: (s) => { const i = motions.findIndex((m) => m.url === s.url); if (i >= 0) motions.splice(i, 1); motions.unshift(s); return s; },
+      searchMotion: (f) => {
+        let items = [...motions];
+        if (f.library) items = items.filter((m) => JSON.stringify(m).toLowerCase().includes(String(f.library).toLowerCase()));
+        if (f.easing) items = items.filter((m) => JSON.stringify(m.easingVocab || []).toLowerCase().includes(String(f.easing).toLowerCase()));
+        if (f.scrollModel) items = items.filter((m) => String((m.stack && m.stack.scrollModel) || "").toLowerCase() === String(f.scrollModel).toLowerCase());
+        return { total: items.length, items: items.slice(0, 10), empty: motions.length === 0 };
+      },
+      newWinners: async () => { throw awardErr("UNSUPPORTED_OPERATION", "new_winners needs a persistent index + award client; wire the server default"); },
+      rebuild: async () => { throw awardErr("UNSUPPORTED_OPERATION", "rebuild needs a persistent index + award client"); },
+      resume: async () => { throw awardErr("UNSUPPORTED_OPERATION", "resume needs a persistent index + award client"); },
+      refresh: async () => { throw awardErr("UNSUPPORTED_OPERATION", "refresh needs a persistent index + award client"); },
+      watchAdd: (w) => { if (watches.some((x) => x.kind === w.kind && x.pattern === w.pattern)) throw awardErr("BAD_ARGS", "duplicate watch"); if (watches.length >= 50) throw awardErr("BAD_ARGS", "too many watches"); const r = { ...w, createdAt: new Date().toISOString(), lastCheckedAt: null, lastSlugs: null }; watches.push(r); return r; },
+      watchList: () => watches,
+      watchRemove: ({ kind, pattern }) => { const b = watches.length; watches = watches.filter((w) => !(w.kind === kind && w.pattern === String(pattern).toLowerCase())); return { removed: watches.length < b }; },
+      checkWatches: () => [],
+    };
+  }
+  function awardMode(v, allowed, name) { if (v === undefined) toolFn_bad(name + ' is required'); if (!allowed.includes(v)) toolFn_bad(name + ' must be one of ' + allowed.join('|')); return v; }
+  function awardLimit(v, def, max) { if (v === undefined) return def; if (typeof v !== 'number' || !Number.isFinite(v)) toolFn_bad('limit must be a number'); return Math.max(1, Math.min(Math.floor(v), max)); }
+  function awardStrArr(v, name, max) { if (v === undefined) return undefined; if (!Array.isArray(v)) toolFn_bad(name + ' must be an array of strings'); if (v.length > max) toolFn_bad(name + ' holds max ' + max + ' entries'); for (const e of v) if (typeof e !== 'string' || !e.trim()) toolFn_bad(name + ' must hold non-empty strings'); return v.map((e) => e.trim()); }
+  async function awardDetailFor(slug) {
+    const norm = awardNormalizeSlug(slug);
+    const cached = awardIndex.getSite(norm);
+    if (!awardClient) return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: 'award client not wired' };
+    try {
+      const { html } = await awardClient.getAwardHtml('/sites/' + norm);
+      const detail = awardParseDetail(html, norm);
+      const cachedTags = (cached && cached.tags) || [];
+      // Tags vs Technologies consistency (#5): listing tags (WebGL, 3D, …)
+      // exist even when the page has no Technologies section. Backfill from
+      // tags and LABEL it inferred — never present it as parsed section data.
+      if ((!detail.technologies || !detail.technologies.length) && cachedTags.length) {
+        detail.technologies = [...new Set(cachedTags.map((t) => String(t)))].slice(0, 12);
+        detail.technologiesInferred = true;
+        detail.technologyEvidence = "inferred from listing tags; page has no Technologies section";
+      }
+      const summary = { slug: norm, title: detail.title || (cached && cached.title) || norm, createdAt: (cached && cached.createdAt) || 0, tags: (cached && cached.tags) || [], thumbnailPath: (cached && cached.thumbnailPath) || "", liveUrl: detail.liveUrl || (cached && cached.liveUrl) || null, detailPath: "/sites/" + norm, awards: (detail.awards || []).map((a) => a.title), studio: (cached && cached.studio) || null, source: "awwwards", sourceUrl: detail.sourceUrl };
+      try { awardIndex.upsertSites([summary]); } catch { /* memory fallback never fails */ }
+      try {
+        const media = awardParseElementsSection(html);
+        if (media && media.length) awardIndex.upsertElements(media.map((m) => ({ slug: 'site-' + norm + '-' + String(m.title || 'element').toLowerCase().replace(/\W+/g, '-').slice(0, 60), title: m.title || 'Element', author: summary.studio || summary.title, builtWith: [], related: [], mediaPath: m.mediaPath, mediaType: String(m.mediaPath).endsWith('.mp4') ? 'video' : 'image', mediaUrl: awardElementUrl(m.mediaPath), category: 'uncategorized', siteSlug: norm, source: 'site', sourceUrl: summary.sourceUrl })));
+      } catch { /* backfill best-effort */ }
+      return { slug: norm, summary, detail, detailStatus: 'fetched', liveError: null };
+    } catch (e) {
+      if (e && e.code === 'NOT_FOUND') throw e;
+      return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: String((e && e.message) || e).slice(0, 220) };
+    }
+  }
   return {
     aura_status: async () => {
       const [status, update] = await Promise.all([catalog.getStatus(), versionNote()]);
@@ -1881,6 +3385,348 @@ function createHandlers(catalog, icons, version) {
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
       return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+    aura_award_search: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['sites', 'categories', 'elements', 'motion'], 'mode');
+      const limit = awardLimit(a.limit, 5, 25); const offset = Math.max(0, a.offset ?? 0); const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
+      if (mode === 'categories') {
+        let tax = awardIndex.getTaxonomy();
+        let source = 'local-index';
+        if ((!tax.filters.length && !tax.colors.length) && awardClient) {
+          try { const { html } = await awardClient.getAwardHtml('/websites/'); const parsed = awardParseCategories(html); awardIndex.setTaxonomy(parsed); tax = awardIndex.getTaxonomy(); source = 'live'; }
+          catch (e) { return textResult({ mode, colors: [], filters: [], source: 'unavailable', liveError: String((e && e.message) || e).slice(0, 220), note: 'taxonomy unavailable; rebuild the index or retry later' }); }
+        }
+        // Paginated: colors are few (return all); filters page with limit/offset.
+        const allFilters = tax.filters || [];
+        return textResult({ mode, colors: tax.colors || [], filters: allFilters.slice(offset, offset + limit), filtersTotal: allFilters.length, limit, offset, source, updatedAt: tax.updatedAt || null, note: allFilters.length > limit ? 'filters paged — raise offset for more' : undefined });
+      }
+      if (mode === 'motion') {
+        const r = awardIndex.searchMotion({ library: toolFn_str(a.library, 'library'), easing: toolFn_str(a.easing, 'easing'), scrollModel: a.scrollModel === undefined ? undefined : String(a.scrollModel), limit });
+        if (r.empty) return textResult({ mode, total: 0, items: [], emptyCorpus: true, note: 'no motion studies recorded yet — run aura_motion_study {mode:inspect|record} first' });
+        return textResult({ mode, total: r.total, items: r.items, emptyCorpus: false });
+      }
+      if (mode === 'elements') {
+        const q = toolFn_str(a.query, 'query') || ''; const cat = toolFn_str(a.category, 'category');
+        let pool = awardIndex.listElements(500);
+        if (!pool.length && awardClient && q) {
+          // Honest empty: element gallery needs per-item fetches; point at winners backfill instead of scraping blindly.
+          return textResult({ mode, total: 0, items: [], note: 'element corpus is empty; fetch site elements via aura_award_inspect {mode:site_elements} or record new_winners to backfill' });
+        }
+        let items = pool;
+        if (cat) items = items.filter((e) => String(e.category || '').toLowerCase() === cat.toLowerCase() || String(e.title || '').toLowerCase().includes(cat.toLowerCase()));
+        if (q) {
+          const toks = awardTokens(q);
+          items = items.map((e) => { const hay = (String(e.title || '') + ' ' + String(e.author || '') + ' ' + String(e.category || '')).toLowerCase(); let s = 0; for (const t of toks) if (hay.includes(t)) s++; return { e, s }; }).filter((x) => x.s > 0).toolFn_sort((x, y) => y.s - x.s || String(x.e.title).localeCompare(String(y.e.title))).map((x) => x.e);
+        } else items = [...items].toolFn_sort((x, y) => String(x.title).localeCompare(String(y.title)));
+        const page = items.slice(offset, offset + limit).map((e) => ({ slug: e.slug, title: e.title, author: e.author || null, category: e.category || null, mediaUrl: e.mediaUrl || (e.mediaPath ? awardElementUrl(e.mediaPath) : null), mediaType: e.mediaType || null, siteSlug: e.siteSlug || null, sourceUrl: e.sourceUrl || null, evidence: { source: 'awwwards' } }));
+        return textResult({ mode, query: q || null, total: items.length, limit, offset, items: page, ...(page.length ? {} : { suggestions: awardSuggestQueries(q || 'hero', awardIndex.getTaxonomy()) }) });
+      }
+      // sites
+      const query = toolFn_str(a.query, 'query') || ''; const slugQ = a.slug === undefined ? undefined : awardNormalizeSlug(a.slug);
+      const tech = toolFn_str(a.technology, 'technology'); const color = toolFn_str(a.color, 'color'); const awardF = a.award; const studio = toolFn_str(a.studio, 'studio');
+      if (awardF !== undefined && !['sotd', 'developer', 'honorable'].includes(awardF)) toolFn_bad('award must be sotd|developer|honorable');
+      if (color !== undefined && !/^#?[0-9a-fA-F]{6}$/.test(color.trim())) toolFn_bad('color must be a hex like #FF5733');
+      let pool = awardIndex.listSites(2000);
+      let liveError = null, liveRefreshed = false;
+      if (!pool.length && awardClient) {
+        try {
+          const { html } = await awardClient.getAwardHtml(awardFilterUrl({ color: color ? '#' + String(color).replace('#', '') : undefined, tags: a.tags, technology: tech, award: awardF }));
+          const parsed = awardParseListing(html);
+          if (parsed.length) { awardIndex.upsertSites(parsed); pool = awardIndex.listSites(2000); liveRefreshed = true; }
+        } catch (e) { liveError = String((e && e.message) || e).slice(0, 220); }
+      }
+      let filtered = pool;
+      if (slugQ) filtered = filtered.filter((s) => s.slug === slugQ);
+      if (tech) filtered = filtered.filter((s) => (s.tags || []).map((t) => String(t).toLowerCase()).includes(tech.toLowerCase()) || JSON.stringify(s).toLowerCase().includes(tech.toLowerCase()));
+      if (studio) filtered = filtered.filter((s) => String(s.studio || '').toLowerCase().includes(studio.toLowerCase()));
+      if (Array.isArray(a.tags) && a.tags.length) {
+        const want = a.tags.map((t) => String(t).toLowerCase());
+        filtered = filtered.filter((s) => want.some((w) => (s.tags || []).map((t) => String(t).toLowerCase()).includes(w)));
+      }
+      const { tokens, scored } = awardScoreSites(filtered, query || slugQ || '', { technology: tech, color });
+      const ranked = query ? scored.filter((x) => x.score > 0).map((x) => ({ s: x.site, score: x.score, reasons: x.reasons })) : scored.map((x) => ({ s: x.site, score: x.score, reasons: x.reasons }));
+      const total = ranked.length;
+      const page = ranked.slice(offset, offset + limit);
+      const items = [];
+      for (const r of page) {
+        if (full) {
+          try { const d = await awardDetailFor(r.s.slug); items.push(awardFullSite(d.summary || r.s, d.detail, { score: r.score, reasons: r.reasons })); }
+          catch { items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons })); }
+        } else items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons }));
+      }
+      const out = { mode, query: query || null, tokens, total, limit, offset, items, source: liveRefreshed ? 'live' : 'local-index', ...(liveError ? { liveError } : {}),
+        corpusNote: liveRefreshed ? 'local index was empty; seeded from one polite live listing fetch (rebuild the index for depth)' : 'ranked from the local index; rebuild/refresh the index when stale' };
+      if (!items.length && !liveError) { out.suggestions = awardSuggestQueries(query || 'portfolio', awardIndex.getTaxonomy()); out.note = 'zero-match (not a failure): try a suggestion'; }
+      if (!items.length && liveError) out.note = 'upstream fetch failed; local index also empty — retry later, do not treat as zero-match';
+      return textResult(out); },
+    aura_award_inspect: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['site_details', 'site_elements', 'element', 'compare_sites'], 'mode');
+      if (mode === 'element') {
+        const slug = awardNormalizeSlug(a.elementSlug || toolFn_bad('elementSlug (string) is required'));
+        let rec = awardIndex.getElement(slug);
+        if (!rec && awardClient) {
+          try { const { html } = await awardClient.getAwardHtml('/inspiration/' + slug); const parsed = awardParseElementPage(html); if (parsed) { awardIndex.upsertElements([{ ...parsed }]); rec = awardIndex.getElement(slug) || parsed; } } catch (e) { if (e && e.code === 'NOT_FOUND') throw e; }
+        }
+        if (!rec) { const e = new Error('element not found: ' + slug); e.code = 'NOT_FOUND'; throw e; }
+        return textResult({ mode, element: rec });
+      }
+      if (mode === 'compare_sites') {
+        const slugs = awardStrArr(a.slugs, 'slugs', 3) || toolFn_bad('slugs (array of 2-3) is required');
+        if (slugs.length < 2) toolFn_bad('compare_sites needs 2-3 slugs');
+        const normed = slugs.map((s) => awardNormalizeSlug(s));
+        const entries = [];
+        for (const s of normed) {
+          const d = await awardDetailFor(s);
+          let motion = null;
+          try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(s)) || null; } catch { motion = null; }
+          entries.push({ slug: s, detail: d.detail, motion });
+        }
+        const cmp = awardCompareSites(entries);
+        return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
+      }
+      const slug = awardNormalizeSlug(a.slug || toolFn_bad('slug (string) is required'));
+      const d = await awardDetailFor(slug);
+      if (!d.summary && !d.detail) { const e = new Error('site not found: ' + slug); e.code = 'NOT_FOUND'; throw e; }
+      if (mode === 'site_details') {
+        let motion = null;
+        try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(slug)) || null; } catch { motion = null; }
+        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
+      }
+      // site_elements
+      let elements = [];
+      if (d.detail && d.detail.elements) {
+        const media = awardParseElementsSection((await (async () => { try { const r = await awardClient.getAwardHtml('/sites/' + slug); return r.html; } catch { return ''; } })())) || [];
+        elements = (media.length ? media : d.detail.elements.map((t) => ({ title: t, mediaPath: null }))).map((m) => ({ title: m.title, mediaUrl: m.mediaPath ? awardElementUrl(m.mediaPath) : null, mediaType: m.mediaPath ? (String(m.mediaPath).endsWith('.mp4') ? 'video' : 'image') : null, siteSlug: slug, sourceUrl: awardSiteUrl(slug), evidence: { source: 'awwwards' } }));
+      } else {
+        const pool = awardIndex.listElements(500).filter((e) => e.siteSlug === slug);
+        elements = pool.map((e) => ({ title: e.title, mediaUrl: e.mediaUrl || (e.mediaPath ? awardElementUrl(e.mediaPath) : null), mediaType: e.mediaType, siteSlug: slug, sourceUrl: e.sourceUrl || awardSiteUrl(slug), evidence: { source: 'awwwards' } }));
+      }
+      return textResult({ mode, slug, sourceUrl: awardSiteUrl(slug), elements, ...(elements.length ? {} : { note: 'no Elements section on this page (legitimate empty) or detail unavailable' }) }); },
+    aura_design_blueprint: async (a) => { a = a || {}; const goal = typeof a.goal === 'string' ? a.goal.trim() : toolFn_bad('goal (string) is required');
+      if (!goal) toolFn_bad('goal (string) is required');
+      const refs = awardStrArr(a.references, 'references', 5) || toolFn_bad('references (array of 2-5 slugs) is required');
+      if (refs.length < 2 || refs.length > 5) toolFn_bad('references must hold 2-5 slugs — got ' + refs.length);
+      const normed = refs.map((s) => awardNormalizeSlug(s));
+      const technology = toolFn_str(a.technology, 'technology'); const visualDirection = toolFn_str(a.visualDirection, 'visualDirection'); const responsive = toolFn_str(a.responsive, 'responsive');
+      const constraints = Array.isArray(a.constraints) ? a.constraints.filter((c) => typeof c === 'string').map((c) => c.slice(0, 200)).slice(0, 8) : [];
+      const includeStructure = a.includeStructure === undefined ? false : toolFn_bool(a.includeStructure, 'includeStructure');
+      const details = [];
+      for (const s of normed) { try { details.push(await awardDetailFor(s)); } catch (e) { if (e && e.code === 'NOT_FOUND') throw e; details.push({ slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) }); } }
+      // Aura catalogue matches (real rows only; failures stay unavailable).
+      // One query PER proposed section so every section gets a candidate —
+      // theme words from the goal ride along (dark/light re-rank server-side).
+      const auraMatches = []; let auraUnavailable = null;
+      const SECTIONS = ['hero', 'proof', 'features', 'showcase', 'pricing', 'testimonials', 'faq', 'cta', 'footer'];
+      try {
+        if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
+        const themeWord = /\b(dark|light)\b/i.test(goal + ' ' + (visualDirection || '')) ? goal.match(/\b(dark|light)\b/i)[1].toLowerCase() : undefined;
+        const seen = new Set();
+        const queries = [];
+        for (const sec of SECTIONS) {
+          const refWords = [];
+          for (const d of details) {
+            const toks = awardTokens(((d.detail && d.detail.title) || '') + ' ' + ((d.detail && (d.detail.elements || []).join(' ')) || '')).slice(0, 2);
+            if (toks.length) refWords.push(toks[0]);
+          }
+          const q = [...new Set([sec, ...refWords.slice(0, 1), themeWord].filter(Boolean))].join(' ');
+          queries.push({ section: sec, q });
+        }
+        for (const { section, q } of queries) {
+          if (auraMatches.length >= 12) break;
+          try {
+            const r = await catalog.searchCatalog('components', { query: q, freeOnly: true, limit: 2, ...(themeWord ? { theme: themeWord } : {}) });
+            for (const it of (r.items || []).slice(0, 1)) {
+              if (!it || it.premium !== false) continue;
+              const key = String(it.id || it.slug);
+              if (seen.has(key)) continue;
+              seen.add(key);
+              auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
+            }
+          } catch { /* per-section failure tolerated, recorded below */ }
+        }
+        try {
+          const sys = await catalog.searchCatalog('design_systems', { query: goal, limit: 1 });
+          if (sys.items && sys.items[0]) auraMatches.unshift({ section: 'tokens', componentId: sys.items[0].slug || sys.items[0].id, componentTitle: sys.items[0].title, pageUrl: sys.items[0].page_url, why: 'design-system tokens first' });
+        } catch { /* optional */ }
+        const covered = new Set(auraMatches.map((m) => m.section));
+        const uncovered = SECTIONS.filter((s) => !covered.has(s));
+        if (uncovered.length) auraUnavailable = (auraUnavailable ? auraUnavailable + '; ' : '') + 'no free catalogue match for sections: ' + uncovered.join(', ') + ' — build these from tokens + closest matched section';
+      } catch (e) { auraUnavailable = String((e && e.message) || e).slice(0, 200); }
+      let structureNotes = null;
+      if (includeStructure) {
+        if (!awardBrowser) structureNotes = 'structure not captured: browser unavailable (install Chrome or set AURA_CHROME_PATH)';
+        else {
+          const parts = [];
+          for (const s of normed.slice(0, 3)) {
+            const d = details.find((x) => x.slug === s);
+            const live = d && d.detail && d.detail.liveUrl;
+            if (!live) { parts.push(s + ': no live URL in evidence'); continue; }
+            try { const st = await awardBrowser.structure(live, { viewport: 'desktop' }); parts.push(s + ': ' + st.bands.length + ' bands over ' + st.totalHeight + 'px (live-dom)'); }
+            catch (e) { parts.push(s + ': structure unavailable (' + String((e && e.message) || e).slice(0, 120) + ')'); }
+          }
+          structureNotes = parts.join('; ');
+        }
+      }
+      let motionNotes = null;
+      const gaps = [];
+      for (const d of details) {
+        if (!d.detail) gaps.push(d.slug + ': reference detail unavailable' + (d.liveError ? ' (' + d.liveError + ')' : ''));
+      }
+      try {
+        const mr = awardIndex.searchMotion({ limit: 25 });
+        const hits = (mr.items || []).filter((m) => normed.some((s) => String(m.url || '').toLowerCase().includes(s)));
+        if (hits.length) motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; ');
+        else gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
+      } catch { /* ignore */ }
+      if (!includeStructure) gaps.push('structure: not requested (pass includeStructure:true for measured band evidence)');
+      if (auraUnavailable) gaps.push('catalogue: ' + auraUnavailable);
+      // Requested palette synthesis: hexes named in the goal/direction become
+      // PROPOSED tokens (never presented as observed ref evidence), mapped
+      // against the refs' observed luminance bands.
+      const requestedPalette = [...new Set([...String(goal + ' ' + (visualDirection || '')).matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)].map((m) => { const h = m[1]; return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toUpperCase(); }))].slice(0, 6);
+      const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
+      return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
+    aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'compare'], 'mode');
+      const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
+      const waitStrategy = a.waitStrategy === undefined ? 'load' : awardMode(a.waitStrategy, ['load', 'networkidle'], 'waitStrategy');
+      const settleMs = a.settleMs === undefined ? 1500 : toolFn_num(a.settleMs, 'settleMs');
+      if (typeof settleMs !== 'number' || settleMs < 0 || settleMs > 8000) toolFn_bad('settleMs must be 0-8000');
+      const allowLocal = a.allowLocal === undefined ? false : toolFn_bool(a.allowLocal, 'allowLocal');
+      // Local-file audit (P0-2): a file:// build path or plain local path is
+      // readable WITHOUT a browser when allowLocal:true — parsed as labeled
+      // static-html estimates (source:local-file). Screenshots still need http.
+      const readLocalSource = async (raw, label) => {
+        if (!allowLocal) { const e = new Error(label + ' is a local path: pass allowLocal:true to audit local builds (structure mode reads the file directly; capture needs a served http URL)'); e.code = 'UNSUPPORTED_OPERATION'; throw e; }
+        let fs, path;
+        try {
+          const g = globalThis.process && globalThis.process.getBuiltinModule ? globalThis.process.getBuiltinModule : null;
+          if (typeof g !== "function") throw new Error("needs Node 22+");
+          fs = g.call(globalThis.process, "node:fs"); path = g.call(globalThis.process, "node:path");
+        } catch { const e = new Error('local file audit needs Node 22+'); e.code = 'UNSUPPORTED_OPERATION'; throw e; }
+        let file = String(raw);
+        if (/^file:\/\//i.test(file)) { try { file = new URL(file).pathname; } catch { toolFn_bad(label + ' is not a readable file URL'); } if (/^\/[A-Za-z]:\//.test(file)) file = file.slice(1); }
+        if (/[\0]/.test(file) || file.length > 1000) toolFn_bad(label + ' is not a readable local file');
+        let html;
+        try { html = fs.readFileSync(file, "utf8"); }
+        catch { const e = new Error(label + ' not found or unreadable: ' + String(file).slice(0, 160)); e.code = 'NOT_FOUND'; throw e; }
+        if (html.length > 1500000) html = html.slice(0, 1500000);
+        const bands = cdpBandsFromHtml(html, raw);
+        return { ...bands, source: 'local-file', note: 'local file estimate — tags/landmarks only, no measured layout; serve over http + allowLocal:true for live-dom bands' };
+      };
+      const isLocalInput = (raw) => typeof raw === 'string' && (/^file:\/\//i.test(raw) || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || /^[^/:?#]+\.html?([?#]|$)/i.test(raw));
+      const fetchStatic = async (target) => {
+        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.1' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        if (res.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
+        if (!res.ok) throw awardErr('UPSTREAM_ERROR', 'HTTP ' + res.status + ' for ' + target);
+        const text = await res.text();
+        return text.slice(0, 1500000);
+      };
+      const structureOf = async (rawTarget, label) => {
+        if (isLocalInput(rawTarget)) return readLocalSource(rawTarget, label || 'url');
+        const target = rawTarget;
+        if (awardBrowser) {
+          try { return await awardBrowser.structure(target, { viewport, allowLocal }); }
+          catch (e) {
+            // Any live-dom failure degrades to labeled static estimates —
+            // the audit stays usable, and the downgrade is disclosed.
+            if (e && (e.code === 'BROWSER_UNAVAILABLE' || e.code === 'CAPTURE_TIMEOUT' || e.code === 'UPSTREAM_ERROR')) {
+              try {
+                const html = await fetchStatic(target);
+                return { ...cdpBandsFromHtml(html, target), fallbackFrom: 'live-dom', fallbackWhy: String((e && e.message) || e).slice(0, 200) };
+              } catch { throw e; }
+            }
+            throw e;
+          }
+        }
+        const html = await fetchStatic(target);
+        return cdpBandsFromHtml(html, target);
+      };
+      if (mode === 'capture') {
+        if (typeof a.url === 'string' && isLocalInput(a.url) && !/^https?:\/\//i.test(a.url)) toolFn_bad('capture needs an http(s) URL — screenshots require a browser navigating a served page. Serve the build (e.g. npx serve) and pass its http://127.0.0.1:PORT URL with allowLocal:true.');
+        const target = awardValidateHttpUrl(a.url || toolFn_bad('url (string) is required'), { allowLocal });
+        if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'capture needs Chrome: install it or set AURA_CHROME_PATH. Fallback: aura_visual_audit {mode:structure} estimates sections from static HTML without a browser.');
+        try { return textResult(await awardBrowser.capture(target, { viewport, waitStrategy, settleMs, allowLocal })); }
+        catch (e) {
+          if (e && e.code === 'BROWSER_UNAVAILABLE') throw e;
+          throw awardErr('UPSTREAM_ERROR', 'capture failed: ' + String((e && e.message) || e).slice(0, 220) + ' — retry, or use mode:structure for a static estimate');
+        }
+      }
+      if (mode === 'structure') {
+        const raw = a.url || toolFn_bad('url (string) is required');
+        const target = isLocalInput(raw) ? raw : awardValidateHttpUrl(raw, { allowLocal });
+        return textResult({ mode, ...(await structureOf(target, 'url')) });
+      }
+      const rawRef = a.referenceUrl || toolFn_bad('referenceUrl (string) is required');
+      const rawBuild = a.buildUrl || toolFn_bad('buildUrl (string) is required');
+      const normRef = isLocalInput(rawRef) ? rawRef : awardValidateHttpUrl(rawRef, { allowLocal });
+      const normBuild = isLocalInput(rawBuild) ? rawBuild : awardValidateHttpUrl(rawBuild, { allowLocal });
+      const [rs, bs] = await Promise.all([structureOf(normRef, 'referenceUrl'), structureOf(normBuild, 'buildUrl')]);
+      const mismatches = [];
+      if (rs.bands.length !== bs.bands.length) mismatches.push({ kind: 'section-count', detail: 'reference has ' + rs.bands.length + ' bands, build has ' + bs.bands.length });
+      const seq = (x) => x.bands.map((b) => b.tag + ':' + (b.label || '')).join(' > ');
+      if (seq(rs) !== seq(bs)) mismatches.push({ kind: 'section-order', detail: 'band tag sequence differs', reference: seq(rs).slice(0, 300), build: seq(bs).slice(0, 300) });
+      if (rs.totalHeight && bs.totalHeight) {
+        const ratio = bs.totalHeight / Math.max(1, rs.totalHeight);
+        if (ratio < 0.7 || ratio > 1.4) mismatches.push({ kind: 'page-height', detail: 'build height ' + bs.totalHeight + 'px vs reference ' + rs.totalHeight + 'px (ratio ' + ratio.toFixed(2) + ')' });
+      }
+      const pal = (x) => new Set(x.bands.map((b) => String(b.background || '').toLowerCase()).filter(Boolean));
+      const rp = pal(rs), bp = pal(bs);
+      const onlyRef = [...rp].filter((c) => ![...bp].some((d) => d === c));
+      if (onlyRef.length >= 2) mismatches.push({ kind: 'palette', detail: onlyRef.length + ' reference backgrounds absent in build: ' + onlyRef.slice(0, 4).join(', ') });
+      return textResult({ mode, reference: rs, build: bs, mismatches, manualJudgment: ['imagery tone and spacing rhythm need human eyes', 'motion/interaction parity is not covered here — see aura_motion_study'], metrics: { refBands: rs.bands.length, buildBands: bs.bands.length }, sources: [rs.source, bs.source], ...((rs.source !== 'live-dom' || bs.source !== 'live-dom') ? { estimateNote: 'one or both sides are layout estimates (no measured offsets) — counts/order still comparable, heights are not' } : {}) }); },
+    aura_motion_study: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['inspect', 'record', 'search'], 'mode');
+      if (mode === 'search') {
+        const r = awardIndex.searchMotion({ library: toolFn_str(a.library, 'library'), easing: toolFn_str(a.easing, 'easing'), scrollModel: a.scrollModel === undefined ? undefined : String(a.scrollModel), limit: awardLimit(a.frames, 10, 25) });
+        if (r.empty) return textResult({ mode, total: 0, items: [], emptyCorpus: true, note: 'no motion studies stored yet' });
+        return textResult({ mode, total: r.total, items: r.items, emptyCorpus: false });
+      }
+      const allowLocal = a.allowLocal === undefined ? false : toolFn_bool(a.allowLocal, 'allowLocal');
+      const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
+      const target = awardValidateHttpUrl(a.url || toolFn_bad('url (string) is required'), { allowLocal });
+      if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'motion ' + mode + ' needs Chrome: install it or set AURA_CHROME_PATH.');
+      if (mode === 'inspect') {
+        const study = await awardBrowser.motionInspect(target, { viewport, allowLocal });
+        try { awardIndex.recordMotion(study); } catch { /* memory fallback never fails */ }
+        return textResult({ mode, study });
+      }
+      const frames = a.frames === undefined ? 8 : toolFn_num(a.frames, 'frames');
+      if (typeof frames !== 'number' || frames < 2 || frames > 16) toolFn_bad('frames must be 2-16');
+      const durationMs = a.durationMs === undefined ? 12000 : toolFn_num(a.durationMs, 'durationMs');
+      if (typeof durationMs !== 'number' || durationMs < 4000 || durationMs > 30000) toolFn_bad('durationMs must be 4000-30000');
+      const rec = await awardBrowser.recordFrames(target, { frames: Math.floor(frames), viewport, allowLocal, durationMs: Math.floor(durationMs) });
+      if (rec.study) { try { awardIndex.recordMotion(rec.study); } catch { /* ignore */ } }
+      let video = null, videoAvailable = false, videoHint = null;
+      try {
+        const enc = await awardBrowser.encodeWebm(rec.frames, {});
+        video = enc.video; videoAvailable = !!enc.available; videoHint = enc.hint || null;
+      } catch (e) { videoHint = String((e && e.message) || e).slice(0, 160); }
+      if (!videoAvailable && !videoHint) videoHint = 'ffmpeg not found; install ffmpeg or set AURA_FFMPEG_PATH for .webm output — frame JPEGs retained';
+      return textResult({ mode, url: target, study: rec.study, frames: rec.frames, frameCount: rec.frameCount, video, video_available: videoAvailable, ...(videoHint ? { videoHint } : {}) }); },
+    aura_award_index: async (a) => { a = a || {}; const action = awardMode(a.action, ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'], 'action');
+      if (action === 'status') return textResult({ action, ...awardIndex.getStatus() });
+      if (action === 'watch_list') return textResult({ action, watches: awardIndex.watchList() });
+      if (action === 'watch_add') {
+        const kind = awardMode(a.kind, ['studio', 'tag', 'url'], 'kind');
+        if (typeof a.pattern !== 'string' || !a.pattern.trim()) toolFn_bad('pattern (string) is required');
+        return textResult({ action, watch: awardIndex.watchAdd({ kind, pattern: a.pattern, award: a.award }) });
+      }
+      if (action === 'watch_remove') {
+        const kind = awardMode(a.kind, ['studio', 'tag', 'url'], 'kind');
+        if (typeof a.pattern !== 'string' || !a.pattern.trim()) toolFn_bad('pattern (string) is required');
+        return textResult({ action, ...awardIndex.watchRemove({ kind, pattern: a.pattern }) });
+      }
+      if (action === 'new_winners') {
+        if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', 'new_winners needs an award client (server wiring)');
+        const r = await awardIndex.newWinners({ client: awardClient, award: a.award || 'sotd' });
+        let deltas = [];
+        try { deltas = awardIndex.checkWatches ? awardIndex.checkWatches() : []; } catch { deltas = []; }
+        return textResult({ action, ...r, watchDeltas: deltas });
+      }
+      if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', action + ' needs an award client (server wiring)');
+      const maxPages = a.maxPages === undefined ? 5 : toolFn_num(a.maxPages, 'maxPages');
+      if (typeof maxPages !== 'number' || maxPages < 1 || maxPages > 20) toolFn_bad('maxPages must be 1-20 (bounded crawl per call; resume for more)');
+      // Bounded crawl: cap the taxonomy to maxPages per call, keep resume state.
+      const tax = awardIndex.getTaxonomy();
+      const tags = (tax.filters || []).slice(0, Math.floor(maxPages));
+      const r = action === 'refresh' ? await awardIndex.refresh({ client: awardClient, tags }) : action === 'resume' ? await awardIndex.resume({ client: awardClient, tags: tags.length ? tags : undefined }) : await awardIndex.rebuild({ client: awardClient, tags: tags.length ? tags : undefined });
+      return textResult({ action, ...r, note: 'bounded per call (maxPages); call resume to continue' }); },
   };
 };
 
@@ -1896,12 +3742,22 @@ function createHandlers(catalog, icons, version) {
 
 
 
+
+
+
 const config = loadConfig();
 const fetcher = createFetcher({ fetchImpl: globalThis.fetch, timeoutMs: config.timeoutMs, retries: config.retries, userAgent: config.userAgent });
 const catalog = createCatalog({ fetcher, config, facetsFn: facets });
 const icons = createIcons({ fetcher });
 const version = createVersion({ fetcher, running: SERVER_INFO.version });
-const handlers = createHandlers(catalog, icons, version);
+// Award subsystem: persistent file index, polite live client, optional CDP
+// browser. No auto-crawl here — indexing runs only via aura_award_index.
+const awardClient = createAwardClient({ fetchImpl: globalThis.fetch });
+let awardIndex = null;
+try { awardIndex = createAwardIndex({}); } catch { awardIndex = null; }
+let awardBrowser = null;
+try { awardBrowser = createBrowserAdapter({}); } catch { awardBrowser = null; }
+const handlers = createHandlers(catalog, icons, version, { awardClient, awardIndex, browser: awardBrowser });
 
 let buffer = "";
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");

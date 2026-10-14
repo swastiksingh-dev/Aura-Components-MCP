@@ -47,6 +47,19 @@ export function detectThemeHint(q) {
   if (light && !dark) return "light";
   return null;
 }
+// Light suffix stemming so inflected query words still hit literal titles
+// (glassy→glass, magazines→magazine). Same rule family as the award ranker;
+// applied symmetrically to query tokens AND haystacks, so counts only grow
+// when both sides agree on the stem — honest-empty behavior preserved.
+export function stemTok(t) {
+  let s = String(t ?? "").toLowerCase();
+  if (s.length > 5 && s.endsWith("ing")) s = s.slice(0, -3);
+  else if (s.length > 4 && s.endsWith("ies")) s = s.slice(0, -3) + "y";
+  else if (s.length > 4 && s.endsWith("es") && /(ses|xes|zes|ches|shes)$/.test(s)) s = s.slice(0, -2);
+  else if (s.length > 4 && s.endsWith("s") && !s.endsWith("ss")) s = s.slice(0, -1);
+  else if (s.length > 4 && s.endsWith("y")) s = s.slice(0, -1);
+  return s;
+}
 // Rank rows: +2 per matched token in title, +1 in description/tags, theme match first.
 // Returns { rows, scored } where scored explains the top pick for fallback_score.
 export function scoreRows(kind, rows, toks, themeHint) {
@@ -55,7 +68,11 @@ export function scoreRows(kind, rows, toks, themeHint) {
     const desc = String(r.description || "").toLowerCase();
     const tags = ((r.tags || []).map((x) => String(x).toLowerCase()).join(" "));
     let s = 0;
-    for (const t of toks) { if (title.includes(t)) s += 2; else if (desc.includes(t) || tags.includes(t)) s += 1; }
+    for (const raw of toks) {
+      const t = stemTok(raw);
+      if (title.includes(raw) || (t !== raw && title.includes(t))) s += 2;
+      else if (desc.includes(raw) || tags.includes(raw) || (t !== raw && (desc.includes(t) || tags.includes(t)))) s += 1;
+    }
     const th = r.facets && r.facets.theme;
     const themeOk = !themeHint || th === themeHint || th === "mixed" || th === "unknown";
     if (themeHint && th === themeHint) s += 3;
@@ -76,7 +93,8 @@ export function matchOverlap(kind, toks, item) {
     let n = 0;
     for (const t of list) {
       const tok = String(t ?? "").toLowerCase();
-      if (tok && title.includes(tok)) n++;
+      const stem = stemTok(tok);
+      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)))) n++;
     }
     return n;
   }
@@ -89,7 +107,8 @@ export function matchOverlap(kind, toks, item) {
   let n = 0;
   for (const t of list) {
     const tok = String(t ?? "").toLowerCase();
-    if (tok && hay.includes(tok)) n++;
+    const stem = stemTok(tok);
+    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)))) n++;
   }
   return n;
 }

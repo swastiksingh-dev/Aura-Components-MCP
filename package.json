@@ -12,7 +12,9 @@
     "dist",
     "README.md",
     "SETUP.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "repository": {
     "type": "git",

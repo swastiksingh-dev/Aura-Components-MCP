@@ -10,13 +10,23 @@ import { TOOL_DEFS, createHandlers } from "./tools.mjs";
 import { facets } from "./guide.mjs";
 import { createIcons } from "./icons.mjs";
 import { createVersion } from "./version.mjs";
+import { createAwardClient } from "./awards.mjs";
+import { createAwardIndex } from "./awards-index.mjs";
+import { createBrowserAdapter } from "./browser-cdp.mjs";
 
 const config = loadConfig();
 const fetcher = createFetcher({ fetchImpl: globalThis.fetch, timeoutMs: config.timeoutMs, retries: config.retries, userAgent: config.userAgent });
 const catalog = createCatalog({ fetcher, config, facetsFn: facets });
 const icons = createIcons({ fetcher });
 const version = createVersion({ fetcher, running: SERVER_INFO.version });
-const handlers = createHandlers(catalog, icons, version);
+// Award subsystem: persistent file index, polite live client, optional CDP
+// browser. No auto-crawl here — indexing runs only via aura_award_index.
+const awardClient = createAwardClient({ fetchImpl: globalThis.fetch });
+let awardIndex = null;
+try { awardIndex = createAwardIndex({}); } catch { awardIndex = null; }
+let awardBrowser = null;
+try { awardBrowser = createBrowserAdapter({}); } catch { awardBrowser = null; }
+const handlers = createHandlers(catalog, icons, version, { awardClient, awardIndex, browser: awardBrowser });
 
 let buffer = "";
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");

@@ -1,4 +1,4 @@
-// Full verification: all 28 tools live + error paths, against dist/server.js.
+// Full verification: all 35 tools live + error paths, against dist/server.js.
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,6 +124,24 @@ if (bun8 && Array.isArray(bun8.items) && bun8.items.length >= 2) {
 } else {
   check('bundle honors up to 8 refs in order', false, 'not enough search hits for a live 8-bundle');
 }
+// Award subsystem (35-tool line): validation-level live checks against the
+// bundled server. No heavyweight crawl here — rebuild stays bounded and the
+// browser checks only assert honest unavailability shapes.
+const li2 = await call('tools/list', {});
+{
+  const names = li2 && li2.result && Array.isArray(li2.result.tools) ? li2.result.tools.map((t) => t.name) : [];
+  check('tools/list exposes 35 unique tools', names.length === 35 && new Set(names).size === 35, names.length + ':' + names.slice(29).join(','));
+}
+const awBad = await tool('aura_award_search', { mode: 'nope' });
+check('award_search bad mode -> -32602', awBad.error && awBad.error.code === -32602, JSON.stringify(awBad).slice(0, 160));
+const awIdx = J(await tool('aura_award_index', { action: 'status' }));
+check('award_index status shape', awIdx && awIdx.counts && typeof awIdx.stale === 'boolean', JSON.stringify(awIdx).slice(0, 200));
+const awWatch = await tool('aura_award_index', { action: 'watch_add', kind: 'nope', pattern: 'x' });
+check('award_index bad watch kind -> -32602', awWatch.error && awWatch.error.code === -32602, JSON.stringify(awWatch).slice(0, 160));
+const awMo = J(await tool('aura_motion_study', { mode: 'search' }));
+check('motion search shape (emptyCorpus or hits)', awMo && typeof awMo.total === 'number' && Array.isArray(awMo.items), JSON.stringify(awMo).slice(0, 200));
+const awBp = await tool('aura_design_blueprint', { goal: 'x', references: ['only-one'] });
+check('blueprint ref-count guard -> -32602', awBp.error && awBp.error.code === -32602, JSON.stringify(awBp).slice(0, 160));
 console.log('VERIFY pass=' + pass + ' fail=' + fail + ' ms=' + (Date.now() - t0));
 child.kill();
 setTimeout(() => process.exit(fail ? 1 : 0), 500);
