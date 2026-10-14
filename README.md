@@ -5,12 +5,22 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/v/aura-components-mcp" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/dm/aura-components-mcp" alt="npm downloads"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license: MIT"></a>
-  <a href="./package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen" alt="node >= 22"></a>
-  <a href="./dist/server.js"><img src="https://img.shields.io/badge/MCP-stdio-blue" alt="MCP stdio"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license: MIT"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen" alt="node >= 22"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/dist/server.js"><img src="https://img.shields.io/badge/MCP-stdio-blue" alt="MCP stdio"></a>
+  <a href="#the-35-tools"><img src="https://img.shields.io/badge/tools-35-blueviolet" alt="35 tools"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP"><img src="https://img.shields.io/github/stars/swastiksingh-dev/Aura-Components-MCP?style=social" alt="GitHub stars"></a>
 </p>
 
 <p align="center"><i>Every free thing on Aura, one call away — no account, no key, no browser.</i></p>
+
+<p align="center">
+  <a href="#install"><b>Install</b></a> ·
+  <a href="#the-35-tools"><b>Tools</b></a> ·
+  <a href="./SETUP.md"><b>Client setup</b></a> ·
+  <a href="./CHANGELOG.md"><b>Changelog</b></a> ·
+  <a href="#credits"><b>Credits</b></a>
+</p>
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ WATCH THE 10-SECOND TOUR (MP4) ▲</b></a>
@@ -20,7 +30,7 @@
 
 <p align="center">
   <b>2,495</b> free components · <b>192</b> skills · <b>30,688</b> assets · <b>725</b> design systems<br>
-  <b>35</b> tools · <b>0</b> dependencies · <b>188</b> hermetic tests + <b>43</b> live checks green · version-checked hourly against npm
+  <b>35</b> tools · <b>0</b> dependencies · <b>201</b> hermetic tests + <b>44</b> live checks green · version-checked hourly against npm
 </p>
 
 ---
@@ -108,6 +118,14 @@ npx -y aura-components-mcp@latest
 ```
 
 Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio.
+
+<p align="center">
+  <a href="./SETUP.md#claude-code"><img src="https://img.shields.io/badge/Claude_Code-setup-black" alt="Claude Code setup"></a>
+  <a href="./SETUP.md#cursor"><img src="https://img.shields.io/badge/Cursor-setup-black" alt="Cursor setup"></a>
+  <a href="./SETUP.md#codex"><img src="https://img.shields.io/badge/Codex-setup-black" alt="Codex setup"></a>
+  <a href="./SETUP.md#opencode"><img src="https://img.shields.io/badge/OpenCode-setup-black" alt="OpenCode setup"></a>
+  <a href="./SETUP.md#any-other-mcp-client"><img src="https://img.shields.io/badge/any_stdio_client-setup-black" alt="Any stdio client setup"></a>
+</p>
 
 ```bash
 # Claude Code
@@ -315,8 +333,8 @@ Optional tuning (all with defaults):
 
 
 ```bash
-npm test      # hermetic tests, no network (188 tests)
-npm run verify  # 43 live checks against the real catalogue + award validation
+npm test      # hermetic tests, no network (201 tests)
+npm run verify  # 44 live checks against the real catalogue + award validation
 npm run build   # rebundle src/*.mjs into dist/server.js
 ```
 
@@ -341,6 +359,22 @@ https://github.com/swastiksingh-dev/Aura-Components-MCP
 ## Credits
 
 
+<p align="center"><sub>Standing on the shoulders of open work — every source below is linked, licensed, and honored in the code.</sub></p>
+
+<table align="center">
+  <tr>
+    <td align="center" width="200">
+      <a href="https://github.com/swastiksingh-dev"><img src="https://github.com/swastiksingh-dev.png?size=100" width="80" alt="swastiksingh-dev"><br><b>swastiksingh-dev</b></a><br><sub>Built this server · MIT</sub>
+    </td>
+    <td align="center" width="200">
+      <a href="https://www.aura.build"><img src="https://github.com/MengTo.png?size=100" width="80" alt="Meng To"><br><b>Meng To / Aura</b></a><br><sub>The entire catalogue</sub>
+    </td>
+    <td align="center" width="200">
+      <a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="https://github.com/INSANE0777.png?size=100" width="80" alt="INSANE0777"><br><b>INSANE0777</b></a><br><sub><a href="https://github.com/INSANE0777/Awwwards-mcp">awwwards-mcp</a> · award-layer inspiration · MIT</sub>
+    </td>
+  </tr>
+</table>
+
 Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Free to fork, use, and sell with. If you fork this, keep the credit line and point people at the original repo.
 
 | Source | Used for | License / terms |
@@ -352,6 +386,7 @@ Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Fre
 | [Font Awesome Free](https://fontawesome.com) | Icons via `aura_icon` (served from jsDelivr + cdnjs) | [CC BY 4.0](https://fontawesome.com/license/free) — credit on every hit, enforced by the tool |
 | [HackerNoon Pixel Icon Library](https://github.com/hackernoon/pixel-icon-library) ([site](https://pixeliconlibrary.com)) | Pixel icons via `aura_icon` (served from jsDelivr) | Icons CC BY 4.0, other files MIT — credit on every hit, enforced by the tool |
 | [Awwwards](https://www.awwwards.com) | Award-website references behind `aura_award_*` (metadata + Awwwards-CDN media URLs, never mirrored) | Screenshots/designs belong to Awwwards + credited creators — personal-inspiration use at ~1 req/s, honor robots.txt; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) |
+| [awwwards-mcp](https://github.com/INSANE0777/Awwwards-mcp) by [INSANE0777](https://github.com/INSANE0777) | Behavioral inspiration for the six award tools (site discovery, design DNA, elements, briefs, indexing, capture, motion, winners, watches) — reimplemented natively, zero code copied | [MIT](https://github.com/INSANE0777/Awwwards-mcp/blob/main/LICENSE) © 2026 Afjal — permission notice preserved in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) |
 | Upstream libraries (Tailwind CSS, GSAP, Lenis, Iconify) | The code this server's guides point at | Each project's own license — check before shipping |
 
 ---
