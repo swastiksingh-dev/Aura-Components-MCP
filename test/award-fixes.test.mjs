@@ -224,3 +224,48 @@ test("P2-10: categories paginate filters, colors stay complete", async () => {
   assert.deepEqual(r.colors, ["#FF0000"]);
   void h;
 });
+
+test("follow-up-1: weak consensus fills from editorial picks, labeled", async () => {
+  const detail = `<html><head><meta property="og:title" content="Oddity" /></head><body><h2>Color Palette</h2><strong>HEX</strong> #123456</body></html>`;
+  const client = { getAwardHtml: async () => ({ html: detail }) };
+  const thinCatalog = {
+    searchCatalog: async () => ({ items: [] }),
+    editorialPicks: async (n) => [{ id: 901, title: "Editorial Hero", tags: ["hero"], page_url: "https://www.aura.build/component/901", premium: false }],
+  };
+  const h = createHandlers(thinCatalog, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_design_blueprint", { goal: "xqztq oddity page", references: ["odd-a", "odd-b"] });
+  const r = JSON.parse(m.result.content[0].text);
+  const ed = r.spec.auraMatches.filter((x) => x.editorial === true);
+  assert.ok(ed.length >= 1, "editorial fill present, matches: " + JSON.stringify(r.spec.auraMatches));
+  assert.ok(/editorial/i.test(r.auraEvidence.unavailable || "") || r.auraEvidence.matched >= 1);
+  assert.ok(r.spec.gaps.length > 0 && r.markdown.includes("## Evidence gaps"));
+});
+
+test("follow-up-2: compare finds tech families across spellings", async () => {
+  const d = (slug, title, techs) => `<html><head><meta property="og:title" content="${title}" /></head><body><h2>Technologies & Tools</h2>${techs.map((t) => `<span class="button button--tag">${t}</span>`).join("")}<h2>Color Palette</h2><strong>HEX</strong> #0A0A0B</body></html>`;
+  const pages = { "fam-aa": d("fam-aa", "AA", ["WebGL", "GSAP"]), "fam-bb": d("fam-bb", "BB", ["Three.js", "GreenSock"]) };
+  const client = { getAwardHtml: async (raw) => { const p = String(raw).startsWith("http") ? new URL(String(raw)).pathname : String(raw); return { html: pages[p.split("/")[2]] || "<html></html>" }; } };
+  const h = createHandlers({}, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_award_inspect", { mode: "compare_sites", slugs: ["fam-aa", "fam-bb"] });
+  const r = JSON.parse(m.result.content[0].text);
+  const fams = (r.shared.technologyFamilies || []).map((t) => t.value);
+  assert.ok(fams.includes("webgl") && fams.includes("gsap"), "families bridge spellings, got: " + JSON.stringify(fams));
+  assert.ok(r.directionHints.some((x) => /family/.test(x)));
+  assert.ok(r.compared[0].technologies.includes("WebGL"), "raw values stay verbatim");
+});
+
+test("follow-up-3: motion/capture errors carry fallback guidance", async () => {
+  const h = createHandlers({}, null, null, { awardClient: null, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const ins = await callWith(h, "aura_motion_study", { mode: "inspect", url: "https://example.com" });
+  assert.ok(ins.error, "spec keeps the error contract");
+  assert.ok(/prefers-reduced-motion|ease-out/i.test(ins.error.message), "error carries a usable generic plan");
+  const noBrowser = { structure: async () => { const e = new Error("dead"); e.code = "BROWSER_UNAVAILABLE"; throw e; } };
+  const prev = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("connect refused"); };
+  try {
+    const h2 = createHandlers({}, null, null, { awardClient: null, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: noBrowser });
+    const st = await callWith(h2, "aura_visual_audit", { mode: "structure", url: "http://127.0.0.1:8123/index.html", allowLocal: true });
+    assert.ok(st.error, "dead server + dead browser must still error, not fake");
+    assert.ok(/dev server|npx serve|allowLocal/i.test(st.error.message), "combined message names both fixes, got: " + st.error.message.slice(0, 200));
+  } finally { globalThis.fetch = prev; }
+});

@@ -69,6 +69,23 @@ release.
   search response carries `source` + `corpusNote` documenting the
   seed-once-then-local rule.
 
+### Fixed — 10/10 follow-up (4 field issues)
+
+- `aura_award_search{mode:elements}` no longer crashes in `dist`: the build
+  renamer rewrote `Array.sort(` into `.toolFn_sort(` (src tests stayed green,
+  only the bundle crashed). The renamer now excludes `.`-prefixed method
+  calls; a dist-level test (renamer assertion + bundled-server elements
+  smoke) guards it.
+- Weak-consensus blueprints fill from human-grade editorial picks (<3
+  section matches → `editorial:true` matches + disclosure) instead of
+  shipping a 1-match brief.
+- `compare_sites` canonicalizes technology families (`WebGL`≈`Three.js`,
+  `GSAP`≈`GreenSock`) for overlap + hints; raw per-site values stay verbatim.
+- Browser-less environments get more than an error code: motion errors carry
+  a generic (explicitly unobserved) motion plan; dead-server + dead-browser
+  audits name both fixes (serve the build / pass the file); Chrome launches
+  with `--no-sandbox` for Windows admin shells.
+
 ### Zero-dependency behavior
 
 - No new npm dependencies (`package.json` gains none). New modules use only

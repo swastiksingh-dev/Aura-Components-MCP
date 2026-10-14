@@ -35,7 +35,7 @@ function cdpSetupFailed(op, err) {
   const fallback = op === "structure"
     ? " Fallback: aura_visual_audit {mode:structure} retries automatically over static HTML (source:static-html, no measured offsets)."
     : op === "motion"
-      ? " Fallback: aura_motion_study {mode:search} still works over stored studies; otherwise write <500ms entrances + prefers-reduced-motion by hand."
+      ? " Fallback motion plan (generic, NOT observed — verify against the live site when a browser is available): entrances <500ms ease-out, one idea per viewport; scroll reveals via IntersectionObserver or GSAP ScrollTrigger (scrub only for pinned storytelling); hover lifts 1.03 + shadow; keep easing vocabulary to ease-out/cubic-bezier(.22,1,.36,1); honor prefers-reduced-motion (disable parallax/scrub, keep content readable); record a study later with aura_motion_study {mode:record}."
       : " Fallback: aura_visual_audit {mode:structure} can still estimate sections from static HTML; screenshots need a working browser.";
   const e = awardErr("BROWSER_UNAVAILABLE", "browser control failed during " + op + " (" + why + "). Check that Chrome is installed and no firewall blocks 127.0.0.1 remote debugging." + fallback);
   return e;
@@ -213,7 +213,7 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
     const exe = executable();
     if (!exe) throw cdpUnavailable("");
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), "aura-cdp-"));
-    const args = ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--disable-dev-shm-usage", "--user-data-dir=" + profile, "--remote-debugging-port=" + port, "--remote-allow-origins=*", "about:blank"];
+    const args = ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox", "--disable-setuid-sandbox", "--user-data-dir=" + profile, "--remote-debugging-port=" + port, "--remote-allow-origins=*", "about:blank"];
     const child = (() => {
       try { return spawn(exe, args, { stdio: "ignore", windowsHide: true, detached: false }); }
       catch (e) { throw cdpUnavailable("launch failed: " + String((e && e.message) || e).slice(0, 160)); }

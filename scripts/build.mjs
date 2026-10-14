@@ -19,7 +19,10 @@ function prep(name, src) {
     s = s.replace(/\bCATS\b/g, "TOOL_CATS");
     for (const fn of ["bad", "str", "num", "bool", "sort", "cat"]) {
       s = s.replace(new RegExp("\\bfunction " + fn + "\\(", "g"), "function toolFn_" + fn + "(");
-      s = s.replace(new RegExp("([^a-zA-Z_])" + fn + "\\(", "g"), "$1toolFn_" + fn + "(");
+      // Method calls (Array.sort, ...) must NOT be renamed: the prefix class
+      // excludes "." so only bare helper calls are rewritten. (.sort( was
+      // rewritten to .toolFn_sort( and crashed elements search in dist.)
+      s = s.replace(new RegExp("([^a-zA-Z_.])" + fn + "\\(", "g"), "$1toolFn_" + fn + "(");
     }
   }
   if (name === "guide.mjs") {
@@ -37,7 +40,7 @@ function prep(name, src) {
     // keep textResult's canonical name (tools.mjs calls it); only de-collide err
     s = s.replace(/\bfunction textResult\(/g, "function textResult(");
     s = s.replace(/\bconst err\b/g, "const protocolFn_err");
-    s = s.replace(/([^a-zA-Z_])err\(/g, "$1protocolFn_err(");
+    s = s.replace(/([^a-zA-Z_.])err\(/g, "$1protocolFn_err(");
   }
   // http.mjs sleep() is file-local with no collisions — leave canonical.
   return s;

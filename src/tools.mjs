@@ -422,7 +422,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
           entries.push({ slug: s, detail: d.detail, motion });
         }
         const cmp = awardCompareSites(entries);
-        return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
+        return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, technologyFamilies: cmp.sharedTechFamilies, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
       }
       const slug = awardNormalizeSlug(a.slug || bad('slug (string) is required'));
       const d = await awardDetailFor(slug);
@@ -491,6 +491,24 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         const covered = new Set(auraMatches.map((m) => m.section));
         const uncovered = SECTIONS.filter((s) => !covered.has(s));
         if (uncovered.length) auraUnavailable = (auraUnavailable ? auraUnavailable + '; ' : '') + 'no free catalogue match for sections: ' + uncovered.join(', ') + ' — build these from tokens + closest matched section';
+        // Weak-consensus fallback: fewer than 3 component matches is not an
+        // actionable brief. Fill from human-grade editorial picks, LABELED as
+        // such (editorial:true) — never silently presented as query matches.
+        const compCount = auraMatches.filter((m) => m.section !== 'tokens').length;
+        if (compCount < 3 && catalog && typeof catalog.editorialPicks === 'function') {
+          try {
+            const picks = await catalog.editorialPicks(3);
+            for (const p of (picks || [])) {
+              if (auraMatches.length >= 12) break;
+              if (!p || p.premium !== false) continue;
+              const key = String(p.id || p.slug);
+              if (seen.has(key)) continue;
+              seen.add(key);
+              auraMatches.push({ section: 'general', componentId: p.id ?? p.slug, componentTitle: p.title, pageUrl: p.page_url, why: 'editorial fallback: goal matched nothing directly — human-grade free pick', editorial: true });
+            }
+            if ((picks || []).length) auraUnavailable = (auraUnavailable ? auraUnavailable + '; ' : '') + 'section queries matched thinly — editorial free picks fill the kit (marked editorial:true)';
+          } catch { /* brief stays thin but honest */ }
+        }
       } catch (e) { auraUnavailable = String((e && e.message) || e).slice(0, 200); }
       let structureNotes = null;
       if (includeStructure) {
@@ -573,7 +591,10 @@ export function createHandlers(catalog, icons, version, awardDeps) {
               try {
                 const html = await fetchStatic(target);
                 return { ...cdpBandsFromHtml(html, target), fallbackFrom: 'live-dom', fallbackWhy: String((e && e.message) || e).slice(0, 200) };
-              } catch { throw e; }
+              } catch (fe) {
+                const both = awardErr('UPSTREAM_ERROR', 'live-dom failed (' + String((e && e.message) || e).slice(0, 160) + ') AND static fetch failed (' + String((fe && fe.message) || fe).slice(0, 160) + ') — is the dev server running? For http://127.0.0.1 targets serve the build first (e.g. npx serve) with allowLocal:true; for files pass the path directly with allowLocal:true.');
+                throw both;
+              }
             }
             throw e;
           }
@@ -623,7 +644,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       const allowLocal = a.allowLocal === undefined ? false : bool(a.allowLocal, 'allowLocal');
       const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
       const target = awardValidateHttpUrl(a.url || bad('url (string) is required'), { allowLocal });
-      if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'motion ' + mode + ' needs Chrome: install it or set AURA_CHROME_PATH.');
+      if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'motion ' + mode + ' needs Chrome: install it or set AURA_CHROME_PATH. Fallback motion plan (generic, NOT observed): entrances <500ms ease-out; scroll reveals via IntersectionObserver; hover 1.03 + shadow; easing ease-out/cubic-bezier(.22,1,.36,1); prefers-reduced-motion disables parallax/scrub. aura_motion_study {mode:search} still queries stored studies.');
       if (mode === 'inspect') {
         const study = await awardBrowser.motionInspect(target, { viewport, allowLocal });
         try { awardIndex.recordMotion(study); } catch { /* memory fallback never fails */ }

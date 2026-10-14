@@ -483,10 +483,26 @@ function awardLuminance(hex) {
     return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
   } catch { return 0.5; }
 }
+// Technology families for compare: "WebGL" and "Three.js" are the same stack
+// choice spelled differently. Canonicalization applies ONLY to the family
+// overlap signal — per-site raw values stay verbatim.
+const AWARD_TECH_FAMILIES = [
+  { family: "webgl", members: ["webgl", "three", "three.js", "threejs", "babylon", "pixi", "glsl", "shader"] },
+  { family: "gsap", members: ["gsap", "greensock", "scrolltrigger"] },
+  { family: "lenis", members: ["lenis", "studio-freight"] },
+  { family: "react", members: ["react", "next", "next.js", "gatsby"] },
+  { family: "tailwind", members: ["tailwind", "tailwindcss"] },
+];
+export function awardTechFamily(tech) {
+  const t = String(tech || "").toLowerCase().trim();
+  for (const f of AWARD_TECH_FAMILIES) if (f.family === t || f.members.includes(t)) return f.family;
+  return t;
+}
 export function awardCompareSites(entries) {
   // entries: [{ slug, detail|null, motion|null }]
   const usable = entries.filter((e) => e.detail);
   const tech = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.technologies || [] })));
+  const techFamilies = awardFreq(usable.map((e) => ({ slug: e.slug, values: (e.detail.technologies || []).map(awardTechFamily) })));
   const elements = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.elements || [] })));
   const palette = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.palette || [] })));
   // Fuzzy element overlap: "Hero Section" and "hero banner" share the keyword
@@ -505,7 +521,9 @@ export function awardCompareSites(entries) {
   const topBand = Object.entries(bandVotes).sort((a, b) => b[1] - a[1])[0];
   if (topBand && topBand[1] >= 2) direction.push("all refs skew " + topBand[0] + " — keep that value range for backgrounds");
   const sharedTech = tech.filter((t) => t.frequency >= 2);
+  const sharedTechFamilies = techFamilies.filter((t) => t.frequency >= 2);
   if (sharedTech.length) direction.push("shared stack (" + sharedTech.slice(0, 3).map((t) => t.value).join(", ") + ") — safe default for the build");
+  else if (sharedTechFamilies.length) direction.push("shared stack family (" + sharedTechFamilies.slice(0, 3).map((t) => t.value).join(", ") + ") — same capability, different spelling — safe default for the build");
   const per = entries.map((e) => ({
     slug: e.slug,
     title: (e.detail && e.detail.title) || e.slug,
@@ -520,7 +538,7 @@ export function awardCompareSites(entries) {
     motion: e.motion ? { libs: e.motion.stack.libs, scrollModel: e.motion.stack.scrollModel } : null,
     gaps: [...(e.detail ? [] : ["detail unavailable"]), ...(e.motion ? [] : ["motion not recorded"])],
   }));
-  return { per, sharedTech, sharedElements: elements.filter((t) => t.frequency >= 2), sharedElementKeywords: elemKeywords.filter((t) => t.frequency >= 2), sharedPalette: palette.filter((t) => t.frequency >= 2), sharedBands: bands, directionHints: direction };
+  return { per, sharedTech, sharedTechFamilies, sharedElements: elements.filter((t) => t.frequency >= 2), sharedElementKeywords: elemKeywords.filter((t) => t.frequency >= 2), sharedPalette: palette.filter((t) => t.frequency >= 2), sharedBands: bands, directionHints: direction };
 }
 export function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes, motionNotes, constraints = [], technology = null, visualDirection = null, responsive = null, requestedPalette = [], gaps: extraGaps = [] }) {
   if (!goal || !String(goal).trim()) throw awardBad("goal is required");

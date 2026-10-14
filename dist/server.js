@@ -2135,10 +2135,26 @@ function awardLuminance(hex) {
     return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
   } catch { return 0.5; }
 }
+// Technology families for compare: "WebGL" and "Three.js" are the same stack
+// choice spelled differently. Canonicalization applies ONLY to the family
+// overlap signal — per-site raw values stay verbatim.
+const AWARD_TECH_FAMILIES = [
+  { family: "webgl", members: ["webgl", "three", "three.js", "threejs", "babylon", "pixi", "glsl", "shader"] },
+  { family: "gsap", members: ["gsap", "greensock", "scrolltrigger"] },
+  { family: "lenis", members: ["lenis", "studio-freight"] },
+  { family: "react", members: ["react", "next", "next.js", "gatsby"] },
+  { family: "tailwind", members: ["tailwind", "tailwindcss"] },
+];
+function awardTechFamily(tech) {
+  const t = String(tech || "").toLowerCase().trim();
+  for (const f of AWARD_TECH_FAMILIES) if (f.family === t || f.members.includes(t)) return f.family;
+  return t;
+}
 function awardCompareSites(entries) {
   // entries: [{ slug, detail|null, motion|null }]
   const usable = entries.filter((e) => e.detail);
   const tech = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.technologies || [] })));
+  const techFamilies = awardFreq(usable.map((e) => ({ slug: e.slug, values: (e.detail.technologies || []).map(awardTechFamily) })));
   const elements = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.elements || [] })));
   const palette = awardFreq(usable.map((e) => ({ slug: e.slug, values: e.detail.palette || [] })));
   // Fuzzy element overlap: "Hero Section" and "hero banner" share the keyword
@@ -2157,7 +2173,9 @@ function awardCompareSites(entries) {
   const topBand = Object.entries(bandVotes).sort((a, b) => b[1] - a[1])[0];
   if (topBand && topBand[1] >= 2) direction.push("all refs skew " + topBand[0] + " — keep that value range for backgrounds");
   const sharedTech = tech.filter((t) => t.frequency >= 2);
+  const sharedTechFamilies = techFamilies.filter((t) => t.frequency >= 2);
   if (sharedTech.length) direction.push("shared stack (" + sharedTech.slice(0, 3).map((t) => t.value).join(", ") + ") — safe default for the build");
+  else if (sharedTechFamilies.length) direction.push("shared stack family (" + sharedTechFamilies.slice(0, 3).map((t) => t.value).join(", ") + ") — same capability, different spelling — safe default for the build");
   const per = entries.map((e) => ({
     slug: e.slug,
     title: (e.detail && e.detail.title) || e.slug,
@@ -2172,7 +2190,7 @@ function awardCompareSites(entries) {
     motion: e.motion ? { libs: e.motion.stack.libs, scrollModel: e.motion.stack.scrollModel } : null,
     gaps: [...(e.detail ? [] : ["detail unavailable"]), ...(e.motion ? [] : ["motion not recorded"])],
   }));
-  return { per, sharedTech, sharedElements: elements.filter((t) => t.frequency >= 2), sharedElementKeywords: elemKeywords.filter((t) => t.frequency >= 2), sharedPalette: palette.filter((t) => t.frequency >= 2), sharedBands: bands, directionHints: direction };
+  return { per, sharedTech, sharedTechFamilies, sharedElements: elements.filter((t) => t.frequency >= 2), sharedElementKeywords: elemKeywords.filter((t) => t.frequency >= 2), sharedPalette: palette.filter((t) => t.frequency >= 2), sharedBands: bands, directionHints: direction };
 }
 function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes, motionNotes, constraints = [], technology = null, visualDirection = null, responsive = null, requestedPalette = [], gaps: extraGaps = [] }) {
   if (!goal || !String(goal).trim()) throw awardBad("goal is required");
@@ -2638,7 +2656,7 @@ function cdpSetupFailed(op, err) {
   const fallback = op === "structure"
     ? " Fallback: aura_visual_audit {mode:structure} retries automatically over static HTML (source:static-html, no measured offsets)."
     : op === "motion"
-      ? " Fallback: aura_motion_study {mode:search} still works over stored studies; otherwise write <500ms entrances + prefers-reduced-motion by hand."
+      ? " Fallback motion plan (generic, NOT observed — verify against the live site when a browser is available): entrances <500ms ease-out, one idea per viewport; scroll reveals via IntersectionObserver or GSAP ScrollTrigger (scrub only for pinned storytelling); hover lifts 1.03 + shadow; keep easing vocabulary to ease-out/cubic-bezier(.22,1,.36,1); honor prefers-reduced-motion (disable parallax/scrub, keep content readable); record a study later with aura_motion_study {mode:record}."
       : " Fallback: aura_visual_audit {mode:structure} can still estimate sections from static HTML; screenshots need a working browser.";
   const e = awardErr("BROWSER_UNAVAILABLE", "browser control failed during " + op + " (" + why + "). Check that Chrome is installed and no firewall blocks 127.0.0.1 remote debugging." + fallback);
   return e;
@@ -2816,7 +2834,7 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
     const exe = executable();
     if (!exe) throw cdpUnavailable("");
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), "aura-cdp-"));
-    const args = ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--disable-dev-shm-usage", "--user-data-dir=" + profile, "--remote-debugging-port=" + port, "--remote-allow-origins=*", "about:blank"];
+    const args = ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox", "--disable-setuid-sandbox", "--user-data-dir=" + profile, "--remote-debugging-port=" + port, "--remote-allow-origins=*", "about:blank"];
     const child = (() => {
       try { return spawn(exe, args, { stdio: "ignore", windowsHide: true, detached: false }); }
       catch (e) { throw cdpUnavailable("launch failed: " + String((e && e.message) || e).slice(0, 160)); }
@@ -3414,8 +3432,8 @@ function createHandlers(catalog, icons, version, awardDeps) {
         if (cat) items = items.filter((e) => String(e.category || '').toLowerCase() === cat.toLowerCase() || String(e.title || '').toLowerCase().includes(cat.toLowerCase()));
         if (q) {
           const toks = awardTokens(q);
-          items = items.map((e) => { const hay = (String(e.title || '') + ' ' + String(e.author || '') + ' ' + String(e.category || '')).toLowerCase(); let s = 0; for (const t of toks) if (hay.includes(t)) s++; return { e, s }; }).filter((x) => x.s > 0).toolFn_sort((x, y) => y.s - x.s || String(x.e.title).localeCompare(String(y.e.title))).map((x) => x.e);
-        } else items = [...items].toolFn_sort((x, y) => String(x.title).localeCompare(String(y.title)));
+          items = items.map((e) => { const hay = (String(e.title || '') + ' ' + String(e.author || '') + ' ' + String(e.category || '')).toLowerCase(); let s = 0; for (const t of toks) if (hay.includes(t)) s++; return { e, s }; }).filter((x) => x.s > 0).sort((x, y) => y.s - x.s || String(x.e.title).localeCompare(String(y.e.title))).map((x) => x.e);
+        } else items = [...items].sort((x, y) => String(x.title).localeCompare(String(y.title)));
         const page = items.slice(offset, offset + limit).map((e) => ({ slug: e.slug, title: e.title, author: e.author || null, category: e.category || null, mediaUrl: e.mediaUrl || (e.mediaPath ? awardElementUrl(e.mediaPath) : null), mediaType: e.mediaType || null, siteSlug: e.siteSlug || null, sourceUrl: e.sourceUrl || null, evidence: { source: 'awwwards' } }));
         return textResult({ mode, query: q || null, total: items.length, limit, offset, items: page, ...(page.length ? {} : { suggestions: awardSuggestQueries(q || 'hero', awardIndex.getTaxonomy()) }) });
       }
@@ -3479,7 +3497,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
           entries.push({ slug: s, detail: d.detail, motion });
         }
         const cmp = awardCompareSites(entries);
-        return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
+        return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, technologyFamilies: cmp.sharedTechFamilies, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
       }
       const slug = awardNormalizeSlug(a.slug || toolFn_bad('slug (string) is required'));
       const d = await awardDetailFor(slug);
@@ -3548,6 +3566,24 @@ function createHandlers(catalog, icons, version, awardDeps) {
         const covered = new Set(auraMatches.map((m) => m.section));
         const uncovered = SECTIONS.filter((s) => !covered.has(s));
         if (uncovered.length) auraUnavailable = (auraUnavailable ? auraUnavailable + '; ' : '') + 'no free catalogue match for sections: ' + uncovered.join(', ') + ' — build these from tokens + closest matched section';
+        // Weak-consensus fallback: fewer than 3 component matches is not an
+        // actionable brief. Fill from human-grade editorial picks, LABELED as
+        // such (editorial:true) — never silently presented as query matches.
+        const compCount = auraMatches.filter((m) => m.section !== 'tokens').length;
+        if (compCount < 3 && catalog && typeof catalog.editorialPicks === 'function') {
+          try {
+            const picks = await catalog.editorialPicks(3);
+            for (const p of (picks || [])) {
+              if (auraMatches.length >= 12) break;
+              if (!p || p.premium !== false) continue;
+              const key = String(p.id || p.slug);
+              if (seen.has(key)) continue;
+              seen.add(key);
+              auraMatches.push({ section: 'general', componentId: p.id ?? p.slug, componentTitle: p.title, pageUrl: p.page_url, why: 'editorial fallback: goal matched nothing directly — human-grade free pick', editorial: true });
+            }
+            if ((picks || []).length) auraUnavailable = (auraUnavailable ? auraUnavailable + '; ' : '') + 'section queries matched thinly — editorial free picks fill the kit (marked editorial:true)';
+          } catch { /* brief stays thin but honest */ }
+        }
       } catch (e) { auraUnavailable = String((e && e.message) || e).slice(0, 200); }
       let structureNotes = null;
       if (includeStructure) {
@@ -3630,7 +3666,10 @@ function createHandlers(catalog, icons, version, awardDeps) {
               try {
                 const html = await fetchStatic(target);
                 return { ...cdpBandsFromHtml(html, target), fallbackFrom: 'live-dom', fallbackWhy: String((e && e.message) || e).slice(0, 200) };
-              } catch { throw e; }
+              } catch (fe) {
+                const both = awardErr('UPSTREAM_ERROR', 'live-dom failed (' + String((e && e.message) || e).slice(0, 160) + ') AND static fetch failed (' + String((fe && fe.message) || fe).slice(0, 160) + ') — is the dev server running? For http://127.0.0.1 targets serve the build first (e.g. npx serve) with allowLocal:true; for files pass the path directly with allowLocal:true.');
+                throw both;
+              }
             }
             throw e;
           }
@@ -3680,7 +3719,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const allowLocal = a.allowLocal === undefined ? false : toolFn_bool(a.allowLocal, 'allowLocal');
       const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
       const target = awardValidateHttpUrl(a.url || toolFn_bad('url (string) is required'), { allowLocal });
-      if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'motion ' + mode + ' needs Chrome: install it or set AURA_CHROME_PATH.');
+      if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'motion ' + mode + ' needs Chrome: install it or set AURA_CHROME_PATH. Fallback motion plan (generic, NOT observed): entrances <500ms ease-out; scroll reveals via IntersectionObserver; hover 1.03 + shadow; easing ease-out/cubic-bezier(.22,1,.36,1); prefers-reduced-motion disables parallax/scrub. aura_motion_study {mode:search} still queries stored studies.');
       if (mode === 'inspect') {
         const study = await awardBrowser.motionInspect(target, { viewport, allowLocal });
         try { awardIndex.recordMotion(study); } catch { /* memory fallback never fails */ }
