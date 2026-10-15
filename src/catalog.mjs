@@ -42,10 +42,17 @@ const ilike = (v) => "*" + String(v).replaceAll("*", "").trim().replace(/[%#()'"
 // Split a goal sentence into significant tokens for OR fallback (stop-word filtered).
 // Theme words (dark/light) are NOT search tokens — they become rank/filter signals
 // (see detectThemeHint + scoreByTheme), so "dark cinematic" can't match light rows.
+// Hex codes (#0a0a0b, bare 6-hex with a digit) are NOT search tokens either —
+// catalogue titles never contain them, so they only poison overlap counts while
+// still riding along for palette synthesis elsewhere. 3-hex words without #
+// ("red", "tan") are kept: too often real words to drop.
 const STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,free,also,that,this,from,into,plus,vs,top,best,up".split(","));
 const THEME_WORDS = new Set(["dark", "light", "midnight", "noir", "black", "white", "bright", "airy", "minimal"]);
 export function queryTokens(q, max = 4) {
-  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t) && !THEME_WORDS.has(t)).slice(0, max);
+  const raw = String(q ?? "").toLowerCase();
+  const hashed = new Set([...raw.matchAll(/#([0-9a-z]+)/g)].map((m) => m[1]));
+  const isHexNoise = (t) => hashed.has(t) || (/^(?=.*\d)[0-9a-f]{6}$/.test(t));
+  return raw.replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t) && !THEME_WORDS.has(t) && !isHexNoise(t)).slice(0, max);
 }
 // Theme hint from the raw query: explicit signal, separate from match tokens.
 export function detectThemeHint(q) {
@@ -498,14 +505,24 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
         if (fallback === "popular-safety-net") out.suggested_queries = suggestList();
       }
       else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggestList(); }
-      // Zero-overlap refusal: fallback engaged but top row matches 0/N tokens —
-      // honest empty instead of irrelevant popular rows. Direct hits never refused.
-      // Kind-aware: components/assets stay title-only strict; skills/systems use the
-      // wider net (title+description+tags+snippets) via matchOverlap.
+      // Zero-overlap refusal: fallback engaged but NO row matches ≥1 token —
+      // honest empty instead of irrelevant popular rows. Direct hits never
+      // refused. The gate judges the BEST row, not just the first: a single
+      // irrelevant views-leader must not veto relevant rows below it.
+      // Matching rows are re-ranked first (theme-ok, then overlap, views
+      // order kept within ties) and fallback_score is refreshed to the new
+      // top row so the disclosed score always describes returned rows.
+      // Kind-aware: components/assets stay title-only strict; skills/systems
+      // use the wider net (title+description+tags+snippets) via matchOverlap.
       if (fallback != null && toks.length > 0) {
-        const top = out.items[0];
-        const hits2 = matchOverlap(kind, toks, top);
-        if (hits2 === 0) {
+        const themeOf = (it) => (it && it.facets && it.facets.theme) || "unknown";
+        const themeOkOf = (it) => !effTheme || themeOf(it) === effTheme || themeOf(it) === "mixed" || themeOf(it) === "unknown";
+        const scored = out.items.map((it) => ({ it, hits: matchOverlap(kind, toks, it), themeOk: themeOkOf(it) }));
+        scored.sort((a, b) => (((b.themeOk ? 1 : 0) - (a.themeOk ? 1 : 0)) || (b.hits - a.hits)));
+        // Refusal judges the GLOBAL best: theme-first ordering must never
+        // let a 0-hit row veto a matching row below it.
+        const best = scored.length ? Math.max(...scored.map((s) => s.hits)) : 0;
+        if (best === 0) {
           const refused = fallback;
           out.items = [];
           out.total = 0;
@@ -516,6 +533,9 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
           out.refused_fallback = refused;
           out.suggested_queries = suggestList();
           out.note = "Top fallback result matched 0/" + toks.length + " title tokens — empty instead of irrelevant popular rows. Try a suggested query.";
+        } else {
+          out.items = scored.map((s) => s.it);
+          out.fallback_score = "token-overlap:" + best + "/" + toks.length + "-terms" + (effTheme ? ";theme:" + effTheme : "");
         }
       }
       if (slim) out.items = slimRows(kind, out.items);

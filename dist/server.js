@@ -164,10 +164,17 @@ const ilike = (v) => "*" + String(v).replaceAll("*", "").trim().replace(/[%#()'"
 // Split a goal sentence into significant tokens for OR fallback (stop-word filtered).
 // Theme words (dark/light) are NOT search tokens — they become rank/filter signals
 // (see detectThemeHint + scoreByTheme), so "dark cinematic" can't match light rows.
+// Hex codes (#0a0a0b, bare 6-hex with a digit) are NOT search tokens either —
+// catalogue titles never contain them, so they only poison overlap counts while
+// still riding along for palette synthesis elsewhere. 3-hex words without #
+// ("red", "tan") are kept: too often real words to drop.
 const STOP = new Set("a,an,the,for,with,and,or,of,to,in,on,my,new,free,also,that,this,from,into,plus,vs,top,best,up".split(","));
 const THEME_WORDS = new Set(["dark", "light", "midnight", "noir", "black", "white", "bright", "airy", "minimal"]);
 function queryTokens(q, max = 4) {
-  return String(q ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t) && !THEME_WORDS.has(t)).slice(0, max);
+  const raw = String(q ?? "").toLowerCase();
+  const hashed = new Set([...raw.matchAll(/#([0-9a-z]+)/g)].map((m) => m[1]));
+  const isHexNoise = (t) => hashed.has(t) || (/^(?=.*\d)[0-9a-f]{6}$/.test(t));
+  return raw.replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 2 && !STOP.has(t) && !THEME_WORDS.has(t) && !isHexNoise(t)).slice(0, max);
 }
 // Theme hint from the raw query: explicit signal, separate from match tokens.
 function detectThemeHint(q) {
@@ -620,14 +627,24 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         if (fallback === "popular-safety-net") out.suggested_queries = suggestList();
       }
       else if ((!rows || !rows.length) && toks.length) { out.isFallback = false; out.suggested_queries = suggestList(); }
-      // Zero-overlap refusal: fallback engaged but top row matches 0/N tokens —
-      // honest empty instead of irrelevant popular rows. Direct hits never refused.
-      // Kind-aware: components/assets stay title-only strict; skills/systems use the
-      // wider net (title+description+tags+snippets) via matchOverlap.
+      // Zero-overlap refusal: fallback engaged but NO row matches ≥1 token —
+      // honest empty instead of irrelevant popular rows. Direct hits never
+      // refused. The gate judges the BEST row, not just the first: a single
+      // irrelevant views-leader must not veto relevant rows below it.
+      // Matching rows are re-ranked first (theme-ok, then overlap, views
+      // order kept within ties) and fallback_score is refreshed to the new
+      // top row so the disclosed score always describes returned rows.
+      // Kind-aware: components/assets stay title-only strict; skills/systems
+      // use the wider net (title+description+tags+snippets) via matchOverlap.
       if (fallback != null && toks.length > 0) {
-        const top = out.items[0];
-        const hits2 = matchOverlap(kind, toks, top);
-        if (hits2 === 0) {
+        const themeOf = (it) => (it && it.facets && it.facets.theme) || "unknown";
+        const themeOkOf = (it) => !effTheme || themeOf(it) === effTheme || themeOf(it) === "mixed" || themeOf(it) === "unknown";
+        const scored = out.items.map((it) => ({ it, hits: matchOverlap(kind, toks, it), themeOk: themeOkOf(it) }));
+        scored.sort((a, b) => (((b.themeOk ? 1 : 0) - (a.themeOk ? 1 : 0)) || (b.hits - a.hits)));
+        // Refusal judges the GLOBAL best: theme-first ordering must never
+        // let a 0-hit row veto a matching row below it.
+        const best = scored.length ? Math.max(...scored.map((s) => s.hits)) : 0;
+        if (best === 0) {
           const refused = fallback;
           out.items = [];
           out.total = 0;
@@ -638,6 +655,9 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
           out.refused_fallback = refused;
           out.suggested_queries = suggestList();
           out.note = "Top fallback result matched 0/" + toks.length + " title tokens — empty instead of irrelevant popular rows. Try a suggested query.";
+        } else {
+          out.items = scored.map((s) => s.it);
+          out.fallback_score = "token-overlap:" + best + "/" + toks.length + "-terms" + (effTheme ? ";theme:" + effTheme : "");
         }
       }
       if (slim) out.items = slimRows(kind, out.items);
@@ -1837,7 +1857,8 @@ function awardParseDetail(html, slug) {
   const src = String(html || "");
   const norm = awardNormalizeSlug(slug);
   const palette = [...new Set([...src.matchAll(/<strong>HEX<\/strong>\s*#([0-9A-Fa-f]{6})/g)].map((m) => "#" + m[1].toUpperCase()))];
-  const techIdx = src.indexOf("Technologies & Tools</h2>");
+  const techTitle = src.search(/Technologies\s*(&|&amp;)\s*Tools<\/h2>/);
+  const techIdx = techTitle >= 0 ? techTitle : -1;
   const techSection = techIdx >= 0 ? src.slice(techIdx, techIdx + 6000) : "";
   const technologies = [...new Set([...techSection.matchAll(/class="button button--tag"[^>]*>([^<]+)</g)].map((m) => awardStripTags(m[1])))].filter(Boolean);
   const elStart = src.indexOf(">Elements</h2>");
@@ -2156,6 +2177,61 @@ function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rateMs = A
   return { getAwardHtml };
 }
 
+// ---- Static motion cues: real markup evidence without a browser ----
+// Fetches a public reference URL (bounded, SSRF-guarded) and scans for
+// animation library scripts, @keyframes, transitions, scroll cues, and
+// media elements. Status is ALWAYS "static-markup" — this is observed page
+// source, never runtime behavior: ScrollTrigger counts, scrub ratios, and
+// easing vocabularies still require a recorded browser study. Failures
+// return {status:"unavailable", reason} instead of throwing (except empty
+// input, which is a contract violation → BAD_ARGS).
+const AWARD_STATIC_LIBS = [
+  { lib: "gsap", res: [/gsap(\.min)?\.js/i, /scrolltrigger/i, /gsap\./i] },
+  { lib: "lenis", res: [/lenis/i] },
+  { lib: "locomotive", res: [/locomotive/i] },
+  { lib: "swiper", res: [/swiper/i] },
+  { lib: "framer", res: [/framer/i] },
+  { lib: "lottie", res: [/lottie/i, /dotlottie/i] },
+  { lib: "three", res: [/three(\.min)?\.js/i, /three\./i] },
+  { lib: "pixi", res: [/pixi/i] },
+  { lib: "aos", res: [/aos(\.min)?\.js/i, /data-aos/i] },
+  { lib: "barba", res: [/barba/i] },
+];
+const AWARD_STATIC_CUES = ["data-aos", "data-scroll", "scrolltrigger", "sticky", "parallax", "marquee", "reveal", "loader", "preloader"];
+async function awardStaticMotion(rawUrl, { fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false } = {}) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) throw awardErr("BAD_ARGS", "url must be a non-empty string");
+  const fail = (reason) => ({ status: "unavailable", url: String(rawUrl).slice(0, 200), reason: String(reason).slice(0, 200) });
+  let target;
+  try { target = awardValidateHttpUrl(rawUrl, { allowLocal }); }
+  catch (e) { return fail((e && e.message) || e); }
+  const fetchFn = fetchImpl || globalThis.fetch;
+  let html;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetchFn(target, { headers: { "user-agent": AWARD_USER_AGENT, accept: "text/html,*/*" }, redirect: "follow", signal: ctrl.signal });
+      if (res.status === 404) return fail("HTTP 404 for " + target);
+      if (!res.ok) return fail("HTTP " + res.status + " for " + target);
+      html = await res.text();
+    } finally { clearTimeout(timer); }
+  } catch (e) { return fail(e && e.name === "AbortError" ? "timeout fetching " + target : "network error: " + String((e && e.message) || e).slice(0, 120)); }
+  if (!html || !html.length) return fail("empty body for " + target);
+  const src = html.slice(0, maxBytes);
+  const count = (re) => Math.min(999, (src.match(re) || []).length);
+  const libs = AWARD_STATIC_LIBS.filter(({ res }) => res.some((re) => re.test(src))).map(({ lib }) => lib);
+  return {
+    status: "static-markup", url: target,
+    libs, keyframes: count(/@keyframes\s/gi), animations: count(/animation\s*:/gi), transitions: count(/transition\s*:/gi),
+    canvases: count(/<canvas/gi), videos: count(/<video/gi),
+    scrollCues: AWARD_STATIC_CUES.filter((c) => src.toLowerCase().includes(c)),
+    reducedMotion: /prefers-reduced-motion/i.test(src),
+    bytes: src.length,
+    evidence: "static page markup (not runtime observation): record a browser study for trigger counts and easing vocab",
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 // ---- Design-brief builder (pure): observed facts vs patterns vs proposals ----
 const AWARD_BLUEPRINT_VERSION = 1;
 function awardFreq(rows) {
@@ -2296,7 +2372,7 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
   lines.push("## Aura matches (free-only, real catalogue rows)");
   const matches = (auraMatches && auraMatches.length ? auraMatches : []);
   if (!matches.length) lines.push("- Catalogue lookup unavailable or matched nothing — proceed with tokens only; do not invent component IDs.");
-  for (const m of matches.slice(0, 10)) lines.push("- [" + m.section + "] `" + m.componentTitle + "` (" + m.componentId + ") — " + m.pageUrl + " — " + m.why);
+  for (const m of matches.slice(0, 10)) lines.push("- [" + m.section + "] `" + m.componentTitle + "` (" + m.componentId + ") — " + m.pageUrl + " — " + m.why + (m.matchEvidence && m.matchEvidence.fallback ? " (via fallback " + m.matchEvidence.fallback + " — verify the fit before pasting)" : "") + (m.editorial ? " [editorial pick]" : ""));
   lines.push("");
   lines.push("## Sections (proposed order)");
   sections.forEach((s, i) => lines.push((i + 1) + ". " + s));
@@ -2339,7 +2415,11 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
   const confidence = points <= 1 ? "low" : points <= 3 ? "low-medium" : points === 4 ? "medium" : "high";
   const spec = {
     version: AWARD_BLUEPRINT_VERSION, goal,
-    refs: (refs || []).map((slug) => ({ slug, sourceUrl: awardSiteUrl(slug) })),
+    refs: (refs || []).map((slug) => {
+      const hit = (details || []).find((d) => d.slug === slug);
+      const st = hit && hit.motion_static ? hit.motion_static.status : "none";
+      return { slug, sourceUrl: awardSiteUrl(slug), motionStatic: st };
+    }),
     sharedPatterns: shared, outliers: outliers.slice(0, 12), palette,
     requestedPalette: requestedPalette.map((c) => ({ value: c, status: "proposed" })),
     tokens_css: requestedPalette.length ? (":root{--aw-ground:" + tokenGround + ";--aw-ink:" + tokenInk + ";" + tokenAccents.map((c, i) => "--aw-accent-" + (i + 1) + ":" + c).join(";") + ";}") : "",
@@ -3272,7 +3352,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
   function awardMode(v, allowed, name) { if (v === undefined) toolFn_bad(name + ' is required'); if (!allowed.includes(v)) toolFn_bad(name + ' must be one of ' + allowed.join('|')); return v; }
   function awardLimit(v, def, max) { if (v === undefined) return def; if (typeof v !== 'number' || !Number.isFinite(v)) toolFn_bad('limit must be a number'); return Math.max(1, Math.min(Math.floor(v), max)); }
   function awardStrArr(v, name, max) { if (v === undefined) return undefined; if (!Array.isArray(v)) toolFn_bad(name + ' must be an array of strings'); if (v.length > max) toolFn_bad(name + ' holds max ' + max + ' entries'); for (const e of v) if (typeof e !== 'string' || !e.trim()) toolFn_bad(name + ' must hold non-empty strings'); return v.map((e) => e.trim()); }
-  async function awardDetailFor(slug) {
+  async function awardDetailFor(slug, { withStatic = false } = {}) {
     const norm = awardNormalizeSlug(slug);
     const cached = awardIndex.getSite(norm);
     if (!awardClient) return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: 'award client not wired' };
@@ -3294,7 +3374,13 @@ function createHandlers(catalog, icons, version, awardDeps) {
         const media = awardParseElementsSection(html);
         if (media && media.length) awardIndex.upsertElements(media.map((m) => ({ slug: 'site-' + norm + '-' + String(m.title || 'element').toLowerCase().replace(/\W+/g, '-').slice(0, 60), title: m.title || 'Element', author: summary.studio || summary.title, builtWith: [], related: [], mediaPath: m.mediaPath, mediaType: String(m.mediaPath).endsWith('.mp4') ? 'video' : 'image', mediaUrl: awardElementUrl(m.mediaPath), category: 'uncategorized', siteSlug: norm, source: 'site', sourceUrl: summary.sourceUrl })));
       } catch { /* backfill best-effort */ }
-      return { slug: norm, summary, detail, detailStatus: 'fetched', liveError: null };
+      // Static motion cues (opt-in per caller: one extra bounded fetch).
+      // Recorded studies stay authoritative; static markup is supplementary.
+      let motionStatic = null;
+      if (withStatic && summary.liveUrl) {
+        try { motionStatic = await awardStaticMotion(summary.liveUrl); } catch { motionStatic = { status: "unavailable", url: summary.liveUrl, reason: "static scan failed" }; }
+      }
+      return { slug: norm, summary, detail, detailStatus: 'fetched', liveError: null, ...(motionStatic ? { motion_static: motionStatic } : {}) };
     } catch (e) {
       if (e && e.code === 'NOT_FOUND') throw e;
       return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: String((e && e.message) || e).slice(0, 220) };
@@ -3470,7 +3556,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const sysItem = sys && sys.item ? sys.item : null;
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
-      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, ...(sysItem ? {} : { system_note: 'no design system matched this goal — tokens.css is empty; fetch one via aura_search_design_systems or proceed with component defaults' }), components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
     aura_award_search: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['sites', 'categories', 'elements', 'motion'], 'mode');
       const limit = awardLimit(a.limit, 5, 25); const offset = Math.max(0, a.offset ?? 0); const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
       if (mode === 'categories') {
@@ -3577,12 +3663,12 @@ function createHandlers(catalog, icons, version, awardDeps) {
         return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, technologyFamilies: cmp.sharedTechFamilies, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
       }
       const slug = awardNormalizeSlug(a.slug || toolFn_bad('slug (string) is required'));
-      const d = await awardDetailFor(slug);
+      const d = await awardDetailFor(slug, { withStatic: true });
       if (!d.summary && !d.detail) { const e = new Error('site not found: ' + slug); e.code = 'NOT_FOUND'; throw e; }
       if (mode === 'site_details') {
         let motion = null;
         try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(slug)) || null; } catch { motion = null; }
-        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, ideas: awardSiteIdeas(d.detail), motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
+        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, ideas: awardSiteIdeas(d.detail), ideas_contract: '0-6 ideas by held evidence (1 on thin evidence is valid); every idea is status:suggested with an observed basis, never stated fact', motion: motion || null, motion_static: d.motion_static || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', motion_static: d.motion_static ? d.motion_static.status : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
       }
       // site_elements
       let elements = [];
@@ -3603,7 +3689,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const constraints = Array.isArray(a.constraints) ? a.constraints.filter((c) => typeof c === 'string').map((c) => c.slice(0, 200)).slice(0, 8) : [];
       const includeStructure = a.includeStructure === undefined ? false : toolFn_bool(a.includeStructure, 'includeStructure');
       const details = (await Promise.all(normed.map(async (s) => {
-        try { return await awardDetailFor(s); }
+        try { return await awardDetailFor(s, { withStatic: true }); }
         catch (e) {
           if (e && e.code === 'NOT_FOUND') throw e;
           return { slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) };
@@ -3633,9 +3719,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
         const sectionResults = await Promise.all(queries.map(async ({ section, q }) => {
           try {
             const r = await catalog.searchCatalog('components', { query: q, freeOnly: true, limit: 2, ...(themeWord ? { theme: themeWord } : {}) });
-            return { section, q, items: (r.items || []).slice(0, 1) };
-          } catch { return { section, q, items: [] }; }
+            return { section, q, items: (r.items || []).slice(0, 1), fallback: r && r.isFallback ? (r.fallback || 'fallback') : null };
+          } catch { return { section, q, items: [], fallback: null }; }
         }));
+        const fbBySection = {};
+        for (const { section, fallback } of sectionResults) if (fallback && !(section in fbBySection)) fbBySection[section] = fallback;
         for (const { section, q, items } of sectionResults) {
           if (auraMatches.length >= 12) break;
           for (const it of items) {
@@ -3643,7 +3731,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
             const key = String(it.id || it.slug);
             if (seen.has(key)) continue;
             seen.add(key);
-            auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
+            auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"', matchEvidence: { fallback: fbBySection[section] || null } });
             break;
           }
         }
@@ -3692,11 +3780,19 @@ function createHandlers(catalog, icons, version, awardDeps) {
       for (const d of details) {
         if (!d.detail) gaps.push(d.slug + ': reference detail unavailable' + (d.liveError ? ' (' + d.liveError + ')' : ''));
       }
+      const staticCues = [];
+      for (const d of details) {
+        const st = d.motion_static;
+        if (st && st.status === 'static-markup') staticCues.push(d.slug + ': ' + [st.libs.length ? st.libs.join('+') : 'vanilla', st.keyframes ? st.keyframes + ' keyframes' : null, st.transitions ? st.transitions + ' transitions' : null, st.canvases ? st.canvases + ' canvas' : null, st.scrollCues.length ? 'cues(' + st.scrollCues.slice(0, 4).join(',') + ')' : null].filter(Boolean).join(', '));
+      }
       try {
         const mr = awardIndex.searchMotion({ limit: 25 });
         const hits = (mr.items || []).filter((m) => normed.some((s) => String(m.url || '').toLowerCase().includes(s)));
         if (hits.length) motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; ');
-        else gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
+        else {
+          if (staticCues.length) motionNotes = 'Static markup cues (NOT runtime observation — record a study for trigger counts/easing): ' + staticCues.join(' | ');
+          gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
+        }
       } catch { /* ignore */ }
       if (!includeStructure) gaps.push('structure: not requested (pass includeStructure:true for measured band evidence)');
       if (auraUnavailable) gaps.push('catalogue: ' + auraUnavailable);

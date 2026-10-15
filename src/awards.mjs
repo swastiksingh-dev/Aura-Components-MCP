@@ -176,7 +176,8 @@ export function awardParseDetail(html, slug) {
   const src = String(html || "");
   const norm = awardNormalizeSlug(slug);
   const palette = [...new Set([...src.matchAll(/<strong>HEX<\/strong>\s*#([0-9A-Fa-f]{6})/g)].map((m) => "#" + m[1].toUpperCase()))];
-  const techIdx = src.indexOf("Technologies & Tools</h2>");
+  const techTitle = src.search(/Technologies\s*(&|&amp;)\s*Tools<\/h2>/);
+  const techIdx = techTitle >= 0 ? techTitle : -1;
   const techSection = techIdx >= 0 ? src.slice(techIdx, techIdx + 6000) : "";
   const technologies = [...new Set([...techSection.matchAll(/class="button button--tag"[^>]*>([^<]+)</g)].map((m) => awardStripTags(m[1])))].filter(Boolean);
   const elStart = src.indexOf(">Elements</h2>");
@@ -495,6 +496,61 @@ export function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rat
   return { getAwardHtml };
 }
 
+// ---- Static motion cues: real markup evidence without a browser ----
+// Fetches a public reference URL (bounded, SSRF-guarded) and scans for
+// animation library scripts, @keyframes, transitions, scroll cues, and
+// media elements. Status is ALWAYS "static-markup" — this is observed page
+// source, never runtime behavior: ScrollTrigger counts, scrub ratios, and
+// easing vocabularies still require a recorded browser study. Failures
+// return {status:"unavailable", reason} instead of throwing (except empty
+// input, which is a contract violation → BAD_ARGS).
+const AWARD_STATIC_LIBS = [
+  { lib: "gsap", res: [/gsap(\.min)?\.js/i, /scrolltrigger/i, /gsap\./i] },
+  { lib: "lenis", res: [/lenis/i] },
+  { lib: "locomotive", res: [/locomotive/i] },
+  { lib: "swiper", res: [/swiper/i] },
+  { lib: "framer", res: [/framer/i] },
+  { lib: "lottie", res: [/lottie/i, /dotlottie/i] },
+  { lib: "three", res: [/three(\.min)?\.js/i, /three\./i] },
+  { lib: "pixi", res: [/pixi/i] },
+  { lib: "aos", res: [/aos(\.min)?\.js/i, /data-aos/i] },
+  { lib: "barba", res: [/barba/i] },
+];
+const AWARD_STATIC_CUES = ["data-aos", "data-scroll", "scrolltrigger", "sticky", "parallax", "marquee", "reveal", "loader", "preloader"];
+export async function awardStaticMotion(rawUrl, { fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false } = {}) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) throw awardErr("BAD_ARGS", "url must be a non-empty string");
+  const fail = (reason) => ({ status: "unavailable", url: String(rawUrl).slice(0, 200), reason: String(reason).slice(0, 200) });
+  let target;
+  try { target = awardValidateHttpUrl(rawUrl, { allowLocal }); }
+  catch (e) { return fail((e && e.message) || e); }
+  const fetchFn = fetchImpl || globalThis.fetch;
+  let html;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetchFn(target, { headers: { "user-agent": AWARD_USER_AGENT, accept: "text/html,*/*" }, redirect: "follow", signal: ctrl.signal });
+      if (res.status === 404) return fail("HTTP 404 for " + target);
+      if (!res.ok) return fail("HTTP " + res.status + " for " + target);
+      html = await res.text();
+    } finally { clearTimeout(timer); }
+  } catch (e) { return fail(e && e.name === "AbortError" ? "timeout fetching " + target : "network error: " + String((e && e.message) || e).slice(0, 120)); }
+  if (!html || !html.length) return fail("empty body for " + target);
+  const src = html.slice(0, maxBytes);
+  const count = (re) => Math.min(999, (src.match(re) || []).length);
+  const libs = AWARD_STATIC_LIBS.filter(({ res }) => res.some((re) => re.test(src))).map(({ lib }) => lib);
+  return {
+    status: "static-markup", url: target,
+    libs, keyframes: count(/@keyframes\s/gi), animations: count(/animation\s*:/gi), transitions: count(/transition\s*:/gi),
+    canvases: count(/<canvas/gi), videos: count(/<video/gi),
+    scrollCues: AWARD_STATIC_CUES.filter((c) => src.toLowerCase().includes(c)),
+    reducedMotion: /prefers-reduced-motion/i.test(src),
+    bytes: src.length,
+    evidence: "static page markup (not runtime observation): record a browser study for trigger counts and easing vocab",
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 // ---- Design-brief builder (pure): observed facts vs patterns vs proposals ----
 export const AWARD_BLUEPRINT_VERSION = 1;
 function awardFreq(rows) {
@@ -635,7 +691,7 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
   lines.push("## Aura matches (free-only, real catalogue rows)");
   const matches = (auraMatches && auraMatches.length ? auraMatches : []);
   if (!matches.length) lines.push("- Catalogue lookup unavailable or matched nothing — proceed with tokens only; do not invent component IDs.");
-  for (const m of matches.slice(0, 10)) lines.push("- [" + m.section + "] `" + m.componentTitle + "` (" + m.componentId + ") — " + m.pageUrl + " — " + m.why);
+  for (const m of matches.slice(0, 10)) lines.push("- [" + m.section + "] `" + m.componentTitle + "` (" + m.componentId + ") — " + m.pageUrl + " — " + m.why + (m.matchEvidence && m.matchEvidence.fallback ? " (via fallback " + m.matchEvidence.fallback + " — verify the fit before pasting)" : "") + (m.editorial ? " [editorial pick]" : ""));
   lines.push("");
   lines.push("## Sections (proposed order)");
   sections.forEach((s, i) => lines.push((i + 1) + ". " + s));
@@ -678,7 +734,11 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
   const confidence = points <= 1 ? "low" : points <= 3 ? "low-medium" : points === 4 ? "medium" : "high";
   const spec = {
     version: AWARD_BLUEPRINT_VERSION, goal,
-    refs: (refs || []).map((slug) => ({ slug, sourceUrl: awardSiteUrl(slug) })),
+    refs: (refs || []).map((slug) => {
+      const hit = (details || []).find((d) => d.slug === slug);
+      const st = hit && hit.motion_static ? hit.motion_static.status : "none";
+      return { slug, sourceUrl: awardSiteUrl(slug), motionStatic: st };
+    }),
     sharedPatterns: shared, outliers: outliers.slice(0, 12), palette,
     requestedPalette: requestedPalette.map((c) => ({ value: c, status: "proposed" })),
     tokens_css: requestedPalette.length ? (":root{--aw-ground:" + tokenGround + ";--aw-ink:" + tokenInk + ";" + tokenAccents.map((c, i) => "--aw-accent-" + (i + 1) + ":" + c).join(";") + ";}") : "",

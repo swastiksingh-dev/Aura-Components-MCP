@@ -6,7 +6,7 @@ import { TOOL_DEFS, createHandlers } from "../src/tools.mjs";
 import { createAwardIndex } from "../src/awards-index.mjs";
 import { createBrowserAdapter, createCdpConn } from "../src/browser-cdp.mjs";
 import { awardScoreSites, awardThemeHint, awardBuildBlueprint, awardSiteIdeas } from "../src/awards.mjs";
-import { matchOverlap, scoreRows, stemTok, buildSearchParams, buildUrl, createCatalog } from "../src/catalog.mjs";
+import { matchOverlap, scoreRows, stemTok, buildSearchParams, buildUrl, createCatalog, queryTokens } from "../src/catalog.mjs";
 
 const tmpDir = () => {
   const fs = process.getBuiltinModule("node:fs");
@@ -14,6 +14,10 @@ const tmpDir = () => {
   const os = process.getBuiltinModule("node:os");
   return fs.mkdtempSync(path.join(os.tmpdir(), "aura-awfix-"));
 };
+// Static-markup stub for awardStaticMotion (liveUrls in fixtures must not hit
+// the network). Local try/finally overrides restore to this stub.
+const STATIC_HTML = '<html><head><title>X</title><script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script><style>@keyframes fade{from{}to{}} .a{transition:opacity .3s}</style></head><body><div data-aos="fade-up"></div></body></html>';
+globalThis.fetch = async () => ({ status: 200, ok: true, text: async () => STATIC_HTML });
 // Fake CDP page socket: opens instantly, answers commands, fires load event.
 function fakePageSocket(sent) {
   return class {
@@ -396,4 +400,119 @@ test("P1: confidence is evidence-scored with reasons", () => {
   const rich = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: richDetails, auraMatches: richMatches, motionNotes: "recorded", structureNotes: "aa: 5 bands (live-dom)", requestedPalette: [], gaps: [] });
   assert.ok(["medium", "high"].includes(rich.spec.confidence), "rich evidence lifts past low-medium, got: " + rich.spec.confidence);
   assert.ok(rich.spec.confidenceWhy.some((w) => /motion|structure|sections|technologies/.test(w)));
+});
+
+test("10/10-1: hex codes never become catalogue search tokens", async () => {
+  assert.deepEqual(queryTokens("Dark red glassy SaaS page #0a0a0b with #ff2a2a accents"), ["red", "glassy", "saas", "page"]);
+  assert.deepEqual(queryTokens("100% glass bento #fff hero"), ["100", "glass", "bento", "hero"]);
+  assert.ok(queryTokens("add face beefed decade hero").includes("face"), "real words kept");
+  // End-to-end: hex goal survives phrase miss → OR tokens minus hex → kept.
+  const seen = [];
+  const stub = { getJson: async (url) => {
+    seen.push(url);
+    if (seen.length === 1) return { rows: [], total: 0 };
+    return { rows: [{ id: 5, title: "Glassy Hero", slug: "G5", code: "x", created_by: null }], total: 1 };
+  } };
+  const cfg = { supabaseUrl: "https://x.supabase.co", anonKey: "k", timeoutMs: 1000, retries: 0, cacheTtlMs: 0, defaultLimit: 10, maxLimit: 25, codeChars: 100, contentChars: 100, freeOnlyDefault: false, userAgent: "t" };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "Dark page #0a0a0b glassy", limit: 3 });
+  assert.ok(r.items.length > 0, "hex goal matches instead of refusing, got: " + JSON.stringify(r).slice(0, 200));
+  assert.ok(String(r.fallback || "").startsWith("or-tokens:"), "OR fallback engaged without hex noise");
+});
+
+test("10/10-2: Technologies title tolerates &amp; entity variant", async () => {
+  const { awardParseDetail } = await import("../src/awards.mjs");
+  const html = '<html><head><meta property="og:title" content="T" /></head><body><h2>Technologies &amp; Tools</h2><span class="button button--tag">Lenis</span><h2>Color Palette</h2></body></html>';
+  const d = awardParseDetail(html, "ent-slug");
+  assert.ok(d.technologies.includes("Lenis"), "entity-escaped title still parsed");
+});
+
+test("10/10-3: static motion scan is real markup evidence, bounded, honest", async () => {
+  const { awardStaticMotion } = await import("../src/awards.mjs");
+  const html = '<html><head><script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script><script src="https://unpkg.com/lenis@1.1.0/dist/lenis.min.js"></script><style>@keyframes a{}@keyframes b{} .x{animation:fade 1s} .y{transition:all .3s} @media (prefers-reduced-motion: reduce){}</style></head><body><div data-aos="up"></div><canvas></canvas><canvas></canvas><video></video></body></html>';
+  const ok = await awardStaticMotion("https://example.com/", { fetchImpl: async () => ({ status: 200, ok: true, text: async () => html }) });
+  assert.equal(ok.status, "static-markup");
+  assert.ok(ok.libs.includes("gsap") && ok.libs.includes("lenis") && ok.libs.includes("aos"));
+  assert.equal(ok.keyframes, 2);
+  assert.equal(ok.canvases, 2);
+  assert.equal(ok.videos, 1);
+  assert.ok(ok.scrollCues.includes("data-aos"));
+  assert.equal(ok.reducedMotion, true);
+  assert.ok(/not runtime/.test(ok.evidence));
+  const down = await awardStaticMotion("https://example.com/", { fetchImpl: async () => { throw new Error("no net"); } });
+  assert.equal(down.status, "unavailable");
+  const nf = await awardStaticMotion("https://example.com/", { fetchImpl: async () => ({ status: 404, ok: false, text: async () => "" }) });
+  assert.equal(nf.status, "unavailable");
+  const blocked = await awardStaticMotion("http://127.0.0.1:3000/", { fetchImpl: async () => { throw new Error("must not fetch"); } });
+  assert.equal(blocked.status, "unavailable", "private hosts never fetched");
+  await assert.rejects(() => awardStaticMotion(""), (e) => e.code === "BAD_ARGS");
+});
+
+test("10/10-4: site_details carries motion_static + runtime ideas contract", async () => {
+  const listing = `<div data-collectable-model-value="{&quot;slug&quot;:&quot;st-aa&quot;,&quot;title&quot;:&quot;St Aa&quot;,&quot;createdAt&quot;:1,&quot;tags&quot;:[&quot;dark&quot;],&quot;images&quot;:{},&quot;type&quot;:&quot;submission&quot;}"><a href="/sites/st-aa">x</a></div>`;
+  const client = { getAwardHtml: async (raw) => {
+    const p = String(raw).startsWith("http") ? new URL(String(raw)).pathname : String(raw);
+    if (p.startsWith("/sites/")) return { html: '<html><head><meta property="og:title" content="St Aa" /><meta property="og:description" content="d" /></head><body><h1 class="heading-1 text-uppercase"> <a href="https://st-aa.example.com" target="_blank" rel="noopener">St Aa</a></h1><h2>Color Palette</h2><strong>HEX</strong> #0A0A0B</body></html>' };
+    return { html: listing };
+  } };
+  const h = createHandlers({}, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  await callWith(h, "aura_award_search", { mode: "sites", query: "staa", limit: 3 });
+  const m = await callWith(h, "aura_award_inspect", { mode: "site_details", slug: "st-aa" });
+  const r = JSON.parse(m.result.content[0].text);
+  assert.equal(r.motion_static.status, "static-markup", "module fetch stub feeds the static scan");
+  assert.ok(r.motion_static.libs.includes("gsap"));
+  assert.equal(typeof r.ideas_contract, "string");
+  assert.ok(/0-6/.test(r.ideas_contract) && /suggested/.test(r.ideas_contract));
+});
+
+test("10/10-5: blueprint cites static cues + marks fallback matches", async () => {
+  const client = { getAwardHtml: async (raw) => {
+    const p = String(raw).startsWith("http") ? new URL(String(raw)).pathname : String(raw);
+    const s = p.split("/")[2];
+    return { html: `<html><head><meta property="og:title" content="${s}" /></head><body><h1 class="heading-1 text-uppercase"> <a href="https://${s}.example.com" target="_blank" rel="noopener">${s}</a></h1><h2>Color Palette</h2><strong>HEX</strong> #111111</body></html>` };
+  } };
+  const catalog = {
+    searchCatalog: async (kind, q) => {
+      if (kind === "design_systems") return { items: [] };
+      // First section direct, rest via labeled fallback — like the real layer.
+      if (q.query.startsWith("hero")) return { items: [{ id: 11, title: "Hero Direct", tags: ["hero"], page_url: "https://www.aura.build/component/11", premium: false }] };
+      return { items: [{ id: 12, title: "Fallback Fit", tags: ["section"], page_url: "https://www.aura.build/component/12", premium: false }], isFallback: true, fallback: "or-tokens:xyz" };
+    },
+  };
+  const h = createHandlers(catalog, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_design_blueprint", { goal: "fb test", references: ["fb-aa", "fb-bb"] });
+  const r = JSON.parse(m.result.content[0].text);
+  const fb = r.spec.auraMatches.find((x) => x.matchEvidence && x.matchEvidence.fallback);
+  assert.ok(fb, "fallback provenance recorded on the match");
+  assert.ok(r.markdown.includes("(via fallback or-tokens:xyz"), "markdown discloses it");
+  assert.ok(/Static markup cues/.test(r.markdown) || (r.spec.refs.every((x) => x.motionStatic === "static-markup")), "static cues cited, refs marked");
+  assert.ok(r.spec.gaps.some((g) => /no recorded studies/.test(g)), "recorded-studies gap stays honest");
+});
+
+test("10/10-6: search_all discloses fallback state per surface independently", async () => {  const mixed = {
+    searchCatalog: async (kind) => kind === "components"
+      ? { kind, total: 0, items: [], no_match: true, isFallback: false, suggested_queries: ["hero"] }
+      : { kind, total: 2, items: [{ title: kind + " hit", page_url: "u" }], isFallback: true, fallback: "or-tokens:x" },
+  };
+  const h = createHandlers(mixed, null, null, { awardClient: null, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_search_all", { query: "xqztq" });
+  const r = JSON.parse(m.result.content[0].text);
+  assert.equal(r.components.no_match, true);
+  assert.equal(r.components.isFallback, false);
+  assert.equal(r.skills.isFallback, true);
+  assert.equal(r.skills.fallback, "or-tokens:x");
+});
+
+test("10/10-7: scaffold discloses an unmatched design system instead of empty css", async () => {
+  const catalog = {
+    searchCatalog: async (kind) => kind === "components"
+      ? { items: [{ id: 77, title: "Plain Hero", slug: "PH", code: "<div></div>", tags: ["hero"], page_url: "u", premium: false }] }
+      : { items: [] },
+  };
+  const h = createHandlers(catalog, null, null, { awardClient: null, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_scaffold_page", { goal: "unmatched oddity xyz" });
+  const r = JSON.parse(m.result.content[0].text);
+  assert.equal(r.tokens_css, "");
+  assert.ok(typeof r.system_note === "string" && /no design system matched/.test(r.system_note));
+  assert.equal(r.components.length, 1, "components still ship; only the system is disclosed missing");
 });

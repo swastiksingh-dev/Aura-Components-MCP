@@ -69,7 +69,26 @@ release.
   search response carries `source` + `corpusNote` documenting the
   seed-once-then-local rule.
 
-### Fixed — PostgREST escaping, ideas contract, evidence-scored confidence
+### Fixed — verbatim goals, static motion evidence, fallback provenance
+
+- Refusal gate judges the global best row, not the first: theme-first
+  ordering re-ranks but can no longer let a 0-hit leader veto matching rows
+  below it; `fallback_score` refreshes to the best row. Empty means zero rows
+  matched, honestly.
+- Scaffold discloses `system_note` when no design system matches instead of
+  shipping silent empty `tokens_css`.
+- Hex codes (`#0a0a0b`, bare 6-hex with a digit) are excluded from catalogue
+  search tokens — titles never contain them, so they poisoned overlap counts
+  and emptied scaffolds. Real words (`red`, `face`, `decade`) are kept via a
+  digit rule. Goals with hexes now match instead of refusing.
+- `site_details` returns browserless motion evidence: `motion_static`
+  (library scripts, keyframe/transition counts, scroll cues, canvases,
+  `prefers-reduced-motion` — all labeled static-markup, never runtime) plus
+  a runtime-visible `ideas_contract`. Blueprints cite static cues when no
+  study is recorded; confidence still requires recorded evidence.
+- Blueprint matches record `matchEvidence.fallback` and the markdown marks
+  `(via fallback …)` rows; `search_all` fallback flags stay per-surface
+  (regression-locked). Technologies section titles tolerate `&amp;`.
 
 - Goals containing `#`, `(`, `)`, `"`, `'`, `%`, `,` no longer crash
   catalogue queries (PGRST100): `ilike` values percent-encode significant

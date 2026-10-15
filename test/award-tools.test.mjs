@@ -12,6 +12,11 @@ const tmpDir = () => {
   const os = process.getBuiltinModule("node:os");
   return fs.mkdtempSync(path.join(os.tmpdir(), "aura-awtools-"));
 };
+// Static-markup stub: awardStaticMotion calls global fetch for liveUrls found
+// in fixtures. Deterministic fixture (gsap+aos, 1 keyframes, reduced-motion)
+// keeps every handler test hermetic; tests needing failure override locally.
+const STATIC_HTML = '<html><head><title>X</title><script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script><style>@keyframes fade{from{}to{}} .a{transition:opacity .3s} @media (prefers-reduced-motion: reduce){}</style></head><body><div data-aos="fade-up"></div><canvas></canvas></body></html>';
+globalThis.fetch = async () => ({ status: 200, ok: true, text: async () => STATIC_HTML });
 const LISTING = `<div data-collectable-model-value="{&quot;slug&quot;:&quot;aspen-search&quot;,&quot;title&quot;:&quot;Aspen Search&quot;,&quot;createdAt&quot;:1,&quot;tags&quot;:[&quot;minimal&quot;],&quot;images&quot;:{&quot;thumbnail&quot;:&quot;t.jpg&quot;},&quot;type&quot;:&quot;submission&quot;}"><a href="/sites/aspen-search">x</a><span class="budget-tag--sotd"></span></div>`
   + `<div data-collectable-model-value="{&quot;slug&quot;:&quot;emergence-magazine&quot;,&quot;title&quot;:&quot;Emergence Magazine&quot;,&quot;createdAt&quot;:2,&quot;tags&quot;:[&quot;magazine&quot;],&quot;images&quot;:{&quot;thumbnail&quot;:&quot;b.jpg&quot;},&quot;type&quot;:&quot;submission&quot;}"><a href="/sites/emergence-magazine">x</a></div>`;
 const DETAIL = (slug, title) => `<html><head><meta property="og:title" content="${title}" /><meta property="og:description" content="desc ${title}" /></head><body><h1 class="heading-1 text-uppercase"> <a href="https://example-${slug}.com" target="_blank" rel="noopener">${title}</a></h1><h2>Technologies & Tools</h2><span class="button button--tag">GSAP</span><h2>Elements</h2><div>none</div><h2>Color Palette</h2><strong>HEX</strong> #FFFFFF</body></html>`;

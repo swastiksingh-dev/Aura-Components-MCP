@@ -580,3 +580,61 @@ test("related discovery drops malformed rows, keeps free-only upstream filter", 
   assert.equal(rel.related.length, 1);
   assert.equal(rel.related[0].id, 2);
 });
+
+test("refusal judges best row, not first: irrelevant leader cannot veto matches", async () => {
+  const calls = [];
+  const stub = { getJson: async (url) => {
+    calls.push(url);
+    if (calls.length === 1) return { rows: [], total: 0 };
+    return { rows: [
+      { id: 1, title: "Unrelated Stuff", slug: "S1", views: 9999, created_by: null },
+      { id: 2, title: "SaaS Hero Section", slug: "S2", views: 3, created_by: null },
+    ], total: 2 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "red glassy saas page", limit: 5 });
+  assert.ok(r.items.length > 0, "matching row survives despite irrelevant views-leader");
+  assert.equal(r.items[0].id, 2, "best-overlap row leads");
+  assert.ok(!r.no_match);
+  assert.ok(String(r.fallback_score).startsWith("token-overlap:1/4"), "score refreshed to returned rows, got: " + r.fallback_score);
+});
+
+test("refusal still empties when NO row matches", async () => {  const calls = [];
+  const stub = { getJson: async (url) => {
+    calls.push(url);
+    if (calls.length === 1) return { rows: [], total: 0 };
+    return { rows: [
+      { id: 1, title: "Unrelated Stuff", slug: "S1", views: 9999, created_by: null },
+      { id: 2, title: "Other Things", slug: "S2", views: 5, created_by: null },
+    ], total: 2 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "red glassy saas page", limit: 5 });
+  assert.equal(r.items.length, 0);
+  assert.equal(r.no_match, true);
+});
+
+test("queryTokens drops hex noise but keeps real words", async () => {
+  const { queryTokens } = await import("../src/catalog.mjs");
+  assert.deepEqual(queryTokens("Dark red glassy SaaS page #0a0a0b with #ff2a2a accents"), ["red", "glassy", "saas", "page"]);
+  assert.ok(queryTokens("add face beefed decade hero").includes("face"));
+});
+
+test("themed refusal: 0-hit theme-leader cannot veto a matching row (global max)", async () => {
+  const calls = [];
+  const { facets } = await import("../src/guide.mjs");
+  const stub = { getJson: async (url) => {
+    calls.push(url);
+    if (calls.length === 1) return { rows: [], total: 0 };
+    return { rows: [
+      { id: 1, title: "Dark Analytic Dashboard", slug: "S1", code: "<div class=x bg-black></div>", background: "000000", views: 9999, created_by: null },
+      { id: 2, title: "SaaS Hero Section", slug: "S2", code: "<div class=x bg-white></div>", background: "ffffff", views: 3, created_by: null },
+    ], total: 2 };
+  } };
+  const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: facets });
+  const r = await cat.searchCatalog("components", { query: "dark red glassy saas page", limit: 5 });
+  assert.equal(r.items.length, 2, "matching light row survives the dark 0-hit leader");
+  assert.equal(r.items[0].id, 1, "theme-first ordering kept: dark leader still leads");
+  assert.ok(!r.no_match);
+  assert.ok(String(r.fallback_score).startsWith("token-overlap:1/4"), "score reflects the global best, got: " + r.fallback_score);
+});

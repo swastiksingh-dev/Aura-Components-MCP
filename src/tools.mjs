@@ -3,7 +3,7 @@
 // (except aura_recommend's single bounded auto-retry + editorial fill).
 import { textResult } from './protocol.mjs';
 import { installGuide, tokenHints, buildPrompt, buildInspoRecommend, buildInspoComponents, buildInspoReference, buildInspoSystem, buildInspoCompare, buildDocsPlan, buildDocsCheck, docsStampFor, combineScaffold, INSPO_MACROS, INSPO_VIBES, INSPO_MODES } from './guide.mjs';
-import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementGallery, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, createAwardClient } from './awards.mjs';
+import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementGallery, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, awardStaticMotion, createAwardClient } from './awards.mjs';
 import { createAwardIndex } from './awards-index.mjs';
 import { cdpResolveViewport, cdpCollapseBands, cdpBandsFromHtml, createCdpConn, findChromeExecutable, findFfmpeg, createBrowserAdapter, reduceCdpScan } from './browser-cdp.mjs';
 const SORTS = ['popular', 'recent', 'trending', 'updated'];
@@ -129,7 +129,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
   function awardMode(v, allowed, name) { if (v === undefined) bad(name + ' is required'); if (!allowed.includes(v)) bad(name + ' must be one of ' + allowed.join('|')); return v; }
   function awardLimit(v, def, max) { if (v === undefined) return def; if (typeof v !== 'number' || !Number.isFinite(v)) bad('limit must be a number'); return Math.max(1, Math.min(Math.floor(v), max)); }
   function awardStrArr(v, name, max) { if (v === undefined) return undefined; if (!Array.isArray(v)) bad(name + ' must be an array of strings'); if (v.length > max) bad(name + ' holds max ' + max + ' entries'); for (const e of v) if (typeof e !== 'string' || !e.trim()) bad(name + ' must hold non-empty strings'); return v.map((e) => e.trim()); }
-  async function awardDetailFor(slug) {
+  async function awardDetailFor(slug, { withStatic = false } = {}) {
     const norm = awardNormalizeSlug(slug);
     const cached = awardIndex.getSite(norm);
     if (!awardClient) return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: 'award client not wired' };
@@ -151,7 +151,13 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         const media = awardParseElementsSection(html);
         if (media && media.length) awardIndex.upsertElements(media.map((m) => ({ slug: 'site-' + norm + '-' + String(m.title || 'element').toLowerCase().replace(/\W+/g, '-').slice(0, 60), title: m.title || 'Element', author: summary.studio || summary.title, builtWith: [], related: [], mediaPath: m.mediaPath, mediaType: String(m.mediaPath).endsWith('.mp4') ? 'video' : 'image', mediaUrl: awardElementUrl(m.mediaPath), category: 'uncategorized', siteSlug: norm, source: 'site', sourceUrl: summary.sourceUrl })));
       } catch { /* backfill best-effort */ }
-      return { slug: norm, summary, detail, detailStatus: 'fetched', liveError: null };
+      // Static motion cues (opt-in per caller: one extra bounded fetch).
+      // Recorded studies stay authoritative; static markup is supplementary.
+      let motionStatic = null;
+      if (withStatic && summary.liveUrl) {
+        try { motionStatic = await awardStaticMotion(summary.liveUrl); } catch { motionStatic = { status: "unavailable", url: summary.liveUrl, reason: "static scan failed" }; }
+      }
+      return { slug: norm, summary, detail, detailStatus: 'fetched', liveError: null, ...(motionStatic ? { motion_static: motionStatic } : {}) };
     } catch (e) {
       if (e && e.code === 'NOT_FOUND') throw e;
       return { slug: norm, summary: cached, detail: null, detailStatus: cached ? 'cached' : 'unavailable', liveError: String((e && e.message) || e).slice(0, 220) };
@@ -327,7 +333,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       const sysItem = sys && sys.item ? sys.item : null;
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
-      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, ...(sysItem ? {} : { system_note: 'no design system matched this goal — tokens.css is empty; fetch one via aura_search_design_systems or proceed with component defaults' }), components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
     aura_award_search: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['sites', 'categories', 'elements', 'motion'], 'mode');
       const limit = awardLimit(a.limit, 5, 25); const offset = Math.max(0, a.offset ?? 0); const full = a.full === undefined ? false : bool(a.full, 'full');
       if (mode === 'categories') {
@@ -434,12 +440,12 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, technologyFamilies: cmp.sharedTechFamilies, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
       }
       const slug = awardNormalizeSlug(a.slug || bad('slug (string) is required'));
-      const d = await awardDetailFor(slug);
+      const d = await awardDetailFor(slug, { withStatic: true });
       if (!d.summary && !d.detail) { const e = new Error('site not found: ' + slug); e.code = 'NOT_FOUND'; throw e; }
       if (mode === 'site_details') {
         let motion = null;
         try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(slug)) || null; } catch { motion = null; }
-        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, ideas: awardSiteIdeas(d.detail), motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
+        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, ideas: awardSiteIdeas(d.detail), ideas_contract: '0-6 ideas by held evidence (1 on thin evidence is valid); every idea is status:suggested with an observed basis, never stated fact', motion: motion || null, motion_static: d.motion_static || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', motion_static: d.motion_static ? d.motion_static.status : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
       }
       // site_elements
       let elements = [];
@@ -460,7 +466,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       const constraints = Array.isArray(a.constraints) ? a.constraints.filter((c) => typeof c === 'string').map((c) => c.slice(0, 200)).slice(0, 8) : [];
       const includeStructure = a.includeStructure === undefined ? false : bool(a.includeStructure, 'includeStructure');
       const details = (await Promise.all(normed.map(async (s) => {
-        try { return await awardDetailFor(s); }
+        try { return await awardDetailFor(s, { withStatic: true }); }
         catch (e) {
           if (e && e.code === 'NOT_FOUND') throw e;
           return { slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) };
@@ -490,9 +496,11 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         const sectionResults = await Promise.all(queries.map(async ({ section, q }) => {
           try {
             const r = await catalog.searchCatalog('components', { query: q, freeOnly: true, limit: 2, ...(themeWord ? { theme: themeWord } : {}) });
-            return { section, q, items: (r.items || []).slice(0, 1) };
-          } catch { return { section, q, items: [] }; }
+            return { section, q, items: (r.items || []).slice(0, 1), fallback: r && r.isFallback ? (r.fallback || 'fallback') : null };
+          } catch { return { section, q, items: [], fallback: null }; }
         }));
+        const fbBySection = {};
+        for (const { section, fallback } of sectionResults) if (fallback && !(section in fbBySection)) fbBySection[section] = fallback;
         for (const { section, q, items } of sectionResults) {
           if (auraMatches.length >= 12) break;
           for (const it of items) {
@@ -500,7 +508,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
             const key = String(it.id || it.slug);
             if (seen.has(key)) continue;
             seen.add(key);
-            auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
+            auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"', matchEvidence: { fallback: fbBySection[section] || null } });
             break;
           }
         }
@@ -549,11 +557,19 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       for (const d of details) {
         if (!d.detail) gaps.push(d.slug + ': reference detail unavailable' + (d.liveError ? ' (' + d.liveError + ')' : ''));
       }
+      const staticCues = [];
+      for (const d of details) {
+        const st = d.motion_static;
+        if (st && st.status === 'static-markup') staticCues.push(d.slug + ': ' + [st.libs.length ? st.libs.join('+') : 'vanilla', st.keyframes ? st.keyframes + ' keyframes' : null, st.transitions ? st.transitions + ' transitions' : null, st.canvases ? st.canvases + ' canvas' : null, st.scrollCues.length ? 'cues(' + st.scrollCues.slice(0, 4).join(',') + ')' : null].filter(Boolean).join(', '));
+      }
       try {
         const mr = awardIndex.searchMotion({ limit: 25 });
         const hits = (mr.items || []).filter((m) => normed.some((s) => String(m.url || '').toLowerCase().includes(s)));
         if (hits.length) motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; ');
-        else gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
+        else {
+          if (staticCues.length) motionNotes = 'Static markup cues (NOT runtime observation — record a study for trigger counts/easing): ' + staticCues.join(' | ');
+          gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
+        }
       } catch { /* ignore */ }
       if (!includeStructure) gaps.push('structure: not requested (pass includeStructure:true for measured band evidence)');
       if (auraUnavailable) gaps.push('catalogue: ' + auraUnavailable);
