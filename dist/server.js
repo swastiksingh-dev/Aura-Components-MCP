@@ -2024,14 +2024,19 @@ function awardSuggestQueries(query, taxonomy) {
   return [...new Set(out)].slice(0, 5);
 }
 function awardCompactSite(s, scoreInfo) {
+  const tags = (s.tags || []).slice(0, 8);
+  // try_for: agent-actionable cue derived ONLY from observed tags
+  // ("dark hero sections" from tags [dark, hero]) — absent when no tags.
+  const tryFor = tags.length ? "use for: " + tags.slice(0, 3).join(" ") + " sections" : null;
   return {
     slug: s.slug, title: s.title,
     sourceUrl: s.sourceUrl || awardSiteUrl(s.slug),
     liveUrl: s.liveUrl || null,
-    tags: (s.tags || []).slice(0, 8),
+    tags,
     awards: s.awards || [],
     studio: s.studio || null,
     previewUrl: s.thumbnailPath ? awardThumbnailUrl(s.thumbnailPath, 880) : (s.ogImage || null),
+    ...(tryFor ? { try_for: tryFor } : {}),
     ...(scoreInfo ? { relevance: scoreInfo.score, matchReasons: scoreInfo.reasons } : {}),
     evidence: { source: "awwwards", detailPath: s.detailPath || ("/sites/" + s.slug) },
   };
@@ -2039,6 +2044,28 @@ function awardCompactSite(s, scoreInfo) {
 function awardFullSite(s, detail, scoreInfo) {
   const base = awardCompactSite(s, scoreInfo);
   return { ...base, description: (detail && detail.description) || null, palette: (detail && detail.palette) || [], technologies: (detail && detail.technologies) || [], elements: (detail && detail.elements) || [], awardHistory: (detail && detail.awards) || [], score: (detail && detail.score) ?? null, nominee: !!(detail && detail.nominee), retrievedAt: (detail && detail.retrievedAt) || null };
+}
+
+// awardSiteIdeas: agent-usable design ideas derived ONLY from observed
+// detail fields. Every idea carries status:"suggested" + basis naming the
+// evidence — never presented as observed fact.
+function awardSiteIdeas(detail) {
+  if (!detail) return [];
+  const ideas = [];
+  const bands = new Set((detail.palette || []).map((c) => {
+    const l = awardLuminance(String(c).toUpperCase());
+    return l >= 0.7 ? "light" : l <= 0.3 ? "dark" : "mid";
+  }));
+  if (bands.has("dark") && !bands.has("light")) ideas.push({ idea: "near-black grounds with one saturated accent; keep body text light and verify 4.5:1", status: "suggested", basis: "observed palette skews dark" });
+  if (bands.has("light") && !bands.has("dark")) ideas.push({ idea: "light grounds with dark ink; reserve saturated hues for CTAs and focus rings", status: "suggested", basis: "observed palette skews light" });
+  const els = (detail.elements || []).join(" ").toLowerCase();
+  if (/hero/.test(els)) ideas.push({ idea: "full-viewport hero with a single primary CTA above the fold", status: "suggested", basis: "observed element: hero" });
+  if (/pricing|faq/.test(els)) ideas.push({ idea: "comparison table for pricing, accordion for faq — one pattern per section", status: "suggested", basis: "observed elements" });
+  if (/testimonial|review/.test(els)) ideas.push({ idea: "social proof as a logo strip plus 2–3 short quotes, not a carousel", status: "suggested", basis: "observed elements" });
+  const techs = (detail.technologies || []).join(" ").toLowerCase();
+  if (/gsap|scrolltrigger/.test(techs)) ideas.push({ idea: "scroll reveals under 500ms with scrub only on pinned storytelling", status: "suggested", basis: "observed technology: gsap" });
+  if (/webgl|three/.test(techs)) ideas.push({ idea: "keep WebGL to one hero canvas with a static-image fallback and reduced-motion off-switch", status: "suggested", basis: "observed technology: webgl" });
+  return ideas.slice(0, 6);
 }
 
 // ---- Polite fetch client (1 req/s, bounded, distinct errors) ----
@@ -2199,8 +2226,7 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
   const tech = awardFreq(usable.map((d) => ({ slug: d.slug, values: d.detail.technologies || [] })));
   const elements = awardFreq(usable.map((d) => ({ slug: d.slug, values: d.detail.elements || [] })));
   const paletteRaw = awardFreq(usable.map((d) => ({ slug: d.slug, values: (d.detail.palette || []).map((c) => String(c).toUpperCase()) })));
-  const palette = paletteRaw.map((p) => ({ ...p, luminanceBand: awardLuminance(p.value) >= 0.7 ? "light" : awardLuminance(p.value) <= 0.3 ? "dark" : "mid" }));
-  const tagged = [...tech.map((s) => ({ ...s, kind: "technology" })), ...elements.map((s) => ({ ...s, kind: "element" })), ...palette.map((s) => ({ ...s, kind: "palette" }))];
+  const palette = paletteRaw.map((p) => ({ ...p, luminanceBand: awardLuminance(p.value) >= 0.7 ? "light" : awardLuminance(p.value) <= 0.3 ? "dark" : "mid" }));  const tagged = [...tech.map((s) => ({ ...s, kind: "technology" })), ...elements.map((s) => ({ ...s, kind: "element" })), ...palette.map((s) => ({ ...s, kind: "palette" }))];
   const shared = tagged.filter((s) => s.frequency >= threshold).sort((a, b) => (b.frequency - a.frequency) || a.value.localeCompare(b.value));
   const outliers = usable.length >= 2 ? tagged.filter((s) => s.frequency === 1).sort((a, b) => a.value.localeCompare(b.value)).slice(0, 12) : [];
   const gaps = [];
@@ -2230,6 +2256,7 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
   if (shared.length) { lines.push(""); lines.push("### Shared patterns (observed)"); for (const s of shared.slice(0, 12)) lines.push("- " + s.kind + " `" + s.value + "` — " + s.frequency + "/" + usable.length + " refs (" + s.sourceSlugs.join(", ") + ")"); }
   if (outliers.length) { lines.push(""); lines.push("### One-site details (do not generalize)"); for (const s of outliers.slice(0, 8)) lines.push("- " + s.kind + " `" + s.value + "` — only in " + s.sourceSlugs.join(", ")); }
   if (palette.length) { lines.push(""); lines.push("### Palette evidence"); for (const p of palette.slice(0, 8)) lines.push("- `" + p.value + "` (" + p.luminanceBand + ") — " + p.frequency + "/" + usable.length + " refs"); }
+  let tokenGround = null, tokenInk = null, tokenAccents = [];
   if (requestedPalette.length) {
     lines.push("");
     lines.push("### Requested palette (proposed, not observed)");
@@ -2237,6 +2264,22 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
     for (const c of requestedPalette) lines.push("- `" + c + "` (" + (awardLuminance(c) >= 0.7 ? "light" : awardLuminance(c) <= 0.3 ? "dark" : "mid") + ", proposed)");
     const observedBands = [...new Set(palette.map((p) => p.luminanceBand))];
     if (observedBands.length) lines.push("- Refs skew " + observedBands.join("/") + "; keep their layout rhythm, recolor to the proposed tokens above.");
+    // Paste-ready starter: darkest requested hex = ground, lightest = text,
+    // the rest = accents — all labeled proposed, contrast to be verified.
+    const lum = requestedPalette.map((c) => ({ c, l: awardLuminance(c) })).sort((a, b) => a.l - b.l);
+    let ground = lum[0].c, ink = lum[lum.length - 1].c, inkDefaulted = false;
+    if (lum.length === 1) { ink = lum[0].l <= 0.3 ? "#F5F5F5" : "#111318"; inkDefaulted = true; }
+    tokenGround = ground; tokenInk = ink; tokenAccents = lum.slice(1, -1).map((x) => x.c);
+    const accents = lum.slice(1, -1).map((x) => x.c);
+    lines.push("");
+    lines.push("```css");
+    lines.push("/* proposed tokens — paste into styles/tokens.css first */");
+    lines.push(":root {");
+    lines.push("  --aw-ground: " + ground + "; --aw-ink: " + ink + ";" + (inkDefaulted ? " /* ink defaulted for contrast — verify */" : ""));
+    for (let i = 0; i < tokenAccents.length; i++) lines.push("  --aw-accent-" + (i + 1) + ": " + tokenAccents[i] + ";");
+    lines.push("  --aw-glass: color-mix(in srgb, var(--aw-ink) 8%, transparent);");
+    lines.push("}");
+    lines.push("```");
   }
   lines.push("");
   lines.push("## Aura matches (free-only, real catalogue rows)");
@@ -2275,6 +2318,7 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
     refs: (refs || []).map((slug) => ({ slug, sourceUrl: awardSiteUrl(slug) })),
     sharedPatterns: shared, outliers: outliers.slice(0, 12), palette,
     requestedPalette: requestedPalette.map((c) => ({ value: c, status: "proposed" })),
+    tokens_css: requestedPalette.length ? (":root{--aw-ground:" + tokenGround + ";--aw-ink:" + tokenInk + ";" + tokenAccents.map((c, i) => "--aw-accent-" + (i + 1) + ":" + c).join(";") + ";}") : "",
     auraMatches: matches.slice(0, 10),
     sections, constraints,
     confidence: usable.length >= 3 ? "medium" : usable.length === 2 ? "low-medium" : "low",
@@ -3463,14 +3507,17 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const ranked = query ? scored.filter((x) => x.score > 0).map((x) => ({ s: x.site, score: x.score, reasons: x.reasons })) : scored.map((x) => ({ s: x.site, score: x.score, reasons: x.reasons }));
       const total = ranked.length;
       const page = ranked.slice(offset, offset + limit);
-      const items = [];
-      for (const r of page) {
-        if (full) {
-          try { const d = await awardDetailFor(r.s.slug); items.push(awardFullSite(d.summary || r.s, d.detail, { score: r.score, reasons: r.reasons })); }
-          catch { items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons })); }
-        } else items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons }));
-      }
+      // Full-detail enrichment runs concurrently (the award client spaces
+      // requests 1/s) but is capped: enriching 25 rows would take ~25s.
+      const FULL_CAP = 5;
+      const enrich = full ? page.slice(0, FULL_CAP) : [];
+      const enriched = await Promise.all(enrich.map(async (r) => {
+        try { const d = await awardDetailFor(r.s.slug); return awardFullSite(d.summary || r.s, d.detail, { score: r.score, reasons: r.reasons }); }
+        catch { return awardCompactSite(r.s, { score: r.score, reasons: r.reasons }); }
+      }));
+      const items = page.map((r, i) => (full && i < enriched.length ? enriched[i] : awardCompactSite(r.s, { score: r.score, reasons: r.reasons })));
       const out = { mode, query: query || null, tokens, total, limit, offset, items, source: liveRefreshed ? 'live' : 'local-index', ...(liveError ? { liveError } : {}),
+        ...(full && page.length > FULL_CAP ? { full_enrichment_capped: FULL_CAP, full_note: 'only the first ' + FULL_CAP + ' hits carry full detail (polite-fetch bound); the rest are compact' } : {}),
         corpusNote: liveRefreshed ? 'local index was empty; seeded from one polite live listing fetch (rebuild the index for depth)' : 'ranked from the local index; rebuild/refresh the index when stale' };
       if (!items.length && !liveError) { out.suggestions = awardSuggestQueries(query || 'portfolio', awardIndex.getTaxonomy()); out.note = 'zero-match (not a failure): try a suggestion'; }
       if (!items.length && liveError) out.note = 'upstream fetch failed; local index also empty — retry later, do not treat as zero-match';
@@ -3489,13 +3536,19 @@ function createHandlers(catalog, icons, version, awardDeps) {
         const slugs = awardStrArr(a.slugs, 'slugs', 3) || toolFn_bad('slugs (array of 2-3) is required');
         if (slugs.length < 2) toolFn_bad('compare_sites needs 2-3 slugs');
         const normed = slugs.map((s) => awardNormalizeSlug(s));
-        const entries = [];
-        for (const s of normed) {
-          const d = await awardDetailFor(s);
+        // Concurrent detail fetch (polite 1/s via the client); NOT_FOUND on
+        // any ref still throws, other failures stay per-ref unavailable.
+        const settled = await Promise.all(normed.map(async (s) => {
+          try { return { ok: true, d: await awardDetailFor(s) }; }
+          catch (e) { return { ok: false, slug: s, err: e }; }
+        }));
+        for (const r of settled) if (!r.ok && r.err && r.err.code === 'NOT_FOUND') throw r.err;
+        const entries = settled.map((r) => {
+          const s = r.ok ? r.d.slug : r.slug;
           let motion = null;
           try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(s)) || null; } catch { motion = null; }
-          entries.push({ slug: s, detail: d.detail, motion });
-        }
+          return { slug: s, detail: r.ok ? r.d.detail : null, motion };
+        });
         const cmp = awardCompareSites(entries);
         return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, technologyFamilies: cmp.sharedTechFamilies, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
       }
@@ -3505,7 +3558,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
       if (mode === 'site_details') {
         let motion = null;
         try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(slug)) || null; } catch { motion = null; }
-        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
+        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, ideas: awardSiteIdeas(d.detail), motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
       }
       // site_elements
       let elements = [];
@@ -3525,12 +3578,17 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const technology = toolFn_str(a.technology, 'technology'); const visualDirection = toolFn_str(a.visualDirection, 'visualDirection'); const responsive = toolFn_str(a.responsive, 'responsive');
       const constraints = Array.isArray(a.constraints) ? a.constraints.filter((c) => typeof c === 'string').map((c) => c.slice(0, 200)).slice(0, 8) : [];
       const includeStructure = a.includeStructure === undefined ? false : toolFn_bool(a.includeStructure, 'includeStructure');
-      const details = [];
-      for (const s of normed) { try { details.push(await awardDetailFor(s)); } catch (e) { if (e && e.code === 'NOT_FOUND') throw e; details.push({ slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) }); } }
+      const details = (await Promise.all(normed.map(async (s) => {
+        try { return await awardDetailFor(s); }
+        catch (e) {
+          if (e && e.code === 'NOT_FOUND') throw e;
+          return { slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) };
+        }
+      })));
       // Aura catalogue matches (real rows only; failures stay unavailable).
       // One query PER proposed section so every section gets a candidate —
       // theme words from the goal ride along (dark/light re-rank server-side).
-      const auraMatches = []; let auraUnavailable = null;
+      const auraMatches = []; let auraUnavailable = null; let sysSlugForScaffold = null;
       const SECTIONS = ['hero', 'proof', 'features', 'showcase', 'pricing', 'testimonials', 'faq', 'cta', 'footer'];
       try {
         if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
@@ -3546,22 +3604,28 @@ function createHandlers(catalog, icons, version, awardDeps) {
           const q = [...new Set([sec, ...refWords.slice(0, 1), themeWord].filter(Boolean))].join(' ');
           queries.push({ section: sec, q });
         }
-        for (const { section, q } of queries) {
-          if (auraMatches.length >= 12) break;
+        // Section queries run concurrently (catalogue coalesces + caches);
+        // results re-assemble in section order with duplicate ids collapsed.
+        const sectionResults = await Promise.all(queries.map(async ({ section, q }) => {
           try {
             const r = await catalog.searchCatalog('components', { query: q, freeOnly: true, limit: 2, ...(themeWord ? { theme: themeWord } : {}) });
-            for (const it of (r.items || []).slice(0, 1)) {
-              if (!it || it.premium !== false) continue;
-              const key = String(it.id || it.slug);
-              if (seen.has(key)) continue;
-              seen.add(key);
-              auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
-            }
-          } catch { /* per-section failure tolerated, recorded below */ }
+            return { section, q, items: (r.items || []).slice(0, 1) };
+          } catch { return { section, q, items: [] }; }
+        }));
+        for (const { section, q, items } of sectionResults) {
+          if (auraMatches.length >= 12) break;
+          for (const it of items) {
+            if (!it || it.premium !== false) continue;
+            const key = String(it.id || it.slug);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
+            break;
+          }
         }
         try {
           const sys = await catalog.searchCatalog('design_systems', { query: goal, limit: 1 });
-          if (sys.items && sys.items[0]) auraMatches.unshift({ section: 'tokens', componentId: sys.items[0].slug || sys.items[0].id, componentTitle: sys.items[0].title, pageUrl: sys.items[0].page_url, why: 'design-system tokens first' });
+          if (sys.items && sys.items[0]) { auraMatches.unshift({ section: 'tokens', componentId: sys.items[0].slug || sys.items[0].id, componentTitle: sys.items[0].title, pageUrl: sys.items[0].page_url, why: 'design-system tokens first' }); sysSlugForScaffold = sys.items[0].slug || sys.items[0].id; }
         } catch { /* optional */ }
         const covered = new Set(auraMatches.map((m) => m.section));
         const uncovered = SECTIONS.filter((s) => !covered.has(s));
@@ -3589,14 +3653,13 @@ function createHandlers(catalog, icons, version, awardDeps) {
       if (includeStructure) {
         if (!awardBrowser) structureNotes = 'structure not captured: browser unavailable (install Chrome or set AURA_CHROME_PATH)';
         else {
-          const parts = [];
-          for (const s of normed.slice(0, 3)) {
+          const parts = await Promise.all(normed.slice(0, 3).map(async (s) => {
             const d = details.find((x) => x.slug === s);
             const live = d && d.detail && d.detail.liveUrl;
-            if (!live) { parts.push(s + ': no live URL in evidence'); continue; }
-            try { const st = await awardBrowser.structure(live, { viewport: 'desktop' }); parts.push(s + ': ' + st.bands.length + ' bands over ' + st.totalHeight + 'px (live-dom)'); }
-            catch (e) { parts.push(s + ': structure unavailable (' + String((e && e.message) || e).slice(0, 120) + ')'); }
-          }
+            if (!live) return s + ': no live URL in evidence';
+            try { const st = await awardBrowser.structure(live, { viewport: 'desktop' }); return s + ': ' + st.bands.length + ' bands over ' + st.totalHeight + 'px (live-dom)'; }
+            catch (e) { return s + ': structure unavailable (' + String((e && e.message) || e).slice(0, 120) + ')'; }
+          }));
           structureNotes = parts.join('; ');
         }
       }
@@ -3618,7 +3681,17 @@ function createHandlers(catalog, icons, version, awardDeps) {
       // against the refs' observed luminance bands.
       const requestedPalette = [...new Set([...String(goal + ' ' + (visualDirection || '')).matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)].map((m) => { const h = m[1]; return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toUpperCase(); }))].slice(0, 6);
       const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
-      return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
+      // next_calls: immediately executable follow-ups built ONLY from real
+      // ids/urls gathered above — the agent acts without another search round.
+      const compMatches = auraMatches.filter((m) => m.section !== 'tokens' && !m.editorial).slice(0, 3);
+      const nextCalls = compMatches.map((m) => ({ tool: 'aura_get_component', arguments: { id: m.componentId }, why: 'read full markup for the ' + m.section + ' pick before pasting' }));
+      const scaffoldComps = auraMatches.filter((m) => m.section !== 'tokens').slice(0, 8).map((m) => String(m.componentId));
+      if (scaffoldComps.length) nextCalls.push({ tool: 'aura_scaffold_page', arguments: { goal, ...(sysSlugForScaffold ? { system: sysSlugForScaffold } : {}), components: scaffoldComps }, why: 'one-turn page build from the matched kit (tokens first, then markup)' });
+      for (const d of details) {
+        if (d.detail && d.detail.liveUrl) nextCalls.push({ tool: 'aura_motion_study', arguments: { mode: 'inspect', url: d.detail.liveUrl }, why: 'record real motion evidence for ' + d.slug + ' before animating' });
+        if (nextCalls.length >= 6) break;
+      }
+      return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, next_calls: nextCalls, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
     aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'compare'], 'mode');
       const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
       const waitStrategy = a.waitStrategy === undefined ? 'load' : awardMode(a.waitStrategy, ['load', 'networkidle'], 'waitStrategy');

@@ -236,6 +236,11 @@ CDP setup failures (refused socket, hung attach) normalize to the same
 `BROWSER_UNAVAILABLE` code with a per-operation fallback hint — never a raw
 CDP timeout.
 
+```text
+The 6-call award loop (fast: details + section queries run concurrently):
+search → inspect → blueprint → follow its next_calls → audit → motion
+```
+
 **Two award servers?** If you also run `awwwards-mcp`, keep both or pick one:
 `aura_award_*` is canonical here — it's the only path that maps references to
 Aura's free catalogue inside `aura_design_blueprint`. The standalone server

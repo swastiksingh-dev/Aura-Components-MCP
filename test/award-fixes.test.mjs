@@ -269,3 +269,84 @@ test("follow-up-3: motion/capture errors carry fallback guidance", async () => {
     assert.ok(/dev server|npx serve|allowLocal/i.test(st.error.message), "combined message names both fixes, got: " + st.error.message.slice(0, 200));
   } finally { globalThis.fetch = prev; }
 });
+
+test("speed+UX: try_for cues, full-cap, parallel order, ideas, next_calls, tokens_css", async () => {
+  const { awardCompactSite, awardSiteIdeas, awardBuildBlueprint } = await import("../src/awards.mjs");
+  // try_for derived from tags only
+  const withTags = awardCompactSite({ slug: "a", title: "A", tags: ["dark", "hero"], detailPath: "/sites/a" }, null);
+  assert.equal(withTags.try_for, "use for: dark hero sections");
+  const noTags = awardCompactSite({ slug: "b", title: "B", tags: [], detailPath: "/sites/b" }, null);
+  assert.ok(!("try_for" in noTags), "no tags → no cue, never invented");
+  // ideas labeled suggested with basis; null detail → []
+  assert.deepEqual(awardSiteIdeas(null), []);
+  const ideas = awardSiteIdeas({ palette: ["#0A0A0B"], elements: ["Hero banner"], technologies: ["GSAP"] });
+  assert.ok(ideas.length >= 3);
+  assert.ok(ideas.every((i) => i.status === "suggested" && typeof i.basis === "string" && /observed/.test(i.basis)));
+  // tokens_css carries requested hexes; empty → ""
+  const built = awardBuildBlueprint({ goal: "dark page #0a0a0b with #ff2a2a", refs: ["aa", "bb"], details: [], auraMatches: [], requestedPalette: ["#0A0A0B", "#FF2A2A"], gaps: [] });
+  assert.ok(built.spec.tokens_css.includes("#0A0A0B") && built.spec.tokens_css.includes("#FF2A2A"));
+  assert.ok(built.markdown.includes("--aw-ground: #0A0A0B") && built.markdown.includes("--aw-ink: #FF2A2A"));
+  const bare = awardBuildBlueprint({ goal: "plain", refs: ["aa", "bb"], details: [], auraMatches: [], requestedPalette: [], gaps: [] });
+  assert.equal(bare.spec.tokens_css, "");
+  assert.ok(!bare.markdown.includes("--aw-ground:"));
+  // single-hex edge: ground ≠ ink
+  const single = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: [], auraMatches: [], requestedPalette: ["#0A0A0B"], gaps: [] });
+  assert.ok(single.spec.tokens_css.includes("--aw-ground:#0A0A0B") && single.spec.tokens_css.includes("--aw-ink:#F5F5F5"));
+});
+
+test("speed+UX: full:true caps enrichment at 5 with disclosure", async () => {
+  const listing = [1, 2, 3, 4, 5, 6, 7].map((n) => `<div data-collectable-model-value="{&quot;slug&quot;:&quot;site-${n}&quot;,&quot;title&quot;:&quot;Site ${n} portfolio&quot;,&quot;createdAt&quot;:1,&quot;tags&quot;:[&quot;portfolio&quot;],&quot;images&quot;:{},&quot;type&quot;:&quot;submission&quot;}"><a href="/sites/site-${n}">x</a></div>`).join("");
+  const client = { getAwardHtml: async () => ({ html: listing }) };
+  const h = createHandlers({}, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_award_search", { mode: "sites", query: "portfolio", limit: 7, full: true });
+  const r = JSON.parse(m.result.content[0].text);
+  assert.equal(r.items.length, 7);
+  assert.equal(r.full_enrichment_capped, 5);
+  assert.ok(r.items.slice(0, 5).every((i) => "palette" in i), "first 5 carry full detail");
+  assert.ok(r.items.slice(5).every((i) => !("palette" in i)), "rest stay compact");
+});
+
+test("speed+UX: blueprint details fetch concurrently, NOT_FOUND still throws", async () => {
+  const order = [];
+  const client = {
+    getAwardHtml: async (raw) => {
+      const p = String(raw).startsWith("http") ? new URL(String(raw)).pathname : String(raw);
+      const slug = p.split("/")[2];
+      order.push(slug);
+      await new Promise((r) => setTimeout(r, 20));
+      if (slug === "ghost-zz") { const e = new Error("gone"); e.code = "NOT_FOUND"; throw e; }
+      return { html: `<html><head><meta property="og:title" content="${slug}" /></head><body></body></html>` };
+    },
+  };
+  const catalog = { searchCatalog: async () => ({ items: [] }) };
+  const h = createHandlers(catalog, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const t0 = Date.now();
+  const m = await callWith(h, "aura_design_blueprint", { goal: "x", references: ["cc-aa", "cc-bb", "cc-cc"] });
+  const ms = Date.now() - t0;
+  const r = JSON.parse(m.result.content[0].text);
+  assert.ok(r.spec, "blueprint built");
+  assert.ok(ms < 3000, "3 details fetched concurrently, took " + ms + "ms");
+  const bad = await callWith(h, "aura_design_blueprint", { goal: "x", references: ["cc-aa", "ghost-zz"] });
+  assert.equal(bad.error.code, -32004, "unknown ref still surfaces NOT_FOUND");
+});
+
+test("speed+UX: next_calls use only real gathered ids/urls", async () => {
+  const detail = (slug, live) => `<html><head><meta property="og:title" content="${slug}" /></head><body>${live ? `<h1 class="heading-1 text-uppercase"> <a href="${live}" target="_blank" rel="noopener">${slug}</a></h1>` : ""}</body></html>`;
+  const client = { getAwardHtml: async (raw) => { const p = String(raw).startsWith("http") ? new URL(String(raw)).pathname : String(raw); const s = p.split("/")[2]; return { html: detail(s, s === "nc-aa" ? "https://nc-aa.example.com" : null) }; } };
+  const catalog = {
+    searchCatalog: async (kind, q) => kind === "components"
+      ? { items: [{ id: 441, title: "NC Hero", tags: ["hero"], page_url: "https://www.aura.build/component/441", premium: false }] }
+      : { items: [{ slug: "nc-sys", title: "NC Sys", page_url: "https://www.aura.build/design-systems/nc-sys" }] },
+  };
+  const h = createHandlers(catalog, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_design_blueprint", { goal: "nc test", references: ["nc-aa", "nc-bb"] });
+  const r = JSON.parse(m.result.content[0].text);
+  assert.ok(Array.isArray(r.next_calls) && r.next_calls.length > 0);
+  const get = r.next_calls.find((c) => c.tool === "aura_get_component");
+  assert.ok(get && get.arguments.id === 441, "get call uses the matched component id");
+  const scaf = r.next_calls.find((c) => c.tool === "aura_scaffold_page");
+  assert.ok(scaf && scaf.arguments.system === "nc-sys" && scaf.arguments.components.includes("441"), "scaffold reuses real system + component ids");
+  const mo = r.next_calls.find((c) => c.tool === "aura_motion_study");
+  assert.ok(mo && mo.arguments.url === "https://nc-aa.example.com", "motion call uses the observed liveUrl");
+  assert.ok(r.next_calls.every((c) => typeof c.why === "string"));
+});

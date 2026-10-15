@@ -3,7 +3,7 @@
 // (except aura_recommend's single bounded auto-retry + editorial fill).
 import { textResult } from './protocol.mjs';
 import { installGuide, tokenHints, buildPrompt, buildInspoRecommend, buildInspoComponents, buildInspoReference, buildInspoSystem, buildInspoCompare, buildDocsPlan, buildDocsCheck, docsStampFor, combineScaffold, INSPO_MACROS, INSPO_VIBES, INSPO_MODES } from './guide.mjs';
-import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementGallery, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, createAwardClient } from './awards.mjs';
+import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementGallery, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, createAwardClient } from './awards.mjs';
 import { createAwardIndex } from './awards-index.mjs';
 import { cdpResolveViewport, cdpCollapseBands, cdpBandsFromHtml, createCdpConn, findChromeExecutable, findFfmpeg, createBrowserAdapter, reduceCdpScan } from './browser-cdp.mjs';
 const SORTS = ['popular', 'recent', 'trending', 'updated'];
@@ -388,14 +388,17 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       const ranked = query ? scored.filter((x) => x.score > 0).map((x) => ({ s: x.site, score: x.score, reasons: x.reasons })) : scored.map((x) => ({ s: x.site, score: x.score, reasons: x.reasons }));
       const total = ranked.length;
       const page = ranked.slice(offset, offset + limit);
-      const items = [];
-      for (const r of page) {
-        if (full) {
-          try { const d = await awardDetailFor(r.s.slug); items.push(awardFullSite(d.summary || r.s, d.detail, { score: r.score, reasons: r.reasons })); }
-          catch { items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons })); }
-        } else items.push(awardCompactSite(r.s, { score: r.score, reasons: r.reasons }));
-      }
+      // Full-detail enrichment runs concurrently (the award client spaces
+      // requests 1/s) but is capped: enriching 25 rows would take ~25s.
+      const FULL_CAP = 5;
+      const enrich = full ? page.slice(0, FULL_CAP) : [];
+      const enriched = await Promise.all(enrich.map(async (r) => {
+        try { const d = await awardDetailFor(r.s.slug); return awardFullSite(d.summary || r.s, d.detail, { score: r.score, reasons: r.reasons }); }
+        catch { return awardCompactSite(r.s, { score: r.score, reasons: r.reasons }); }
+      }));
+      const items = page.map((r, i) => (full && i < enriched.length ? enriched[i] : awardCompactSite(r.s, { score: r.score, reasons: r.reasons })));
       const out = { mode, query: query || null, tokens, total, limit, offset, items, source: liveRefreshed ? 'live' : 'local-index', ...(liveError ? { liveError } : {}),
+        ...(full && page.length > FULL_CAP ? { full_enrichment_capped: FULL_CAP, full_note: 'only the first ' + FULL_CAP + ' hits carry full detail (polite-fetch bound); the rest are compact' } : {}),
         corpusNote: liveRefreshed ? 'local index was empty; seeded from one polite live listing fetch (rebuild the index for depth)' : 'ranked from the local index; rebuild/refresh the index when stale' };
       if (!items.length && !liveError) { out.suggestions = awardSuggestQueries(query || 'portfolio', awardIndex.getTaxonomy()); out.note = 'zero-match (not a failure): try a suggestion'; }
       if (!items.length && liveError) out.note = 'upstream fetch failed; local index also empty — retry later, do not treat as zero-match';
@@ -414,13 +417,19 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         const slugs = awardStrArr(a.slugs, 'slugs', 3) || bad('slugs (array of 2-3) is required');
         if (slugs.length < 2) bad('compare_sites needs 2-3 slugs');
         const normed = slugs.map((s) => awardNormalizeSlug(s));
-        const entries = [];
-        for (const s of normed) {
-          const d = await awardDetailFor(s);
+        // Concurrent detail fetch (polite 1/s via the client); NOT_FOUND on
+        // any ref still throws, other failures stay per-ref unavailable.
+        const settled = await Promise.all(normed.map(async (s) => {
+          try { return { ok: true, d: await awardDetailFor(s) }; }
+          catch (e) { return { ok: false, slug: s, err: e }; }
+        }));
+        for (const r of settled) if (!r.ok && r.err && r.err.code === 'NOT_FOUND') throw r.err;
+        const entries = settled.map((r) => {
+          const s = r.ok ? r.d.slug : r.slug;
           let motion = null;
           try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(s)) || null; } catch { motion = null; }
-          entries.push({ slug: s, detail: d.detail, motion });
-        }
+          return { slug: s, detail: r.ok ? r.d.detail : null, motion };
+        });
         const cmp = awardCompareSites(entries);
         return textResult({ mode, compared: cmp.per, shared: { technology: cmp.sharedTech, technologyFamilies: cmp.sharedTechFamilies, elements: cmp.sharedElements, elementKeywords: cmp.sharedElementKeywords, palette: cmp.sharedPalette, luminanceBands: cmp.sharedBands }, directionHints: cmp.directionHints, gaps: cmp.per.flatMap((p) => p.gaps.map((g) => p.slug + ': ' + g)), note: 'missing fields are unknown evidence, not negative proof' });
       }
@@ -430,7 +439,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       if (mode === 'site_details') {
         let motion = null;
         try { const mr = awardIndex.searchMotion({ limit: 25 }); motion = (mr.items || []).find((m) => String(m.url || '').toLowerCase().includes(slug)) || null; } catch { motion = null; }
-        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
+        return textResult({ mode, slug, summary: d.summary ? awardCompactSite(d.summary, null) : null, detail: d.detail, ideas: awardSiteIdeas(d.detail), motion: motion || null, evidence: { detail: d.detail ? d.detailStatus : 'unavailable', motion: motion ? 'cached' : 'unavailable', ...(d.liveError ? { liveError: d.liveError } : {}) } });
       }
       // site_elements
       let elements = [];
@@ -450,12 +459,17 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       const technology = str(a.technology, 'technology'); const visualDirection = str(a.visualDirection, 'visualDirection'); const responsive = str(a.responsive, 'responsive');
       const constraints = Array.isArray(a.constraints) ? a.constraints.filter((c) => typeof c === 'string').map((c) => c.slice(0, 200)).slice(0, 8) : [];
       const includeStructure = a.includeStructure === undefined ? false : bool(a.includeStructure, 'includeStructure');
-      const details = [];
-      for (const s of normed) { try { details.push(await awardDetailFor(s)); } catch (e) { if (e && e.code === 'NOT_FOUND') throw e; details.push({ slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) }); } }
+      const details = (await Promise.all(normed.map(async (s) => {
+        try { return await awardDetailFor(s); }
+        catch (e) {
+          if (e && e.code === 'NOT_FOUND') throw e;
+          return { slug: s, summary: awardIndex.getSite(s), detail: null, detailStatus: 'unavailable', liveError: String((e && e.message) || e).slice(0, 160) };
+        }
+      })));
       // Aura catalogue matches (real rows only; failures stay unavailable).
       // One query PER proposed section so every section gets a candidate —
       // theme words from the goal ride along (dark/light re-rank server-side).
-      const auraMatches = []; let auraUnavailable = null;
+      const auraMatches = []; let auraUnavailable = null; let sysSlugForScaffold = null;
       const SECTIONS = ['hero', 'proof', 'features', 'showcase', 'pricing', 'testimonials', 'faq', 'cta', 'footer'];
       try {
         if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
@@ -471,22 +485,28 @@ export function createHandlers(catalog, icons, version, awardDeps) {
           const q = [...new Set([sec, ...refWords.slice(0, 1), themeWord].filter(Boolean))].join(' ');
           queries.push({ section: sec, q });
         }
-        for (const { section, q } of queries) {
-          if (auraMatches.length >= 12) break;
+        // Section queries run concurrently (catalogue coalesces + caches);
+        // results re-assemble in section order with duplicate ids collapsed.
+        const sectionResults = await Promise.all(queries.map(async ({ section, q }) => {
           try {
             const r = await catalog.searchCatalog('components', { query: q, freeOnly: true, limit: 2, ...(themeWord ? { theme: themeWord } : {}) });
-            for (const it of (r.items || []).slice(0, 1)) {
-              if (!it || it.premium !== false) continue;
-              const key = String(it.id || it.slug);
-              if (seen.has(key)) continue;
-              seen.add(key);
-              auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
-            }
-          } catch { /* per-section failure tolerated, recorded below */ }
+            return { section, q, items: (r.items || []).slice(0, 1) };
+          } catch { return { section, q, items: [] }; }
+        }));
+        for (const { section, q, items } of sectionResults) {
+          if (auraMatches.length >= 12) break;
+          for (const it of items) {
+            if (!it || it.premium !== false) continue;
+            const key = String(it.id || it.slug);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            auraMatches.push({ section, componentId: it.id ?? it.slug, componentTitle: it.title, pageUrl: it.page_url, why: 'catalogue match for "' + q + '"' });
+            break;
+          }
         }
         try {
           const sys = await catalog.searchCatalog('design_systems', { query: goal, limit: 1 });
-          if (sys.items && sys.items[0]) auraMatches.unshift({ section: 'tokens', componentId: sys.items[0].slug || sys.items[0].id, componentTitle: sys.items[0].title, pageUrl: sys.items[0].page_url, why: 'design-system tokens first' });
+          if (sys.items && sys.items[0]) { auraMatches.unshift({ section: 'tokens', componentId: sys.items[0].slug || sys.items[0].id, componentTitle: sys.items[0].title, pageUrl: sys.items[0].page_url, why: 'design-system tokens first' }); sysSlugForScaffold = sys.items[0].slug || sys.items[0].id; }
         } catch { /* optional */ }
         const covered = new Set(auraMatches.map((m) => m.section));
         const uncovered = SECTIONS.filter((s) => !covered.has(s));
@@ -514,14 +534,13 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       if (includeStructure) {
         if (!awardBrowser) structureNotes = 'structure not captured: browser unavailable (install Chrome or set AURA_CHROME_PATH)';
         else {
-          const parts = [];
-          for (const s of normed.slice(0, 3)) {
+          const parts = await Promise.all(normed.slice(0, 3).map(async (s) => {
             const d = details.find((x) => x.slug === s);
             const live = d && d.detail && d.detail.liveUrl;
-            if (!live) { parts.push(s + ': no live URL in evidence'); continue; }
-            try { const st = await awardBrowser.structure(live, { viewport: 'desktop' }); parts.push(s + ': ' + st.bands.length + ' bands over ' + st.totalHeight + 'px (live-dom)'); }
-            catch (e) { parts.push(s + ': structure unavailable (' + String((e && e.message) || e).slice(0, 120) + ')'); }
-          }
+            if (!live) return s + ': no live URL in evidence';
+            try { const st = await awardBrowser.structure(live, { viewport: 'desktop' }); return s + ': ' + st.bands.length + ' bands over ' + st.totalHeight + 'px (live-dom)'; }
+            catch (e) { return s + ': structure unavailable (' + String((e && e.message) || e).slice(0, 120) + ')'; }
+          }));
           structureNotes = parts.join('; ');
         }
       }
@@ -543,7 +562,17 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       // against the refs' observed luminance bands.
       const requestedPalette = [...new Set([...String(goal + ' ' + (visualDirection || '')).matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)].map((m) => { const h = m[1]; return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toUpperCase(); }))].slice(0, 6);
       const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
-      return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
+      // next_calls: immediately executable follow-ups built ONLY from real
+      // ids/urls gathered above — the agent acts without another search round.
+      const compMatches = auraMatches.filter((m) => m.section !== 'tokens' && !m.editorial).slice(0, 3);
+      const nextCalls = compMatches.map((m) => ({ tool: 'aura_get_component', arguments: { id: m.componentId }, why: 'read full markup for the ' + m.section + ' pick before pasting' }));
+      const scaffoldComps = auraMatches.filter((m) => m.section !== 'tokens').slice(0, 8).map((m) => String(m.componentId));
+      if (scaffoldComps.length) nextCalls.push({ tool: 'aura_scaffold_page', arguments: { goal, ...(sysSlugForScaffold ? { system: sysSlugForScaffold } : {}), components: scaffoldComps }, why: 'one-turn page build from the matched kit (tokens first, then markup)' });
+      for (const d of details) {
+        if (d.detail && d.detail.liveUrl) nextCalls.push({ tool: 'aura_motion_study', arguments: { mode: 'inspect', url: d.detail.liveUrl }, why: 'record real motion evidence for ' + d.slug + ' before animating' });
+        if (nextCalls.length >= 6) break;
+      }
+      return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, next_calls: nextCalls, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
     aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'compare'], 'mode');
       const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
       const waitStrategy = a.waitStrategy === undefined ? 'load' : awardMode(a.waitStrategy, ['load', 'networkidle'], 'waitStrategy');

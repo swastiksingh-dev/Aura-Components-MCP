@@ -69,7 +69,17 @@ release.
   search response carries `source` + `corpusNote` documenting the
   seed-once-then-local rule.
 
-### Fixed — 10/10 follow-up (4 field issues)
+### Fixed — agent-speed + output pass (parallel fetch, actionable briefs)
+
+- `aura_design_blueprint` details (≤5 refs), all 9 section queries, `compare`
+  refs, and `includeStructure` targets now fetch concurrently (order
+  preserved; award client still spaces requests 1/s; `NOT_FOUND` still
+  throws). `search{full:true}` enriches max 5 hits with disclosure.
+- Search hits carry tag-derived `try_for` cues; `site_details` carries
+  rule-based `ideas` (every one `status:suggested` + evidence `basis`).
+- Blueprints return executable `next_calls` (`aura_get_component`,
+  `aura_scaffold_page`, `aura_motion_study`) built only from gathered
+  ids/urls, plus paste-ready `:root` tokens (`spec.tokens_css`).
 
 - `aura_award_search{mode:elements}` no longer crashes in `dist`: the build
   renamer rewrote `Array.sort(` into `.toolFn_sort(` (src tests stayed green,

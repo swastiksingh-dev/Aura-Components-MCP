@@ -372,14 +372,19 @@ export function awardSuggestQueries(query, taxonomy) {
   return [...new Set(out)].slice(0, 5);
 }
 export function awardCompactSite(s, scoreInfo) {
+  const tags = (s.tags || []).slice(0, 8);
+  // try_for: agent-actionable cue derived ONLY from observed tags
+  // ("dark hero sections" from tags [dark, hero]) — absent when no tags.
+  const tryFor = tags.length ? "use for: " + tags.slice(0, 3).join(" ") + " sections" : null;
   return {
     slug: s.slug, title: s.title,
     sourceUrl: s.sourceUrl || awardSiteUrl(s.slug),
     liveUrl: s.liveUrl || null,
-    tags: (s.tags || []).slice(0, 8),
+    tags,
     awards: s.awards || [],
     studio: s.studio || null,
     previewUrl: s.thumbnailPath ? awardThumbnailUrl(s.thumbnailPath, 880) : (s.ogImage || null),
+    ...(tryFor ? { try_for: tryFor } : {}),
     ...(scoreInfo ? { relevance: scoreInfo.score, matchReasons: scoreInfo.reasons } : {}),
     evidence: { source: "awwwards", detailPath: s.detailPath || ("/sites/" + s.slug) },
   };
@@ -387,6 +392,28 @@ export function awardCompactSite(s, scoreInfo) {
 export function awardFullSite(s, detail, scoreInfo) {
   const base = awardCompactSite(s, scoreInfo);
   return { ...base, description: (detail && detail.description) || null, palette: (detail && detail.palette) || [], technologies: (detail && detail.technologies) || [], elements: (detail && detail.elements) || [], awardHistory: (detail && detail.awards) || [], score: (detail && detail.score) ?? null, nominee: !!(detail && detail.nominee), retrievedAt: (detail && detail.retrievedAt) || null };
+}
+
+// awardSiteIdeas: agent-usable design ideas derived ONLY from observed
+// detail fields. Every idea carries status:"suggested" + basis naming the
+// evidence — never presented as observed fact.
+export function awardSiteIdeas(detail) {
+  if (!detail) return [];
+  const ideas = [];
+  const bands = new Set((detail.palette || []).map((c) => {
+    const l = awardLuminance(String(c).toUpperCase());
+    return l >= 0.7 ? "light" : l <= 0.3 ? "dark" : "mid";
+  }));
+  if (bands.has("dark") && !bands.has("light")) ideas.push({ idea: "near-black grounds with one saturated accent; keep body text light and verify 4.5:1", status: "suggested", basis: "observed palette skews dark" });
+  if (bands.has("light") && !bands.has("dark")) ideas.push({ idea: "light grounds with dark ink; reserve saturated hues for CTAs and focus rings", status: "suggested", basis: "observed palette skews light" });
+  const els = (detail.elements || []).join(" ").toLowerCase();
+  if (/hero/.test(els)) ideas.push({ idea: "full-viewport hero with a single primary CTA above the fold", status: "suggested", basis: "observed element: hero" });
+  if (/pricing|faq/.test(els)) ideas.push({ idea: "comparison table for pricing, accordion for faq — one pattern per section", status: "suggested", basis: "observed elements" });
+  if (/testimonial|review/.test(els)) ideas.push({ idea: "social proof as a logo strip plus 2–3 short quotes, not a carousel", status: "suggested", basis: "observed elements" });
+  const techs = (detail.technologies || []).join(" ").toLowerCase();
+  if (/gsap|scrolltrigger/.test(techs)) ideas.push({ idea: "scroll reveals under 500ms with scrub only on pinned storytelling", status: "suggested", basis: "observed technology: gsap" });
+  if (/webgl|three/.test(techs)) ideas.push({ idea: "keep WebGL to one hero canvas with a static-image fallback and reduced-motion off-switch", status: "suggested", basis: "observed technology: webgl" });
+  return ideas.slice(0, 6);
 }
 
 // ---- Polite fetch client (1 req/s, bounded, distinct errors) ----
@@ -547,8 +574,7 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
   const tech = awardFreq(usable.map((d) => ({ slug: d.slug, values: d.detail.technologies || [] })));
   const elements = awardFreq(usable.map((d) => ({ slug: d.slug, values: d.detail.elements || [] })));
   const paletteRaw = awardFreq(usable.map((d) => ({ slug: d.slug, values: (d.detail.palette || []).map((c) => String(c).toUpperCase()) })));
-  const palette = paletteRaw.map((p) => ({ ...p, luminanceBand: awardLuminance(p.value) >= 0.7 ? "light" : awardLuminance(p.value) <= 0.3 ? "dark" : "mid" }));
-  const tagged = [...tech.map((s) => ({ ...s, kind: "technology" })), ...elements.map((s) => ({ ...s, kind: "element" })), ...palette.map((s) => ({ ...s, kind: "palette" }))];
+  const palette = paletteRaw.map((p) => ({ ...p, luminanceBand: awardLuminance(p.value) >= 0.7 ? "light" : awardLuminance(p.value) <= 0.3 ? "dark" : "mid" }));  const tagged = [...tech.map((s) => ({ ...s, kind: "technology" })), ...elements.map((s) => ({ ...s, kind: "element" })), ...palette.map((s) => ({ ...s, kind: "palette" }))];
   const shared = tagged.filter((s) => s.frequency >= threshold).sort((a, b) => (b.frequency - a.frequency) || a.value.localeCompare(b.value));
   const outliers = usable.length >= 2 ? tagged.filter((s) => s.frequency === 1).sort((a, b) => a.value.localeCompare(b.value)).slice(0, 12) : [];
   const gaps = [];
@@ -578,6 +604,7 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
   if (shared.length) { lines.push(""); lines.push("### Shared patterns (observed)"); for (const s of shared.slice(0, 12)) lines.push("- " + s.kind + " `" + s.value + "` — " + s.frequency + "/" + usable.length + " refs (" + s.sourceSlugs.join(", ") + ")"); }
   if (outliers.length) { lines.push(""); lines.push("### One-site details (do not generalize)"); for (const s of outliers.slice(0, 8)) lines.push("- " + s.kind + " `" + s.value + "` — only in " + s.sourceSlugs.join(", ")); }
   if (palette.length) { lines.push(""); lines.push("### Palette evidence"); for (const p of palette.slice(0, 8)) lines.push("- `" + p.value + "` (" + p.luminanceBand + ") — " + p.frequency + "/" + usable.length + " refs"); }
+  let tokenGround = null, tokenInk = null, tokenAccents = [];
   if (requestedPalette.length) {
     lines.push("");
     lines.push("### Requested palette (proposed, not observed)");
@@ -585,6 +612,22 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
     for (const c of requestedPalette) lines.push("- `" + c + "` (" + (awardLuminance(c) >= 0.7 ? "light" : awardLuminance(c) <= 0.3 ? "dark" : "mid") + ", proposed)");
     const observedBands = [...new Set(palette.map((p) => p.luminanceBand))];
     if (observedBands.length) lines.push("- Refs skew " + observedBands.join("/") + "; keep their layout rhythm, recolor to the proposed tokens above.");
+    // Paste-ready starter: darkest requested hex = ground, lightest = text,
+    // the rest = accents — all labeled proposed, contrast to be verified.
+    const lum = requestedPalette.map((c) => ({ c, l: awardLuminance(c) })).sort((a, b) => a.l - b.l);
+    let ground = lum[0].c, ink = lum[lum.length - 1].c, inkDefaulted = false;
+    if (lum.length === 1) { ink = lum[0].l <= 0.3 ? "#F5F5F5" : "#111318"; inkDefaulted = true; }
+    tokenGround = ground; tokenInk = ink; tokenAccents = lum.slice(1, -1).map((x) => x.c);
+    const accents = lum.slice(1, -1).map((x) => x.c);
+    lines.push("");
+    lines.push("```css");
+    lines.push("/* proposed tokens — paste into styles/tokens.css first */");
+    lines.push(":root {");
+    lines.push("  --aw-ground: " + ground + "; --aw-ink: " + ink + ";" + (inkDefaulted ? " /* ink defaulted for contrast — verify */" : ""));
+    for (let i = 0; i < tokenAccents.length; i++) lines.push("  --aw-accent-" + (i + 1) + ": " + tokenAccents[i] + ";");
+    lines.push("  --aw-glass: color-mix(in srgb, var(--aw-ink) 8%, transparent);");
+    lines.push("}");
+    lines.push("```");
   }
   lines.push("");
   lines.push("## Aura matches (free-only, real catalogue rows)");
@@ -623,6 +666,7 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
     refs: (refs || []).map((slug) => ({ slug, sourceUrl: awardSiteUrl(slug) })),
     sharedPatterns: shared, outliers: outliers.slice(0, 12), palette,
     requestedPalette: requestedPalette.map((c) => ({ value: c, status: "proposed" })),
+    tokens_css: requestedPalette.length ? (":root{--aw-ground:" + tokenGround + ";--aw-ink:" + tokenInk + ";" + tokenAccents.map((c, i) => "--aw-accent-" + (i + 1) + ":" + c).join(";") + ";}") : "",
     auraMatches: matches.slice(0, 10),
     sections, constraints,
     confidence: usable.length >= 3 ? "medium" : usable.length === 2 ? "low-medium" : "low",
