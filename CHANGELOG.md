@@ -1,11 +1,13 @@
 # Changelog
 
-All notable changes to `aura-components-mcp`. The package version stays
-`1.7.1` until a new version is explicitly authorized — the award subsystem
-below ships in the working tree as `[Unreleased]`, not as a published
-release.
+All notable changes to `aura-components-mcp`.
 
 ## [Unreleased]
+
+## [1.7.2] — 2026-10-15
+
+35 tools: the six award-intelligence tools below join the 29 catalogue tools
+in the published package (no new npm dependencies).
 
 ### Added — award-website intelligence (6 new MCP tools, 29 → 35)
 

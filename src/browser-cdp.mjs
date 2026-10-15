@@ -452,6 +452,6 @@ export function reduceCdpScan(url, scan, t, viewport) {
     scroll: { triggerCount: st.count || 0, scrubCount: st.scrub || 0, pinCount: st.pin || 0, scrubRatio: st.count ? (st.scrub || 0) / st.count : 0, sample: (st.sample || []).slice(0, 20) },
     easingVocab: [...agg.values()].sort((a, b) => b.uses - a.uses).slice(0, 15),
     durationVocab: ms.length ? { p25: q(0.25), median: q(0.5), p75: q(0.75) } : null,
-    capturedAt: t, toolVersion: "aura/1.7.1", source: "live-browser",
+    capturedAt: t, toolVersion: "aura/1.7.2", source: "live-browser",
   };
 }

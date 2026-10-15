@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v1.7.1 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v1.7.2 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -30,7 +30,7 @@ function loadConfig(env = process.env) {
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     freeOnlyDefault: bool(env.AURA_FREE_ONLY_DEFAULT, true),
-    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.1",
+    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.2",
   };
 }
 
@@ -841,7 +841,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.1" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.2" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
@@ -1690,7 +1690,7 @@ function createVersion({ fetcher, running, now = () => Date.now() }) {
 const AWARD_SCHEMA_VERSION = 1;
 const AWARD_BASE_URL = "https://www.awwwards.com";
 const AWARD_ASSETS_URL = "https://assets.awwwards.com";
-const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.1";
+const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.2";
 const AWARD_ALLOWED_HOSTS = ["www.awwwards.com", "awwwards.com", "assets.awwwards.com"];
 const AWARD_TIMEOUT_MS = 10000;
 const AWARD_MAX_BYTES = 2 * 1024 * 1024;
@@ -3219,7 +3219,7 @@ function reduceCdpScan(url, scan, t, viewport) {
     scroll: { triggerCount: st.count || 0, scrubCount: st.scrub || 0, pinCount: st.pin || 0, scrubRatio: st.count ? (st.scrub || 0) / st.count : 0, sample: (st.sample || []).slice(0, 20) },
     easingVocab: [...agg.values()].sort((a, b) => b.uses - a.uses).slice(0, 15),
     durationVocab: ms.length ? { p25: q(0.25), median: q(0.5), p75: q(0.75) } : null,
-    capturedAt: t, toolVersion: "aura/1.7.1", source: "live-browser",
+    capturedAt: t, toolVersion: "aura/1.7.2", source: "live-browser",
   };
 }
 
@@ -3839,7 +3839,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
       };
       const isLocalInput = (raw) => typeof raw === 'string' && (/^file:\/\//i.test(raw) || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || /^[^/:?#]+\.html?([?#]|$)/i.test(raw));
       const fetchStatic = async (target) => {
-        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.1' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.2' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
         if (res.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
         if (!res.ok) throw awardErr('UPSTREAM_ERROR', 'HTTP ' + res.status + ' for ' + target);
         const text = await res.text();

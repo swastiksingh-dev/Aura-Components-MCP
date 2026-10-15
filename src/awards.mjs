@@ -9,7 +9,7 @@
 export const AWARD_SCHEMA_VERSION = 1;
 export const AWARD_BASE_URL = "https://www.awwwards.com";
 export const AWARD_ASSETS_URL = "https://assets.awwwards.com";
-export const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.1";
+export const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.2";
 export const AWARD_ALLOWED_HOSTS = ["www.awwwards.com", "awwwards.com", "assets.awwwards.com"];
 export const AWARD_TIMEOUT_MS = 10000;
 export const AWARD_MAX_BYTES = 2 * 1024 * 1024;

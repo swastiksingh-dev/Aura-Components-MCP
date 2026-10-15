@@ -18,8 +18,8 @@
 <p align="center">
   <a href="#install"><b>Install</b></a> ·
   <a href="#the-35-tools"><b>Tools</b></a> ·
-  <a href="./SETUP.md"><b>Client setup</b></a> ·
-  <a href="./CHANGELOG.md"><b>Changelog</b></a> ·
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md"><b>Client setup</b></a> ·
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/CHANGELOG.md"><b>Changelog</b></a> ·
   <a href="#credits"><b>Credits</b></a>
 </p>
 
@@ -89,7 +89,7 @@ Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good a
 - 192 agent skills with full SKILL.md bodies (GSAP, Tailwind v4, Anime.js, copywriting, and more)
 - 30,688 images and clips with direct CDN URLs at multiple widths
 - 725 DESIGN.md systems with tokens, type rules, layout notes, and preview HTML
-- 35 tools over stdio (29 catalogue + 6 award-intelligence in source; npm 1.7.1 ships 29), one bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
+- 35 tools over stdio (29 catalogue + 6 award-intelligence), one bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff
 - Award corpus: file-based JSON index (`~/.aura-mcp/awards`) with atomic writes, resume checkpoints, winner baselines, watches; polite ~1 req/s Awwwards fetching with distinct 404/403+429/5xx/timeout handling
 - Honest search: AND-phrase misses retry as OR-tokens (2 passes) plus a labeled safety net — but zero title-overlap fallbacks are refused as `total:0` + `no_match` + `suggested_queries` instead of masking with popular rows; `exact_match:true` skips fallbacks entirely
 - Agent accelerators: `aura_prompt` (2-pass prompt with user confirmation), `aura_bulk_fetch`/`aura_bundle` (8 details/turn, any of 3 kinds), `aura_scaffold_page` (tokens + system + markup in dependency order), `aura_related`, `aura_install_asset` (license-aware)
@@ -123,14 +123,14 @@ aura-components-mcp
 npx -y aura-components-mcp@latest
 ```
 
-Then register it in your client. Full per-client steps live in [SETUP.md](./SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio.
+Then register it in your client. Full per-client steps live in [SETUP.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio.
 
 <p align="center">
-  <a href="./SETUP.md#claude-code"><img src="https://img.shields.io/badge/Claude_Code-setup-black" alt="Claude Code setup"></a>
-  <a href="./SETUP.md#cursor"><img src="https://img.shields.io/badge/Cursor-setup-black" alt="Cursor setup"></a>
-  <a href="./SETUP.md#codex"><img src="https://img.shields.io/badge/Codex-setup-black" alt="Codex setup"></a>
-  <a href="./SETUP.md#opencode"><img src="https://img.shields.io/badge/OpenCode-setup-black" alt="OpenCode setup"></a>
-  <a href="./SETUP.md#any-other-mcp-client"><img src="https://img.shields.io/badge/any_stdio_client-setup-black" alt="Any stdio client setup"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#claude-code"><img src="https://img.shields.io/badge/Claude_Code-setup-black" alt="Claude Code setup"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#cursor"><img src="https://img.shields.io/badge/Cursor-setup-black" alt="Cursor setup"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#codex"><img src="https://img.shields.io/badge/Codex-setup-black" alt="Codex setup"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#opencode"><img src="https://img.shields.io/badge/OpenCode-setup-black" alt="OpenCode setup"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#any-other-mcp-client"><img src="https://img.shields.io/badge/any_stdio_client-setup-black" alt="Any stdio client setup"></a>
 </p>
 
 ```bash
@@ -154,7 +154,7 @@ claude mcp add aura-components -- node ./dist/server.js
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ CLICK TO WATCH THE 10-SECOND FLOW TOUR (MP4) ▲</b></a>
-  <br><em>Same file as <a href="./assets/heart-demo.mp4">assets/heart-demo.mp4</a></em>
+  <br><em>Same file as <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/assets/heart-demo.mp4">assets/heart-demo.mp4</a></em>
 </p>
 
 *`aura_prompt` turns one sentence into a confirmed prompt, `aura_recommend` turns it into a starter kit with links. Full clip in [`assets/`](assets/).*
@@ -165,10 +165,7 @@ claude mcp add aura-components -- node ./dist/server.js
 
 Start with `aura_status`, then `aura_search_all`. That order matters: status confirms the catalogue is reachable, search_all shows which surface has the best match before you spend calls on details.
 
-> **Unreleased (working tree):** six award-intelligence tools (`aura_award_*`,
-> `aura_design_blueprint`, `aura_visual_audit`, `aura_motion_study`) extend the
-> 29 published tools to 35 in source. The published npm `1.7.1` package contains
-> only the 29. See [CHANGELOG.md](./CHANGELOG.md).
+> **v1.7.2** — 35 tools: the six award-intelligence tools (`aura_award_search`, `aura_award_inspect`, `aura_design_blueprint`, `aura_visual_audit`, `aura_motion_study`, `aura_award_index`) join the 29 catalogue tools — ranked Awwwards references with `try_for` cues, design DNA with suggested `ideas`, blueprints with paste-ready tokens + executable `next_calls`, graceful browserless fallbacks, and a persistent local corpus. See [CHANGELOG.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/CHANGELOG.md).
 
 ### Find
 
@@ -219,7 +216,7 @@ Start with `aura_status`, then `aura_search_all`. That order matters: status con
 | `aura_version` | Running vs npm-published version (live, hourly cache). `update_available` + prefer-latest notice. `aura_status` carries the verdict on every call. |
 | `aura_version` | Running vs npm-published version (live, hourly cache). `update_available` + prefer-latest notice. `aura_status` carries the verdict on every call. |
 
-### Award intelligence (unreleased in source — 6 tools, zero npm deps)
+### Award intelligence (new in v1.7.2 — 6 tools, zero npm deps)
 
 Search → inspect → blueprint → audit → motion. Core search/index work with no
 browser; live capture needs Chrome (see setup below).
@@ -330,7 +327,7 @@ New landing page, dark cinematic portfolio, SaaS pricing section. The shape is t
 4. `aura_install_component` on the winner. Follow the file map.
 5. `aura_use_design_system` once, before any markup, so tokens land first.
 
-Prompts that work well are in [SETUP.md](./SETUP.md#prompts-that-work).
+Prompts that work well are in [SETUP.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#prompts-that-work).
 
 ---
 ## Free only, no login
@@ -370,7 +367,7 @@ Layout: `src/config.mjs` holds env parsing. `src/http.mjs` hides timeouts and re
 ## Share
 
 
-Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Components-MCP](https://github.com/swastiksingh-dev/Aura-Components-MCP). Reposits welcome — see [DIRECTION.md](./DIRECTION.md) for where this is headed.
+Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Components-MCP](https://github.com/swastiksingh-dev/Aura-Components-MCP). Reposits welcome — see [DIRECTION.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/DIRECTION.md) for where this is headed.
 
 [![Star History Chart](https://api.star-history.com/svg?repos=swastiksingh-dev/Aura-Components-MCP&type=Date)](https://star-history.com/#swastiksingh-dev/Aura-Components-MCP&Date)
 
@@ -424,12 +421,12 @@ Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Fre
 | [Context7](https://context7.com) | Fresh library docs behind `aura_docs_*` (trusted: Tailwind CSS, GSAP, Lenis, Iconify) | Docs belong to their projects |
 | [Font Awesome Free](https://fontawesome.com) | Icons via `aura_icon` (served from jsDelivr + cdnjs) | [CC BY 4.0](https://fontawesome.com/license/free) — credit on every hit, enforced by the tool |
 | [HackerNoon Pixel Icon Library](https://github.com/hackernoon/pixel-icon-library) ([site](https://pixeliconlibrary.com)) | Pixel icons via `aura_icon` (served from jsDelivr) | Icons CC BY 4.0, other files MIT — credit on every hit, enforced by the tool |
-| [Awwwards](https://www.awwwards.com) | Award-website references behind `aura_award_*` (metadata + Awwwards-CDN media URLs, never mirrored) | Screenshots/designs belong to Awwwards + credited creators — personal-inspiration use at ~1 req/s, honor robots.txt; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) |
-| [awwwards-mcp](https://github.com/INSANE0777/Awwwards-mcp) by [INSANE0777](https://github.com/INSANE0777) | Behavioral inspiration for the six award tools (site discovery, design DNA, elements, briefs, indexing, capture, motion, winners, watches) — reimplemented natively, zero code copied | [MIT](https://github.com/INSANE0777/Awwwards-mcp/blob/main/LICENSE) © 2026 Afjal — permission notice preserved in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) |
+| [Awwwards](https://www.awwwards.com) | Award-website references behind `aura_award_*` (metadata + Awwwards-CDN media URLs, never mirrored) | Screenshots/designs belong to Awwwards + credited creators — personal-inspiration use at ~1 req/s, honor robots.txt; see [THIRD_PARTY_NOTICES.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/THIRD_PARTY_NOTICES.md) |
+| [awwwards-mcp](https://github.com/INSANE0777/Awwwards-mcp) by [INSANE0777](https://github.com/INSANE0777) | Behavioral inspiration for the six award tools (site discovery, design DNA, elements, briefs, indexing, capture, motion, winners, watches) — reimplemented natively, zero code copied | [MIT](https://github.com/INSANE0777/Awwwards-mcp/blob/main/LICENSE) © 2026 Afjal — permission notice preserved in [THIRD_PARTY_NOTICES.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/THIRD_PARTY_NOTICES.md) |
 | Upstream libraries (Tailwind CSS, GSAP, Lenis, Iconify) | The code this server's guides point at | Each project's own license — check before shipping |
 
 ---
 ## License
 
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [LICENSE](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/LICENSE).

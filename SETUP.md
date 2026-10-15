@@ -9,7 +9,7 @@ git clone https://github.com/swastiksingh-dev/Aura-Components-MCP.git
 cd Aura-Components-MCP
 npm install
 npm run build
-node ./dist/server.js  # prints: aura-components-mcp v1.7.0 listening on stdio (Ctrl+C to stop)
+node ./dist/server.js  # prints: aura-components-mcp v1.7.2 listening on stdio (Ctrl+C to stop)
 ```
 
 ```bash

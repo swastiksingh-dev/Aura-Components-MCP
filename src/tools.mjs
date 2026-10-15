@@ -618,7 +618,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       };
       const isLocalInput = (raw) => typeof raw === 'string' && (/^file:\/\//i.test(raw) || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || /^[^/:?#]+\.html?([?#]|$)/i.test(raw));
       const fetchStatic = async (target) => {
-        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.1' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.2' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
         if (res.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
         if (!res.ok) throw awardErr('UPSTREAM_ERROR', 'HTTP ' + res.status + ' for ' + target);
         const text = await res.text();
