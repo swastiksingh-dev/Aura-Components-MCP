@@ -406,10 +406,10 @@ Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Fre
 ### Contributors
 
 <p align="center">
+  <a href="https://github.com/swastiksingh-dev"><img src="https://github.com/swastiksingh-dev.png?size=80" width="60" alt="swastiksingh-dev"></a>&nbsp;&nbsp;
   <a href="https://github.com/INSANE0777"><img src="https://github.com/INSANE0777.png?size=80" width="60" alt="INSANE0777"></a>&nbsp;&nbsp;
-  <a href="https://github.com/MengTo"><img src="https://github.com/MengTo.png?size=80" width="60" alt="Meng To"></a>&nbsp;&nbsp;
-  <a href="https://github.com/swastiksingh-dev"><img src="https://github.com/swastiksingh-dev.png?size=80" width="60" alt="swastiksingh-dev"></a>
-  <br><sub><b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors">INSANE0777</a></b> — awwwards-mcp inspiration · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors">MengTo</a></b> — the Aura catalogue · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors">swastiksingh-dev</a></b> — builder & maintainer</sub>
+  <a href="https://github.com/MengTo"><img src="https://github.com/MengTo.png?size=80" width="60" alt="Meng To"></a>
+  <br><sub><b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors?from=7%2F11%2F2026">swastiksingh-dev</a></b> — builder & maintainer · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors?from=7%2F11%2F2026">INSANE0777</a></b> — awwwards-mcp inspiration · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors?from=7%2F11%2F2026">MengTo</a></b> — the Aura catalogue</sub>
 </p>
 
 <p align="center">
