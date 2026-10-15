@@ -516,3 +516,16 @@ test("10/10-7: scaffold discloses an unmatched design system instead of empty cs
   assert.ok(typeof r.system_note === "string" && /no design system matched/.test(r.system_note));
   assert.equal(r.components.length, 1, "components still ship; only the system is disclosed missing");
 });
+
+test("polish: one section list, one static-summary renderer (locality)", async () => {
+  const { awardStaticSummary, AWARD_SECTIONS, awardBuildBlueprint } = await import("../src/awards.mjs");
+  assert.deepEqual(AWARD_SECTIONS, ["hero", "proof", "features", "showcase", "pricing", "testimonials", "faq", "cta", "footer"]);
+  assert.equal(awardStaticSummary("a", null), null);
+  assert.equal(awardStaticSummary("a", { status: "unavailable", reason: "x" }), null);
+  const line = awardStaticSummary("a", { status: "static-markup", libs: ["gsap"], keyframes: 2, transitions: 0, canvases: 1, scrollCues: ["data-aos", "sticky"] });
+  assert.ok(line.startsWith("a: ") && line.includes("gsap") && line.includes("2 keyframes"));
+  const bare = awardStaticSummary("b", { status: "static-markup", libs: [], keyframes: 0, transitions: 0, canvases: 0, scrollCues: [] });
+  assert.ok(bare.includes("vanilla"));
+  const built = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: [], auraMatches: [], requestedPalette: [], gaps: [] });
+  assert.deepEqual(built.spec.sections, AWARD_SECTIONS, "builder and handlers share one list");
+});

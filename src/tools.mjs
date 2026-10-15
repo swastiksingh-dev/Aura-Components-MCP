@@ -3,9 +3,9 @@
 // (except aura_recommend's single bounded auto-retry + editorial fill).
 import { textResult } from './protocol.mjs';
 import { installGuide, tokenHints, buildPrompt, buildInspoRecommend, buildInspoComponents, buildInspoReference, buildInspoSystem, buildInspoCompare, buildDocsPlan, buildDocsCheck, docsStampFor, combineScaffold, INSPO_MACROS, INSPO_VIBES, INSPO_MODES } from './guide.mjs';
-import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementGallery, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, awardStaticMotion, createAwardClient } from './awards.mjs';
+import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, awardStaticMotion, awardStaticSummary, AWARD_SECTIONS } from './awards.mjs';
 import { createAwardIndex } from './awards-index.mjs';
-import { cdpResolveViewport, cdpCollapseBands, cdpBandsFromHtml, createCdpConn, findChromeExecutable, findFfmpeg, createBrowserAdapter, reduceCdpScan } from './browser-cdp.mjs';
+import { cdpBandsFromHtml } from './browser-cdp.mjs';
 const SORTS = ['popular', 'recent', 'trending', 'updated'];
 const CATS = ['hero','section','button','card','background','header','logo','feature','pricing','testimonial','footer','form','heading'];
 function bad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
@@ -476,7 +476,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       // One query PER proposed section so every section gets a candidate —
       // theme words from the goal ride along (dark/light re-rank server-side).
       const auraMatches = []; let auraUnavailable = null; let sysSlugForScaffold = null;
-      const SECTIONS = ['hero', 'proof', 'features', 'showcase', 'pricing', 'testimonials', 'faq', 'cta', 'footer'];
+      const SECTIONS = AWARD_SECTIONS;
       try {
         if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
         const themeWord = /\b(dark|light)\b/i.test(goal + ' ' + (visualDirection || '')) ? goal.match(/\b(dark|light)\b/i)[1].toLowerCase() : undefined;
@@ -559,8 +559,8 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       }
       const staticCues = [];
       for (const d of details) {
-        const st = d.motion_static;
-        if (st && st.status === 'static-markup') staticCues.push(d.slug + ': ' + [st.libs.length ? st.libs.join('+') : 'vanilla', st.keyframes ? st.keyframes + ' keyframes' : null, st.transitions ? st.transitions + ' transitions' : null, st.canvases ? st.canvases + ' canvas' : null, st.scrollCues.length ? 'cues(' + st.scrollCues.slice(0, 4).join(',') + ')' : null].filter(Boolean).join(', '));
+        const line = awardStaticSummary(d.slug, d.motion_static);
+        if (line) staticCues.push(line);
       }
       try {
         const mr = awardIndex.searchMotion({ limit: 25 });

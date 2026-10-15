@@ -30,7 +30,7 @@
 
 <p align="center">
   <b>2,495</b> free components · <b>192</b> skills · <b>30,688</b> assets · <b>725</b> design systems<br>
-  <b>35</b> tools · <b>0</b> dependencies · <b>201</b> hermetic tests + <b>44</b> live checks green · version-checked hourly against npm
+  <b>35</b> tools · <b>0</b> dependencies · <b>226</b> hermetic tests + <b>45</b> live checks green · version-checked hourly against npm
 </p>
 
 ---
@@ -195,7 +195,7 @@ Start with `aura_status`, then `aura_search_all`. That order matters: status con
 | `aura_install_skill` | Where to save SKILL.md so the agent can load it, plus upstream link. |
 | `aura_install_asset` | Legal drop-in: download + preview URLs, license (all-rights-reserved per [Aura Terms §4](https://www.aura.build/terms)), file path. |
 | `aura_use_design_system` | Token starter CSS plus the order to apply things in. |
-| `aura_scaffold_page` | One-turn page build: tokens.css + system preview + markup in order, combined deps + files. `components: ["732","1364"]` or `[{id:"732"}]`. |
+| `aura_scaffold_page` | One-turn page build: tokens.css + system preview + markup in order, combined deps + files. `components: ["732","1364"]` or `[{id:"732"}]`. Goals with `#hex`/punctuation are escaped safely; an unmatched system is disclosed via `system_note` instead of silent empty CSS. |
 | `aura_prompt` | Need-based prompt in 2 passes: draft + 6 questions (theme, sections, system, assets, macrostructure, vibe), then copy-paste final. Confirm with user first. Pass 2 leads with `inspo.recommend` + `aura_inspo_recommend`. |
 
 ### Bridge (Inspo · fresh docs · icons)
@@ -221,8 +221,8 @@ browser; live capture needs Chrome (see setup below).
 | Tool | Modes | What it returns |
 | --- | --- | --- |
 | `aura_award_search` | `sites` / `categories` / `elements` / `motion` | Ranked Awwwards refs (title, source URL, tags, awards, studio, preview link, relevance + reasons). Multiword queries get alias expansion (`glassy`→`glassmorphism`, `3d`→`webgl`) plus a `theme:dark/light` boost — reasons always name your word, never the alias. `categories` returns real taxonomy from the index/source, filters paged by `limit`/`offset` (`filtersTotal` tells the full size). `motion` searches stored studies (`emptyCorpus:true` when none recorded yet). Every response carries `source` + `corpusNote`: first run on an empty index seeds from one polite live fetch (`source:live`); after that everything ranks from the local index until you `rebuild`/`refresh`. Empty results carry `suggestions`; upstream failures carry `liveError` instead of fake hits. |
-| `aura_award_inspect` | `site_details` / `site_elements` / `element` / `compare_sites` | Design DNA (palette, tech, elements, awards, score). Empty Technologies sections are backfilled from listing tags and labeled `technologiesInferred:true` (never presented as parsed). Element media URLs with attribution. 2–3-site comparisons with shared signals, fuzzy element-keyword overlap, luminance-band agreement, `directionHints`, and gaps (missing = unknown, never negative proof). |
-| `aura_design_blueprint` | goal + 2–5 refs | Markdown brief + versioned JSON (`spec.version: 1`): shared patterns, outliers, palette evidence, one catalogue query PER proposed section (tokens/hero/proof/…/footer, capped at 12 matches — slim rows, not full code dumps), real free Aura matches (IDs + page URLs, free-only enforced), requested hexes from your goal synthesized as `proposed` tokens against the refs' observed bands, sections, motion/a11y/performance guidance, checklist, and an always-present Evidence gaps section. Catalogue failures surface as unavailable evidence. |
+| `aura_award_inspect` | `site_details` / `site_elements` / `element` / `compare_sites` | Design DNA (palette, tech, elements, awards, score). Empty Technologies sections are backfilled from listing tags and labeled `technologiesInferred:true` (never presented as parsed). Rule-based `ideas` (0–6 by evidence, always `status:suggested` + observed `basis`, contract in `ideas_contract`). Browserless motion evidence in `motion_static` (scripts, keyframes, scroll cues — labeled static-markup, never runtime). Element media URLs with attribution. 2–3-site comparisons with shared signals, fuzzy element-keyword overlap, tech-family canonicalization, luminance-band agreement, `directionHints`, and gaps (missing = unknown, never negative proof). |
+| `aura_design_blueprint` | goal + 2–5 refs | Markdown brief + versioned JSON (`spec.version: 1`): shared patterns, outliers, palette evidence, one catalogue query PER proposed section (tokens/hero/proof/…/footer, capped at 12 matches — slim rows, not full code dumps), real free Aura matches (IDs + page URLs, free-only enforced, fallback-sourced rows marked `(via fallback …)` with `matchEvidence`), requested hexes from your goal synthesized as `proposed` tokens against the refs' observed bands, executable `next_calls` (get/scaffold/motion with real gathered IDs), evidence-scored `confidence` + `confidenceWhy`, sections, motion/a11y/performance guidance, checklist, and an always-present Evidence gaps section. Catalogue failures surface as unavailable evidence. |
 | `aura_visual_audit` | `capture` / `structure` / `compare` | Real browser screenshots + live-DOM band maps when Chrome works (`source: live-browser`, attached via `/json/list` page targets). Any live-dom failure degrades to labeled `static-html` estimates (`fallbackFrom` + `fallbackWhy` disclosed) instead of erroring. Local builds: pass a `file://` path or local file with `allowLocal:true` for direct file estimates (`source: local-file`); screenshots still need a served `http://127.0.0.1` URL. `compare` reports section-count/order, height, palette mismatches + manual-judgment items, with an `estimateNote` when offsets aren't measured. |
 | `aura_motion_study` | `inspect` / `record` / `search` | Live runtime scans (libs, easing vocab, scroll model, ScrollTrigger counts — only what was observed), bounded frame studies (2–16 frames, ≤30s), `.webm` only when system ffmpeg exists. Stored studies are searchable by library/easing/scroll. |
 | `aura_award_index` | `status` / `rebuild` / `resume` / `refresh` / `new_winners` / `watch_add` / `watch_list` / `watch_remove` | Persistent corpus in `~/.aura-mcp/awards` (`AURA_AWARDS_DIR` overrides): counts/freshness/lock, polite ~1 req/s crawl bounded by `maxPages` (default 5, max 20 — `resume` continues), winner baseline-then-delta, studio/tag/url watches. Never auto-crawls on startup. |
@@ -338,8 +338,8 @@ Optional tuning (all with defaults):
 
 
 ```bash
-npm test      # hermetic tests, no network (201 tests)
-npm run verify  # 44 live checks against the real catalogue + award validation
+npm test      # hermetic tests, no network (226 tests)
+npm run verify  # 45 live checks against the real catalogue + award validation
 npm run build   # rebundle src/*.mjs into dist/server.js
 ```
 

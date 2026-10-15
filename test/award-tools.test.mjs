@@ -100,7 +100,8 @@ test("award_search categories: real taxonomy, no invented counts", async () => {
   const m = await callWith(h, "aura_award_search", { mode: "categories" });
   const r = JSON.parse(m.result.content[0].text);
   assert.ok(Array.isArray(r.filters) && r.filters.includes("minimal"));
-  assert.ok(!("total" in r) || typeof r.total !== "number" || true, "no fake counts asserted");
+  assert.ok(!("total" in r), "no total field at all — counts are never invented here");
+  assert.equal(r.filtersTotal, r.filters.length, "unpaged taxonomy: total matches returned");
 });
 
 test("award_search motion: empty corpus distinct from zero-match", async () => {

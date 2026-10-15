@@ -16,8 +16,7 @@ export const AWARD_MAX_BYTES = 2 * 1024 * 1024;
 export const AWARD_RATE_MS = 1000;
 export const AWARD_FILTERS = { sotd: "websites/sites_of_the_day", developer: "websites/developer", honorable: "websites/honorable" };
 export const AWARD_FILTER_NAMES = ["sotd", "developer", "honorable"];
-export const AWARD_ELEMENT_CATS = ["hero", "navigation", "pricing", "footer", "features", "contact", "cta", "testimonial", "faq", "about", "gallery", "menu"];
-export const AWARD_SCORE_VERSION = 1;
+export const AWARD_SECTIONS = ["hero", "proof", "features", "showcase", "pricing", "testimonials", "faq", "cta", "footer"];
 
 export function awardErr(code, message) {
   const e = new Error(message);
@@ -39,14 +38,6 @@ export function awardNormalizeSlug(s) {
   const v = String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   if (!v || v.length > 120) throw awardBad("slug must be 1-120 chars of [a-z0-9-], got: " + String(s).slice(0, 80));
   return v;
-}
-export function awardNormalizeUrl(u) {
-  if (typeof u !== "string" || !u) return null;
-  try {
-    const p = new URL(u);
-    if (p.protocol !== "http:" && p.protocol !== "https:") return null;
-    return p.toString();
-  } catch { return null; }
 }
 
 // ---- URL safety (SSRF guard) ----
@@ -496,6 +487,13 @@ export function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rat
   return { getAwardHtml };
 }
 
+// awardStaticSummary: one-line human rendering of a static-motion record.
+// Lives with the data shape (locality); the blueprint handler just maps it.
+export function awardStaticSummary(slug, st) {
+  if (!st || st.status !== "static-markup") return null;
+  return slug + ": " + [st.libs.length ? st.libs.join("+") : "vanilla", st.keyframes ? st.keyframes + " keyframes" : null, st.transitions ? st.transitions + " transitions" : null, st.canvases ? st.canvases + " canvas" : null, st.scrollCues.length ? "cues(" + st.scrollCues.slice(0, 4).join(",") + ")" : null].filter(Boolean).join(", ");
+}
+
 // ---- Static motion cues: real markup evidence without a browser ----
 // Fetches a public reference URL (bounded, SSRF-guarded) and scans for
 // animation library scripts, @keyframes, transitions, scroll cues, and
@@ -642,7 +640,7 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
   }
   for (const g of (extraGaps || [])) if (!gaps.includes(g)) gaps.push(g);
   if (!usable.length) gaps.push("no reference details available; brief is goal-only and low confidence");
-  const sections = ["hero", "proof", "features", "showcase", "pricing", "testimonials", "faq", "cta", "footer"];
+  const sections = AWARD_SECTIONS;
   const lines = [];
   lines.push("# Design brief — " + String(goal).slice(0, 120));
   lines.push("");

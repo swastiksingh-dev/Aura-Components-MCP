@@ -69,7 +69,18 @@ release.
   search response carries `source` + `corpusNote` documenting the
   seed-once-then-local rule.
 
-### Fixed — verbatim goals, static motion evidence, fallback provenance
+### Polish — deep-module cleanup (skill 16-codebase-design)
+
+- Removed dead surface: unused `awardNormalizeUrl`, `AWARD_ELEMENT_CATS`,
+  `AWARD_SCORE_VERSION` exports and seven unreferenced names from the
+  `tools.mjs` import lists.
+- One section list: `AWARD_SECTIONS` is the single source both the blueprint
+  handler and builder share (was duplicated verbatim).
+- Static-cue rendering moved next to its data shape (`awardStaticSummary`);
+  the handler just maps it. Tautological test assertion replaced with real
+  ones (no `total` key; `filtersTotal` consistency).
+
+### Fixed — refusal gate, hex tokens, static motion, fallback evidence
 
 - Refusal gate judges the global best row, not the first: theme-first
   ordering re-ranks but can no longer let a 0-hit leader veto matching rows
@@ -89,6 +100,8 @@ release.
 - Blueprint matches record `matchEvidence.fallback` and the markdown marks
   `(via fallback …)` rows; `search_all` fallback flags stay per-surface
   (regression-locked). Technologies section titles tolerate `&amp;`.
+
+### Fixed — PostgREST escaping, ideas contract, evidence-scored confidence
 
 - Goals containing `#`, `(`, `)`, `"`, `'`, `%`, `,` no longer crash
   catalogue queries (PGRST100): `ilike` values percent-encode significant

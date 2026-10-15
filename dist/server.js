@@ -1697,8 +1697,7 @@ const AWARD_MAX_BYTES = 2 * 1024 * 1024;
 const AWARD_RATE_MS = 1000;
 const AWARD_FILTERS = { sotd: "websites/sites_of_the_day", developer: "websites/developer", honorable: "websites/honorable" };
 const AWARD_FILTER_NAMES = ["sotd", "developer", "honorable"];
-const AWARD_ELEMENT_CATS = ["hero", "navigation", "pricing", "footer", "features", "contact", "cta", "testimonial", "faq", "about", "gallery", "menu"];
-const AWARD_SCORE_VERSION = 1;
+const AWARD_SECTIONS = ["hero", "proof", "features", "showcase", "pricing", "testimonials", "faq", "cta", "footer"];
 
 function awardErr(code, message) {
   const e = new Error(message);
@@ -1720,14 +1719,6 @@ function awardNormalizeSlug(s) {
   const v = String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   if (!v || v.length > 120) throw awardBad("slug must be 1-120 chars of [a-z0-9-], got: " + String(s).slice(0, 80));
   return v;
-}
-function awardNormalizeUrl(u) {
-  if (typeof u !== "string" || !u) return null;
-  try {
-    const p = new URL(u);
-    if (p.protocol !== "http:" && p.protocol !== "https:") return null;
-    return p.toString();
-  } catch { return null; }
 }
 
 // ---- URL safety (SSRF guard) ----
@@ -2177,6 +2168,13 @@ function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rateMs = A
   return { getAwardHtml };
 }
 
+// awardStaticSummary: one-line human rendering of a static-motion record.
+// Lives with the data shape (locality); the blueprint handler just maps it.
+function awardStaticSummary(slug, st) {
+  if (!st || st.status !== "static-markup") return null;
+  return slug + ": " + [st.libs.length ? st.libs.join("+") : "vanilla", st.keyframes ? st.keyframes + " keyframes" : null, st.transitions ? st.transitions + " transitions" : null, st.canvases ? st.canvases + " canvas" : null, st.scrollCues.length ? "cues(" + st.scrollCues.slice(0, 4).join(",") + ")" : null].filter(Boolean).join(", ");
+}
+
 // ---- Static motion cues: real markup evidence without a browser ----
 // Fetches a public reference URL (bounded, SSRF-guarded) and scans for
 // animation library scripts, @keyframes, transitions, scroll cues, and
@@ -2323,7 +2321,7 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
   }
   for (const g of (extraGaps || [])) if (!gaps.includes(g)) gaps.push(g);
   if (!usable.length) gaps.push("no reference details available; brief is goal-only and low confidence");
-  const sections = ["hero", "proof", "features", "showcase", "pricing", "testimonials", "faq", "cta", "footer"];
+  const sections = AWARD_SECTIONS;
   const lines = [];
   lines.push("# Design brief — " + String(goal).slice(0, 120));
   lines.push("");
@@ -3699,7 +3697,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
       // One query PER proposed section so every section gets a candidate —
       // theme words from the goal ride along (dark/light re-rank server-side).
       const auraMatches = []; let auraUnavailable = null; let sysSlugForScaffold = null;
-      const SECTIONS = ['hero', 'proof', 'features', 'showcase', 'pricing', 'testimonials', 'faq', 'cta', 'footer'];
+      const SECTIONS = AWARD_SECTIONS;
       try {
         if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
         const themeWord = /\b(dark|light)\b/i.test(goal + ' ' + (visualDirection || '')) ? goal.match(/\b(dark|light)\b/i)[1].toLowerCase() : undefined;
@@ -3782,8 +3780,8 @@ function createHandlers(catalog, icons, version, awardDeps) {
       }
       const staticCues = [];
       for (const d of details) {
-        const st = d.motion_static;
-        if (st && st.status === 'static-markup') staticCues.push(d.slug + ': ' + [st.libs.length ? st.libs.join('+') : 'vanilla', st.keyframes ? st.keyframes + ' keyframes' : null, st.transitions ? st.transitions + ' transitions' : null, st.canvases ? st.canvases + ' canvas' : null, st.scrollCues.length ? 'cues(' + st.scrollCues.slice(0, 4).join(',') + ')' : null].filter(Boolean).join(', '));
+        const line = awardStaticSummary(d.slug, d.motion_static);
+        if (line) staticCues.push(line);
       }
       try {
         const mr = awardIndex.searchMotion({ limit: 25 });
