@@ -150,7 +150,16 @@ const DETAIL_COLS = {
 };
 
 const esc = (s) => String(s).replaceAll('"', '""');
-const ilike = (v) => "*" + String(v).replaceAll("*", "").replaceAll(",", " ").trim() + "*";
+// pct: percent-encode chars that break PostgREST query parsing when raw —
+// "#" would start a URL fragment (PGRST100), "," splits value lists,
+// "()" groups logic, quotes break string parsing, raw "%" corrupts decoding.
+// encodeURIComponent deliberately leaves !'()* raw, so escEq finishes the job.
+const pct = (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase();
+const escEq = (s) => encodeURIComponent(String(s)).replace(/[!'()*]/g, pct);
+// ilike patterns keep our own "*" wildcards; everything user-typed that is
+// PostgREST-significant gets encoded so goals like "page #0a0a0b (dark)"
+// match literally instead of crashing the query.
+const ilike = (v) => "*" + String(v).replaceAll("*", "").trim().replace(/[%#()'",]/g, pct) + "*";
 
 // Split a goal sentence into significant tokens for OR fallback (stop-word filtered).
 // Theme words (dark/light) are NOT search tokens — they become rank/filter signals
@@ -536,7 +545,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
       if ((kind === "design_systems" || kind === "skills") && rows.length) {
         const topIds = rows.slice(0, 5).map((r) => r.id);
         try {
-          const idList = topIds.map((id) => encodeURIComponent(String(id))).join(",");
+          const idList = topIds.map((id) => escEq(id)).join(",");
           const sel = kind === "design_systems" ? "id,content,preview_html" : "id,content,source_url";
           const { rows: full } = await fetcher.getJson(base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&id=in.(" + idList + ")", headers);
           const byId = new Map(full.map((r) => [String(r.id), r]));
@@ -650,10 +659,10 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const sel = DETAIL_COLS[kind];
     // design_systems + skills: uuid id vs slug; components: numeric id vs slug
     const filt = (kind === "design_systems" || kind === "skills")
-      ? (isUuid ? "id=eq." + encodeURIComponent(String(idOrSlug)) : "slug=eq." + encodeURIComponent(String(idOrSlug)))
+      ? (isUuid ? "id=eq." + escEq(idOrSlug) : "slug=eq." + escEq(idOrSlug))
       : (kind === "components" && !isNum
-        ? "slug=eq." + encodeURIComponent(String(idOrSlug))
-        : "id=eq." + encodeURIComponent(String(idOrSlug)));
+        ? "slug=eq." + escEq(idOrSlug)
+        : "id=eq." + escEq(idOrSlug));
     const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&" + filt + "&limit=1";
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
@@ -797,7 +806,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     const lim = Math.max(1, Math.min(limit || 3, 8));
     const sel = LIST_COLS[kind];
     const idCol = (kind === "components") ? "id" : "id";
-    const selfId = encodeURIComponent(String(item.id));
+    const selfId = escEq(item.id);
     const premF = (freeOnly && (kind === "components" || kind === "assets")) ? "&premium=eq.false" : "";
     const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&private=eq.false" + premF + tagF + "&" + idCol + "=neq." + selfId + (orParts.length ? "&or=(" + orParts.join(",") + ")" : "") + "&order=views.desc&limit=" + lim;
     try {
@@ -2048,7 +2057,9 @@ function awardFullSite(s, detail, scoreInfo) {
 
 // awardSiteIdeas: agent-usable design ideas derived ONLY from observed
 // detail fields. Every idea carries status:"suggested" + basis naming the
-// evidence — never presented as observed fact.
+// evidence — never presented as observed fact. Count contract: 0–6 ideas
+// depending on how much evidence the detail holds (1 idea on thin evidence
+// is valid, not a failure); null detail yields [].
 function awardSiteIdeas(detail) {
   if (!detail) return [];
   const ideas = [];
@@ -2313,6 +2324,19 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
   lines.push("## Evidence gaps");
   if (gaps.length) { for (const g of gaps) lines.push("- " + g); }
   else lines.push("- None material: refs, motion/structure evidence as cited above, catalogue matches listed.");
+  // Evidence-scored confidence: base from usable ref count, +1 per
+  // independent axis actually present (matched sections, recorded motion,
+  // measured structure, fully-parsed tech). Thin evidence stays low;
+  // rich evidence may reach high — same honesty, both directions.
+  const why = [];
+  let points = Math.min(usable.length, 3);
+  why.push(usable.length + " usable ref" + (usable.length === 1 ? "" : "s"));
+  const sectionHits = matches.filter((m) => m.section !== "tokens" && !m.editorial).length;
+  if (sectionHits >= 4) { points++; why.push(sectionHits + " catalogue sections matched"); }
+  if (motionNotes) { points++; why.push("recorded motion evidence"); }
+  if (structureNotes && structureNotes.includes("(live-dom)")) { points++; why.push("measured structure"); }
+  if (usable.length >= 2 && usable.every((d) => (d.detail.technologies || []).length && !d.detail.technologiesInferred)) { points++; why.push("fully-parsed technologies (not inferred)"); }
+  const confidence = points <= 1 ? "low" : points <= 3 ? "low-medium" : points === 4 ? "medium" : "high";
   const spec = {
     version: AWARD_BLUEPRINT_VERSION, goal,
     refs: (refs || []).map((slug) => ({ slug, sourceUrl: awardSiteUrl(slug) })),
@@ -2321,7 +2345,7 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
     tokens_css: requestedPalette.length ? (":root{--aw-ground:" + tokenGround + ";--aw-ink:" + tokenInk + ";" + tokenAccents.map((c, i) => "--aw-accent-" + (i + 1) + ":" + c).join(";") + ";}") : "",
     auraMatches: matches.slice(0, 10),
     sections, constraints,
-    confidence: usable.length >= 3 ? "medium" : usable.length === 2 ? "low-medium" : "low",
+    confidence, confidenceWhy: why,
     gaps,
   };
   return { markdown: lines.join("\n"), spec };

@@ -28,7 +28,16 @@ const DETAIL_COLS = {
 };
 
 const esc = (s) => String(s).replaceAll('"', '""');
-const ilike = (v) => "*" + String(v).replaceAll("*", "").replaceAll(",", " ").trim() + "*";
+// pct: percent-encode chars that break PostgREST query parsing when raw —
+// "#" would start a URL fragment (PGRST100), "," splits value lists,
+// "()" groups logic, quotes break string parsing, raw "%" corrupts decoding.
+// encodeURIComponent deliberately leaves !'()* raw, so escEq finishes the job.
+const pct = (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase();
+const escEq = (s) => encodeURIComponent(String(s)).replace(/[!'()*]/g, pct);
+// ilike patterns keep our own "*" wildcards; everything user-typed that is
+// PostgREST-significant gets encoded so goals like "page #0a0a0b (dark)"
+// match literally instead of crashing the query.
+const ilike = (v) => "*" + String(v).replaceAll("*", "").trim().replace(/[%#()'",]/g, pct) + "*";
 
 // Split a goal sentence into significant tokens for OR fallback (stop-word filtered).
 // Theme words (dark/light) are NOT search tokens — they become rank/filter signals
@@ -414,7 +423,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       if ((kind === "design_systems" || kind === "skills") && rows.length) {
         const topIds = rows.slice(0, 5).map((r) => r.id);
         try {
-          const idList = topIds.map((id) => encodeURIComponent(String(id))).join(",");
+          const idList = topIds.map((id) => escEq(id)).join(",");
           const sel = kind === "design_systems" ? "id,content,preview_html" : "id,content,source_url";
           const { rows: full } = await fetcher.getJson(base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&id=in.(" + idList + ")", headers);
           const byId = new Map(full.map((r) => [String(r.id), r]));
@@ -528,10 +537,10 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     const sel = DETAIL_COLS[kind];
     // design_systems + skills: uuid id vs slug; components: numeric id vs slug
     const filt = (kind === "design_systems" || kind === "skills")
-      ? (isUuid ? "id=eq." + encodeURIComponent(String(idOrSlug)) : "slug=eq." + encodeURIComponent(String(idOrSlug)))
+      ? (isUuid ? "id=eq." + escEq(idOrSlug) : "slug=eq." + escEq(idOrSlug))
       : (kind === "components" && !isNum
-        ? "slug=eq." + encodeURIComponent(String(idOrSlug))
-        : "id=eq." + encodeURIComponent(String(idOrSlug)));
+        ? "slug=eq." + escEq(idOrSlug)
+        : "id=eq." + escEq(idOrSlug));
     const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&" + filt + "&limit=1";
     const { rows } = await fetcher.getJson(url, headers);
     if (!rows.length) { const e = new Error("not found: " + kind + " " + idOrSlug); e.code = "NOT_FOUND"; throw e; }
@@ -675,7 +684,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     const lim = Math.max(1, Math.min(limit || 3, 8));
     const sel = LIST_COLS[kind];
     const idCol = (kind === "components") ? "id" : "id";
-    const selfId = encodeURIComponent(String(item.id));
+    const selfId = escEq(item.id);
     const premF = (freeOnly && (kind === "components" || kind === "assets")) ? "&premium=eq.false" : "";
     const url = base + "/rest/v1/" + kind + "?select=" + encodeURIComponent(sel) + "&private=eq.false" + premF + tagF + "&" + idCol + "=neq." + selfId + (orParts.length ? "&or=(" + orParts.join(",") + ")" : "") + "&order=views.desc&limit=" + lim;
     try {

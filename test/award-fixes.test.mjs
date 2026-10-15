@@ -5,8 +5,8 @@ import { createSession } from "../src/protocol.mjs";
 import { TOOL_DEFS, createHandlers } from "../src/tools.mjs";
 import { createAwardIndex } from "../src/awards-index.mjs";
 import { createBrowserAdapter, createCdpConn } from "../src/browser-cdp.mjs";
-import { awardScoreSites, awardThemeHint } from "../src/awards.mjs";
-import { matchOverlap, scoreRows, stemTok } from "../src/catalog.mjs";
+import { awardScoreSites, awardThemeHint, awardBuildBlueprint, awardSiteIdeas } from "../src/awards.mjs";
+import { matchOverlap, scoreRows, stemTok, buildSearchParams, buildUrl, createCatalog } from "../src/catalog.mjs";
 
 const tmpDir = () => {
   const fs = process.getBuiltinModule("node:fs");
@@ -330,8 +330,7 @@ test("speed+UX: blueprint details fetch concurrently, NOT_FOUND still throws", a
   assert.equal(bad.error.code, -32004, "unknown ref still surfaces NOT_FOUND");
 });
 
-test("speed+UX: next_calls use only real gathered ids/urls", async () => {
-  const detail = (slug, live) => `<html><head><meta property="og:title" content="${slug}" /></head><body>${live ? `<h1 class="heading-1 text-uppercase"> <a href="${live}" target="_blank" rel="noopener">${slug}</a></h1>` : ""}</body></html>`;
+test("speed+UX: next_calls use only real gathered ids/urls", async () => {  const detail = (slug, live) => `<html><head><meta property="og:title" content="${slug}" /></head><body>${live ? `<h1 class="heading-1 text-uppercase"> <a href="${live}" target="_blank" rel="noopener">${slug}</a></h1>` : ""}</body></html>`;
   const client = { getAwardHtml: async (raw) => { const p = String(raw).startsWith("http") ? new URL(String(raw)).pathname : String(raw); const s = p.split("/")[2]; return { html: detail(s, s === "nc-aa" ? "https://nc-aa.example.com" : null) }; } };
   const catalog = {
     searchCatalog: async (kind, q) => kind === "components"
@@ -349,4 +348,52 @@ test("speed+UX: next_calls use only real gathered ids/urls", async () => {
   const mo = r.next_calls.find((c) => c.tool === "aura_motion_study");
   assert.ok(mo && mo.arguments.url === "https://nc-aa.example.com", "motion call uses the observed liveUrl");
   assert.ok(r.next_calls.every((c) => typeof c.why === "string"));
+});
+
+test("P0: PostgREST-significant chars in ilike values are encoded, wildcards intact", () => {
+  const { params, ors } = buildSearchParams("components", { query: 'Dark page #0a0a0b with (dark), "glassy" 100% *', sort: "popular", limit: 5, offset: 0 });
+  const url = buildUrl("https://x.supabase.co", "components", params, [], ors);
+  const orPart = url.split("or=(")[1];
+  assert.ok(orPart, "or clause present");
+  // Check VALUES only (between .* and *), not the or=( )/separator syntax.
+  const values = [...orPart.matchAll(/ilike\.\*([^*]*)\*/g)].map((m) => m[1]);
+  assert.ok(values.length >= 2, "ilike values present");
+  for (const v of values) {
+    assert.ok(!/[#()'",]/.test(v), "no raw significant char in value: " + v);
+    assert.ok(!/%(?![0-9A-F]{2})/.test(v), "no stray % in value: " + v);
+  }
+  const joined = values.join("|");
+  for (const enc of ["%23", "%28", "%29", "%2C", "%22", "%25"]) assert.ok(joined.includes(enc), "encoded " + enc + " present");
+  assert.ok(!joined.includes("**"), "user asterisks stripped, not doubled");
+});
+
+test("P0: eq-filter values with parens are encoded (same bug class)", async () => {
+  const seen = [];
+  const stub = { getJson: async (url) => { seen.push(url); return { rows: [{ id: 3, title: "Weird", slug: "weird(slug)", code: "x", premium: false, created_by: null }], total: 1 }; } };
+  const cfg = { supabaseUrl: "https://x.supabase.co", anonKey: "k", timeoutMs: 1000, retries: 0, cacheTtlMs: 0, defaultLimit: 10, maxLimit: 25, codeChars: 100, contentChars: 100, freeOnlyDefault: false, userAgent: "t" };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  await cat.getItem("components", "weird(slug)");
+  assert.ok(seen[0].includes("slug=eq.weird%28slug%29"), "parens encoded, got: " + seen[0]);
+});
+
+test("P1: ideas count varies 0-6 by evidence; 1 is valid, all labeled", () => {
+  assert.deepEqual(awardSiteIdeas(null), []);
+  const bare = awardSiteIdeas({ palette: ["#B0B0B0"], elements: [], technologies: [] });
+  assert.equal(bare.length, 0, "true-mid palette, nothing else → zero ideas, honestly");
+  const thin = awardSiteIdeas({ palette: ["#0A0A0B"], elements: [], technologies: [] });
+  assert.equal(thin.length, 1, "thin evidence → exactly 1 idea is valid");
+  assert.ok(thin.every((i) => i.status === "suggested" && /observed/.test(i.basis)));
+  assert.ok(awardSiteIdeas({ palette: ["#0A0A0B"], elements: ["Hero banner", "Pricing table", "FAQ"], technologies: ["GSAP", "WebGL"] }).length >= 4);
+});
+
+test("P1: confidence is evidence-scored with reasons", () => {
+  const thinDetails = ["aa", "bb"].map((slug) => ({ slug, detail: { slug, title: slug, palette: ["#111111"], technologies: ["tag-tech"], technologiesInferred: true, elements: [], awards: [], sourceUrl: "https://www.awwwards.com/sites/" + slug } }));
+  const thin = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: thinDetails, auraMatches: [{ section: "tokens", componentId: "s", componentTitle: "S", pageUrl: "u", why: "w" }], requestedPalette: [], gaps: ["motion: none"] });
+  assert.equal(thin.spec.confidence, "low-medium");
+  assert.ok(thin.spec.confidenceWhy.includes("2 usable refs"));
+  const richDetails = ["aa", "bb"].map((slug) => ({ slug, detail: { slug, title: slug, palette: ["#0A0A0B"], technologies: ["GSAP"], technologiesInferred: false, elements: ["Hero"], awards: [], sourceUrl: "https://www.awwwards.com/sites/" + slug } }));
+  const richMatches = ["hero", "features", "pricing", "footer"].map((s, i) => ({ section: s, componentId: i + 1, componentTitle: "T" + i, pageUrl: "u", why: "w" }));
+  const rich = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: richDetails, auraMatches: richMatches, motionNotes: "recorded", structureNotes: "aa: 5 bands (live-dom)", requestedPalette: [], gaps: [] });
+  assert.ok(["medium", "high"].includes(rich.spec.confidence), "rich evidence lifts past low-medium, got: " + rich.spec.confidence);
+  assert.ok(rich.spec.confidenceWhy.some((w) => /motion|structure|sections|technologies/.test(w)));
 });

@@ -69,7 +69,17 @@ release.
   search response carries `source` + `corpusNote` documenting the
   seed-once-then-local rule.
 
-### Fixed — agent-speed + output pass (parallel fetch, actionable briefs)
+### Fixed — PostgREST escaping, ideas contract, evidence-scored confidence
+
+- Goals containing `#`, `(`, `)`, `"`, `'`, `%`, `,` no longer crash
+  catalogue queries (PGRST100): `ilike` values percent-encode significant
+  chars while `*` wildcards survive, and `eq`/`in`/`neq` id/slug filters use
+  the same hardened encoder. Matching is preserved (server-side decode).
+- `site_details ideas` contract: 0–6 by evidence, 1 on thin evidence is
+  valid, every entry `status:suggested` with an observed `basis`.
+- Blueprint `confidence` is evidence-scored (usable refs + matched sections
+  + recorded motion + measured structure + fully-parsed tech → low …
+  low-medium … medium … high, with `confidenceWhy`).
 
 - `aura_design_blueprint` details (≤5 refs), all 9 section queries, `compare`
   refs, and `includeStructure` targets now fetch concurrently (order

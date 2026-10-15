@@ -396,7 +396,9 @@ export function awardFullSite(s, detail, scoreInfo) {
 
 // awardSiteIdeas: agent-usable design ideas derived ONLY from observed
 // detail fields. Every idea carries status:"suggested" + basis naming the
-// evidence — never presented as observed fact.
+// evidence — never presented as observed fact. Count contract: 0–6 ideas
+// depending on how much evidence the detail holds (1 idea on thin evidence
+// is valid, not a failure); null detail yields [].
 export function awardSiteIdeas(detail) {
   if (!detail) return [];
   const ideas = [];
@@ -661,6 +663,19 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
   lines.push("## Evidence gaps");
   if (gaps.length) { for (const g of gaps) lines.push("- " + g); }
   else lines.push("- None material: refs, motion/structure evidence as cited above, catalogue matches listed.");
+  // Evidence-scored confidence: base from usable ref count, +1 per
+  // independent axis actually present (matched sections, recorded motion,
+  // measured structure, fully-parsed tech). Thin evidence stays low;
+  // rich evidence may reach high — same honesty, both directions.
+  const why = [];
+  let points = Math.min(usable.length, 3);
+  why.push(usable.length + " usable ref" + (usable.length === 1 ? "" : "s"));
+  const sectionHits = matches.filter((m) => m.section !== "tokens" && !m.editorial).length;
+  if (sectionHits >= 4) { points++; why.push(sectionHits + " catalogue sections matched"); }
+  if (motionNotes) { points++; why.push("recorded motion evidence"); }
+  if (structureNotes && structureNotes.includes("(live-dom)")) { points++; why.push("measured structure"); }
+  if (usable.length >= 2 && usable.every((d) => (d.detail.technologies || []).length && !d.detail.technologiesInferred)) { points++; why.push("fully-parsed technologies (not inferred)"); }
+  const confidence = points <= 1 ? "low" : points <= 3 ? "low-medium" : points === 4 ? "medium" : "high";
   const spec = {
     version: AWARD_BLUEPRINT_VERSION, goal,
     refs: (refs || []).map((slug) => ({ slug, sourceUrl: awardSiteUrl(slug) })),
@@ -669,7 +684,7 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
     tokens_css: requestedPalette.length ? (":root{--aw-ground:" + tokenGround + ";--aw-ink:" + tokenInk + ";" + tokenAccents.map((c, i) => "--aw-accent-" + (i + 1) + ":" + c).join(";") + ";}") : "",
     auraMatches: matches.slice(0, 10),
     sections, constraints,
-    confidence: usable.length >= 3 ? "medium" : usable.length === 2 ? "low-medium" : "low",
+    confidence, confidenceWhy: why,
     gaps,
   };
   return { markdown: lines.join("\n"), spec };

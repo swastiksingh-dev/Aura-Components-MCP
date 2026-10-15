@@ -142,6 +142,8 @@ const awMo = J(await tool('aura_motion_study', { mode: 'search' }));
 check('motion search shape (emptyCorpus or hits)', awMo && typeof awMo.total === 'number' && Array.isArray(awMo.items), JSON.stringify(awMo).slice(0, 200));
 const awBp = await tool('aura_design_blueprint', { goal: 'x', references: ['only-one'] });
 check('blueprint ref-count guard -> -32602', awBp.error && awBp.error.code === -32602, JSON.stringify(awBp).slice(0, 160));
+const hexGoal = J(await tool('aura_scaffold_page', { goal: 'Dark red glassy SaaS page #0a0a0b with #ff2a2a accents' }));
+check('scaffold survives #(),\" in goal (PGRST100 repro)', hexGoal && Array.isArray(hexGoal.components) && typeof hexGoal.tokens_css === 'string', JSON.stringify(hexGoal).slice(0, 200));
 console.log('VERIFY pass=' + pass + ' fail=' + fail + ' ms=' + (Date.now() - t0));
 child.kill();
 setTimeout(() => process.exit(fail ? 1 : 0), 500);
