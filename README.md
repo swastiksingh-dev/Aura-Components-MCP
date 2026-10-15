@@ -9,6 +9,7 @@
   <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen" alt="node >= 22"></a>
   <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/dist/server.js"><img src="https://img.shields.io/badge/MCP-stdio-blue" alt="MCP stdio"></a>
   <a href="#the-35-tools"><img src="https://img.shields.io/badge/tools-35-blueviolet" alt="35 tools"></a>
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/actions"><img src="https://github.com/swastiksingh-dev/Aura-Components-MCP/actions/workflows/verify.yml/badge.svg" alt="verify CI"></a>
   <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP"><img src="https://img.shields.io/github/stars/swastiksingh-dev/Aura-Components-MCP?style=social" alt="GitHub stars"></a>
 </p>
 
@@ -236,10 +237,20 @@ CDP setup failures (refused socket, hung attach) normalize to the same
 `BROWSER_UNAVAILABLE` code with a per-operation fallback hint — never a raw
 CDP timeout.
 
-```text
-The 6-call award loop (fast: details + section queries run concurrently):
-search → inspect → blueprint → follow its next_calls → audit → motion
+```mermaid
+flowchart LR
+    S["🔍 aura_award_search<br/>ranked refs + try_for"] --> I["🧬 aura_award_inspect<br/>design DNA + ideas"]
+    I --> B["📐 aura_design_blueprint<br/>brief + tokens + next_calls"]
+    B --> A["📸 aura_visual_audit<br/>capture / bands / compare"]
+    A --> M["🎞️ aura_motion_study<br/>scans + studies"]
+    B -.-> X["🗂️ aura_award_index<br/>corpus · winners · watches"]
+    X -.-> S
+    style B fill:#ddf4ff,stroke:#0969da
+    style X fill:#fff8c5,stroke:#9a6700
 ```
+
+> The 6-call award loop (fast: details + section queries run concurrently):
+> `search → inspect → blueprint → follow its next_calls → audit → motion`
 
 **Two award servers?** If you also run `awwwards-mcp`, keep both or pick one:
 `aura_award_*` is canonical here — it's the only path that maps references to
