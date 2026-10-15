@@ -51,7 +51,12 @@
 
 > **v1.7.1** — bug-fix release, no new tools. Central free-only enforcement: Pro components/assets by direct ID are now refused (`-32602`, fail-closed on ambiguous entitlement) instead of returned in full — search, install, bundle, scaffold, and related all inherit it. Search cache isolates explicit `theme` (dark/light no longer share entries). Bundles honor all 8 refs end-to-end with `dropped_refs` disclosure. New `min_views_filtered_out` count (`total` stays upstream). Full icon outages surface as upstream errors, not misses. Upstream hardening: malformed rows disclosed via `malformed_dropped` (single fetch fails loud), non-429 4xx never retried. Node floor raised to maintained releases (engines `>=22`, CI matrix 22.x/24.x). Dead code removed, scaffold merge extracted, verify extended.
 
+<details>
+<summary><b>v1.7.0 changelog (29 tools)</b> — click to expand</summary>
+
 > **v1.7.0** — 29 tools: 5 pure `aura_inspo_*` mappers (recommend/components/reference/system/compare) bridge Inspo evidence to Aura calls with zero extra deps — strict macro gate (`need_macro`), palette priority brand > Inspo > Aura, enforced tokens-first, mandated image srcset plan, fast preview-URL look gate — plus 2 pure `aura_docs_*` helpers (plan/check) wiring Context7 fresh docs for tailwind/gsap/lenis/iconify, with `docs_stamp` on every install/scaffold and a look-preserving conflict rule (fresh API wins, look stays identical) — plus live `aura_icon` (Font Awesome Free + HackerNoon pixel SVGs, auto-fallback, CC BY 4.0 credit always) — plus `aura_version` (hourly npm check, prefer-latest notice, verdict inside every `aura_status`). `aura_prompt` now asks 6 questions (+macrostructure, +vibe) and leads Pass 2 with `inspo.recommend`. `aura_scaffold_page` refuses explicit Pro ids (`pro_filtered_out`). Build hardened for CRLF checkouts.
+
+</details>
 
 <details>
 <summary><b>v1.6.3 changelog (20 tools)</b> — click to expand</summary>
@@ -238,6 +243,7 @@ CDP setup failures (refused socket, hung attach) normalize to the same
 CDP timeout.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'Inter, system-ui, -apple-system, sans-serif', 'fontSize': '15px', 'lineColor': '#ff2a2a', 'edgeLabelBackground': '#0a0a0b'}}}%%
 flowchart LR
     S["🔍 aura_award_search<br/>ranked refs + try_for"] --> I["🧬 aura_award_inspect<br/>design DNA + ideas"]
     I --> B["📐 aura_design_blueprint<br/>brief + tokens + next_calls"]
@@ -245,8 +251,12 @@ flowchart LR
     A --> M["🎞️ aura_motion_study<br/>scans + studies"]
     B -.-> X["🗂️ aura_award_index<br/>corpus · winners · watches"]
     X -.-> S
-    style B fill:#ddf4ff,stroke:#0969da
-    style X fill:#fff8c5,stroke:#9a6700
+    classDef core fill:#111318,stroke:#8b949e,color:#f5f5f5,stroke-width:2px;
+    classDef hot fill:#1c0606,stroke:#ff2a2a,color:#ffffff,stroke-width:2px;
+    classDef idx fill:#161a08,stroke:#d4a017,color:#ffffff,stroke-width:2px;
+    class S,I,A,M core;
+    class B hot;
+    class X idx;
 ```
 
 > The 6-call award loop (fast: details + section queries run concurrently):
@@ -392,6 +402,19 @@ https://github.com/swastiksingh-dev/Aura-Components-MCP
 </table>
 
 Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Free to fork, use, and sell with. If you fork this, keep the credit line and point people at the original repo.
+
+### Contributors
+
+<p align="center">
+  <a href="https://github.com/INSANE0777"><img src="https://github.com/INSANE0777.png?size=80" width="60" alt="INSANE0777"></a>&nbsp;&nbsp;
+  <a href="https://github.com/MengTo"><img src="https://github.com/MengTo.png?size=80" width="60" alt="Meng To"></a>&nbsp;&nbsp;
+  <a href="https://github.com/swastiksingh-dev"><img src="https://github.com/swastiksingh-dev.png?size=80" width="60" alt="swastiksingh-dev"></a>
+  <br><sub><b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors">INSANE0777</a></b> — awwwards-mcp inspiration · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors">MengTo</a></b> — the Aura catalogue · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors">swastiksingh-dev</a></b> — builder & maintainer</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors"><img src="https://contrib.rocks/image?repo=swastiksingh-dev/Aura-Components-MCP" alt="All contributors"></a>
+</p>
 
 | Source | Used for | License / terms |
 | --- | --- | --- |
