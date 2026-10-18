@@ -1,6 +1,6 @@
 # DIRECTION — where Aura-Components-MCP goes next
 
-> v1.7.2 ships the award layer: 35 tools (29 catalogue + 6 award-intelligence), 226 hermetic + 45 live checks green. File-based award corpus, native CDP capture, zero new npm dependencies. This is what comes after.
+> v1.7.3 hardens the award layer: 35 tools (29 catalogue + 6 award-intelligence), 275 hermetic + 45 live checks green. One guarded fetch path, plan-based index lifecycle, drift-guarded winners, artifact-honest capture — zero new npm dependencies. This is what comes after.
 ## North star
 
 The fastest free door from an idea to a shippable page: any agent, one install line, honest search, paste-ready answers. Everything below serves that sentence.
@@ -10,6 +10,7 @@ The fastest free door from an idea to a shippable page: any agent, one install l
 - [x] 29 tools (5 pure `aura.inspo.*` mappers + 2 pure `aura_docs_*` helpers with docs_stamp + live `aura_icon` with auto-fallback and credit-always + `aura_prompt` 6-question 2-pass + facets parity, dedupe, absolute URLs, freeOnly related + scaffold Pro guard, scoped CSS, transparent fallback, macro gate, A/B/blend system choice, contrast warnings; no dead trending tool — per-surface `sort:'trending'` instead)
 - [x] v1.7.1 hardening: central access policy, theme-isolated cache, bundle-8 end-to-end, `total` semantics disclosed, malformed-row gate, no-retry 4xx, Node `>=22` with CI matrix 22.x/24.x, dead-code removal, registry-consistency + packaging tests (122 hermetic + 38 live green)
 - [x] v1.7.2 award layer (released): 6 tools (search/inspect/blueprint/audit/motion/index), file JSON corpus with winners + watches, native CDP capture/structure/motion, zero npm deps (226 hermetic + 45 live green)
+- [x] v1.7.3 hardening (release-ready): guarded URL/IPv6 fetch policy, bounded bodies, plan-based index resume/refresh, drift-guarded winner baselines, normalized URL watches, artifact-honest capture/motion, 49 new hermetic tests (275 + 45 live green)
 - [ ] GitHub Release for v1.7.2 (notes: CHANGELOG [1.7.2] — award intelligence, PostgREST escaping, refusal-gate honesty, evidence-scored confidence)
 - [x] v1.6.3 quality: honest empty, exact_match, theme reorder, DS content index, kind-aware recall, slim lists, full:true, recommend retry + editorial fill, freshness, overlap + license notes, concat/scope install docs
 - [ ] GitHub Release for v1.7.1 (notes: hardening audit — access policy, cache isolation, bundle limits, malformed gate, Node 22) — doubles npm + GitHub surfaces

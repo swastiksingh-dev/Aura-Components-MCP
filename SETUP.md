@@ -110,8 +110,10 @@ Core award search/index/blueprint needs nothing extra. Live capture, structure,
 and motion need Chrome/Chromium (or `AURA_CHROME_PATH` to its executable);
 `.webm` motion video additionally needs ffmpeg (or `AURA_FFMPEG_PATH`).
 Corpus lives in `~/.aura-mcp/awards` (`AURA_AWARDS_DIR` overrides). Build it with
-`aura_award_index {action:rebuild}` (bounded `maxPages`, `resume` continues) —
-the server never crawls on startup.
+`aura_award_index {action:rebuild}` (bounded `maxPages`, 1–20 per call). `resume`
+finishes pending work; re-running `rebuild` continues an unfinished cycle and
+starts a fresh one only after completion; `refresh` forces a new crawl. The
+server never crawls on startup.
 
 ## Any other MCP client
 

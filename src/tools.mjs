@@ -3,7 +3,7 @@
 // (except aura_recommend's single bounded auto-retry + editorial fill).
 import { textResult } from './protocol.mjs';
 import { installGuide, tokenHints, buildPrompt, buildInspoRecommend, buildInspoComponents, buildInspoReference, buildInspoSystem, buildInspoCompare, buildDocsPlan, buildDocsCheck, docsStampFor, combineScaffold, INSPO_MACROS, INSPO_VIBES, INSPO_MODES } from './guide.mjs';
-import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, awardStaticMotion, awardStaticSummary, AWARD_SECTIONS } from './awards.mjs';
+import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, awardStaticMotion, awardStaticSummary, awardFetchGuardedHtml, AWARD_SECTIONS } from './awards.mjs';
 import { createAwardIndex } from './awards-index.mjs';
 import { cdpBandsFromHtml } from './browser-cdp.mjs';
 const SORTS = ['popular', 'recent', 'trending', 'updated'];
@@ -562,10 +562,11 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         const line = awardStaticSummary(d.slug, d.motion_static);
         if (line) staticCues.push(line);
       }
+      let motionRecorded = false;
       try {
         const mr = awardIndex.searchMotion({ limit: 25 });
         const hits = (mr.items || []).filter((m) => normed.some((s) => String(m.url || '').toLowerCase().includes(s)));
-        if (hits.length) motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; ');
+        if (hits.length) { motionRecorded = true; motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; '); }
         else {
           if (staticCues.length) motionNotes = 'Static markup cues (NOT runtime observation — record a study for trigger counts/easing): ' + staticCues.join(' | ');
           gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
@@ -577,7 +578,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       // PROPOSED tokens (never presented as observed ref evidence), mapped
       // against the refs' observed luminance bands.
       const requestedPalette = [...new Set([...String(goal + ' ' + (visualDirection || '')).matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)].map((m) => { const h = m[1]; return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toUpperCase(); }))].slice(0, 6);
-      const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
+      const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, motionRecorded, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
       // next_calls: immediately executable follow-ups built ONLY from real
       // ids/urls gathered above — the agent acts without another search round.
       const compMatches = auraMatches.filter((m) => m.section !== 'tokens' && !m.editorial).slice(0, 3);
@@ -618,11 +619,16 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       };
       const isLocalInput = (raw) => typeof raw === 'string' && (/^file:\/\//i.test(raw) || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || /^[^/:?#]+\.html?([?#]|$)/i.test(raw));
       const fetchStatic = async (target) => {
-        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.2' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
-        if (res.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
-        if (!res.ok) throw awardErr('UPSTREAM_ERROR', 'HTTP ' + res.status + ' for ' + target);
-        const text = await res.text();
-        return text.slice(0, 1500000);
+        // Shared guarded fetch: manual redirects with per-hop URL
+        // classification + DNS guard, streaming bounded read. The old
+        // redirect:'follow' fetch could land on a blocked host after a
+        // server-side redirect; this one re-validates every hop.
+        const got = await awardFetchGuardedHtml(target, { fetchImpl: globalThis.fetch, allowLocal, label: 'audited page' });
+        if (!got.ok) {
+          if (got.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
+          throw awardErr('UPSTREAM_ERROR', 'static fetch failed for ' + target + ': ' + String(got.reason).slice(0, 200));
+        }
+        return got.html;
       };
       const structureOf = async (rawTarget, label) => {
         if (isLocalInput(rawTarget)) return readLocalSource(rawTarget, label || 'url');
@@ -653,7 +659,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'capture needs Chrome: install it or set AURA_CHROME_PATH. Fallback: aura_visual_audit {mode:structure} estimates sections from static HTML without a browser.');
         try { return textResult(await awardBrowser.capture(target, { viewport, waitStrategy, settleMs, allowLocal })); }
         catch (e) {
-          if (e && e.code === 'BROWSER_UNAVAILABLE') throw e;
+          if (e && (e.code === 'BROWSER_UNAVAILABLE' || e.code === 'UNSUPPORTED_OPERATION')) throw e;
           throw awardErr('UPSTREAM_ERROR', 'capture failed: ' + String((e && e.message) || e).slice(0, 220) + ' — retry, or use mode:structure for a static estimate');
         }
       }
@@ -707,7 +713,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         video = enc.video; videoAvailable = !!enc.available; videoHint = enc.hint || null;
       } catch (e) { videoHint = String((e && e.message) || e).slice(0, 160); }
       if (!videoAvailable && !videoHint) videoHint = 'ffmpeg not found; install ffmpeg or set AURA_FFMPEG_PATH for .webm output — frame JPEGs retained';
-      return textResult({ mode, url: target, study: rec.study, frames: rec.frames, frameCount: rec.frameCount, video, video_available: videoAvailable, ...(videoHint ? { videoHint } : {}) }); },
+      return textResult({ mode, url: target, study: rec.study, frames: rec.frames, frameCount: rec.frameCount, video, video_available: videoAvailable, ...(videoHint ? { videoHint } : {}), ...(rec.retentionNote ? { retentionNote: rec.retentionNote } : {}) }); },
     aura_award_index: async (a) => { a = a || {}; const action = awardMode(a.action, ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'], 'action');
       if (action === 'status') return textResult({ action, ...awardIndex.getStatus() });
       if (action === 'watch_list') return textResult({ action, watches: awardIndex.watchList() });
@@ -724,17 +730,21 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       if (action === 'new_winners') {
         if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', 'new_winners needs an award client (server wiring)');
         const r = await awardIndex.newWinners({ client: awardClient, award: a.award || 'sotd' });
-        let deltas = [];
-        try { deltas = awardIndex.checkWatches ? awardIndex.checkWatches() : []; } catch { deltas = []; }
-        return textResult({ action, ...r, watchDeltas: deltas });
+        let deltas = []; let seeded = [];
+        try {
+          if (awardIndex.checkWatchesDetailed) { const w = awardIndex.checkWatchesDetailed(); deltas = w.deltas || []; seeded = w.seeded || []; }
+          else deltas = awardIndex.checkWatches ? awardIndex.checkWatches() : [];
+        } catch { deltas = []; seeded = []; }
+        return textResult({ action, ...r, watchDeltas: deltas, ...(seeded.length ? { watchBaselineSeeded: seeded, watchBaselineNote: 'first check for these watches seeded their baseline silently — future deltas report newly indexed matches only' } : {}) });
       }
       if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', action + ' needs an award client (server wiring)');
       const maxPages = a.maxPages === undefined ? 5 : num(a.maxPages, 'maxPages');
       if (typeof maxPages !== 'number' || maxPages < 1 || maxPages > 20) bad('maxPages must be 1-20 (bounded crawl per call; resume for more)');
-      // Bounded crawl: cap the taxonomy to maxPages per call, keep resume state.
-      const tax = awardIndex.getTaxonomy();
-      const tags = (tax.filters || []).slice(0, Math.floor(maxPages));
-      const r = action === 'refresh' ? await awardIndex.refresh({ client: awardClient, tags }) : action === 'resume' ? await awardIndex.resume({ client: awardClient, tags: tags.length ? tags : undefined }) : await awardIndex.rebuild({ client: awardClient, tags: tags.length ? tags : undefined });
-      return textResult({ action, ...r, note: 'bounded per call (maxPages); call resume to continue' }); },
+      // Bounded crawl: the index layer owns the plan; maxPages caps fetches
+      // THIS call so a plan advances across calls instead of re-crawling the
+      // same prefix. No tag slicing here — the stored plan defines the pages.
+      const args = { client: awardClient, maxPages: Math.floor(maxPages) };
+      const r = action === 'refresh' ? await awardIndex.refresh(args) : action === 'resume' ? await awardIndex.resume(args) : await awardIndex.rebuild(args);
+      return textResult({ action, ...r, note: r.note || 'page budget reached; call resume to continue the same plan' }); },
   };
 };

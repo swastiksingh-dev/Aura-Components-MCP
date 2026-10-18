@@ -2,7 +2,59 @@
 
 All notable changes to `aura-components-mcp`.
 
-## [Unreleased]
+## [1.7.3] — 2026-10-18
+
+Hardening pass over the six award tools and shared infrastructure. No public
+tool/contract changes, no new dependencies. Test suite: 275 hermetic
+(226 before + 49 new) + 45 live checks green.
+
+### Security
+
+- Fixed `awardParseIpv6` compressed-form (`::`) fill count: every compressed
+  IPv6 was classified invalid, which mis-blocked public AAAA/dual-stack hosts
+  and broke `[::1]` under `allowLocal`. Classification now matches the literal
+  ranges (`::1` loopback, `fe80::/10`, `fc00::/7`, …), and `[::ffff:127.0.0.1]`
+  counts as loopback while mapped private/link-local/metadata addresses stay
+  blocked.
+- All award HTML fetches (search, inspect, index crawl, static audit) run
+  through one guarded client: scheme + literal host policy, bounded best-effort
+  DNS check (positive-blocking only, ~1.5 s cap), redirect targets re-validated,
+  streamed body size cap (`/exceeds/`), 404 → `NOT_FOUND`, 429 → no retry.
+
+### Fixed
+
+- `aura_award_index` lifecycle: `rebuild` continues an unfinished same-plan
+  cycle and starts a new cycle only after completion; `resume` finishes
+  pending work and then returns an explicit complete no-op; `refresh` starts a
+  new cycle only after lock acquisition; `maxPages` (1–20) is enforced inside
+  the index layer as a per-call fetch budget.
+- `new_winners` drift guard: an empty/failed upstream listing returns
+  `degraded: true` + parser stamp and never overwrites a non-empty baseline;
+  filtered-empty listings never count as empty; a genuinely empty but
+  understood listing on a fresh index seeds an explicit empty baseline.
+- Watches: `kind:"url"` records normalize canonical `/sites/<slug>` URLs or
+  bare slugs; legacy raw-URL records still match at check time and
+  `watch_remove` accepts either form.
+- Browser flows: after navigation settles the page URL is re-checked
+  (`location.href`, http(s) only); blocked/non-http(s) targets abort with
+  `UNSUPPORTED_OPERATION` + `blockedUrl` instead of reading page state.
+- Artifact honesty: `capture` reports `artifactPath` only when the file was
+  actually written (`artifactNote` otherwise) and prunes old temp captures
+  (newest 20 kept) with a `retentionNote`; `recordFrames` prunes
+  `aura-motion-*` dirs older than 24 h; `encodeWebm` validates frames first
+  and reports `framesUsed`.
+- `aura_design_blueprint` confidence gains its motion point only from recorded
+  motion studies (`motionRecorded: true`) — static markup cues never raise it.
+- `aura_visual_audit` capture/motion rethrow `BROWSER_UNAVAILABLE` /
+  `UNSUPPORTED_OPERATION` instead of degrading to static estimates (browserless
+  modes still degrade, with `fallbackFrom`/`fallbackWhy`).
+
+### Tests
+
+- 6 new hermetic suites (49 checks): URL/IPv6 security matrix, bounded client
+  limits, index lifecycle (resume/refresh/lock), watch normalization, output
+  quality (confidence/notes/fragments), artifact retention + `encodeWebm`
+  validation. 275 hermetic total, all green.
 
 ## [1.7.2] — 2026-10-15
 

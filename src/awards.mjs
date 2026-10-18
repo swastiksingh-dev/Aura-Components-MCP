@@ -9,7 +9,7 @@
 export const AWARD_SCHEMA_VERSION = 1;
 export const AWARD_BASE_URL = "https://www.awwwards.com";
 export const AWARD_ASSETS_URL = "https://assets.awwwards.com";
-export const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.2";
+export const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.3";
 export const AWARD_ALLOWED_HOSTS = ["www.awwwards.com", "awwwards.com", "assets.awwwards.com"];
 export const AWARD_TIMEOUT_MS = 10000;
 export const AWARD_MAX_BYTES = 2 * 1024 * 1024;
@@ -39,13 +39,152 @@ export function awardNormalizeSlug(s) {
   if (!v || v.length > 120) throw awardBad("slug must be 1-120 chars of [a-z0-9-], got: " + String(s).slice(0, 80));
   return v;
 }
+// Watches of kind "url" target a site slug. Accept either a bare slug or a
+// canonical Awwwards site URL and reduce both to the same slug, so a stored
+// watch always compares equal to the indexed slug (legacy raw-URL records
+// are normalized at match time too).
+export function awardWatchTargetSlug(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) throw awardBad("url watch needs a site slug or an awwwards /sites/<slug> url");
+  let slug = s;
+  if (/^https?:\/\//i.test(s)) {
+    let u;
+    try { u = new URL(s); } catch { throw awardBad("url watch is not a parseable url: " + s.slice(0, 120)); }
+    const host = u.hostname.toLowerCase();
+    if (!AWARD_ALLOWED_HOSTS.includes(host)) throw awardBad("url watch must point at awwwards.com, got: " + host);
+    const m = /^\/sites\/([^/]+)\/?$/.exec(u.pathname);
+    if (!m) throw awardBad("url watch must be an awwwards.com/sites/<slug> url, got path: " + u.pathname.slice(0, 120));
+    slug = m[1];
+  }
+  return awardNormalizeSlug(slug);
+}
 
 // ---- URL safety (SSRF guard) ----
-const AWARD_BLOCKED_HOST_RES = [/^localhost$/i, /^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^169\.254\./, /^0\.0\.0\.0$/, /^\[?::1\]?$/, /\.local$/i, /^metadata\.google\.internal$/i];
+// Parsed-address classification, not regex matching: WHATWG URL already
+// canonicalizes alternate IPv4 spellings (0x7f000001 → 127.0.0.1, 2130706433
+// → 127.0.0.1) and IPv4-mapped IPv6 (::ffff:127.0.0.1 → ::ffff:7f00:1), so
+// policy decisions run on normalized forms. allowLocal relaxes LOOPBACK ONLY
+// (127.0.0.0/8, ::1, localhost names) for intended local dev builds; private
+// ranges, link-local, CGNAT, ULA, multicast/reserved and cloud metadata stay
+// blocked regardless of allowLocal. See SECURITY.md.
+const AWARD_METADATA_HOSTNAMES = new Set(["metadata.google.internal", "metadata.goog", "instance-data", "instance-data.ec2.internal"]);
+const AWARD_LOCAL_HOST_SUFFIXES = [".local", ".internal", ".home.arpa"];
+function awardIpv4Number(a, b, c, d) { return (((a << 24) >>> 0) + (b << 16) + (c << 8) + d) >>> 0; }
+function awardInIpv4Range(n, base, bits) {
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return ((n & mask) >>> 0) === ((base & mask) >>> 0);
+}
+export function awardParseIpv4(s) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(s || ""));
+  if (!m) return null;
+  const parts = m.slice(1).map(Number);
+  if (parts.some((p) => p > 255)) return null;
+  return awardIpv4Number(parts[0], parts[1], parts[2], parts[3]);
+}
+export function awardClassifyIpv4(n) {
+  if (awardInIpv4Range(n, 0x7f000000, 8)) return "loopback";
+  if (awardInIpv4Range(n, 0x0a000000, 8)) return "private";
+  if (awardInIpv4Range(n, 0xac100000, 12)) return "private";
+  if (awardInIpv4Range(n, 0xc0a80000, 16)) return "private";
+  if (awardInIpv4Range(n, 0x64400000, 10)) return "private"; // 100.64.0.0/10 CGNAT (incl. Alibaba metadata)
+  if (awardInIpv4Range(n, 0xa9fe0000, 16)) return "link-local"; // 169.254/16 (incl. AWS/GCP/Azure IMDS)
+  if (n === 0) return "unspecified";
+  if (awardInIpv4Range(n, 0xe0000000, 4)) return "multicast";
+  if (awardInIpv4Range(n, 0xf0000000, 4)) return "reserved"; // 240/4 incl. broadcast
+  if (awardInIpv4Range(n, 0xc0000000, 24)) return "reserved"; // 192.0.0.0/24 (incl. Oracle metadata .192)
+  if (awardInIpv4Range(n, 0xc0000200, 24)) return "reserved"; // 192.0.2.0/24 TEST-NET-1
+  if (awardInIpv4Range(n, 0xc6120000, 15)) return "reserved"; // 198.18.0.0/15 benchmark
+  if (awardInIpv4Range(n, 0xc6336400, 24)) return "reserved"; // 198.51.100.0/24 TEST-NET-2
+  if (awardInIpv4Range(n, 0xcb007100, 24)) return "reserved"; // 203.0.113.0/24 TEST-NET-3
+  return "public";
+}
+export function awardParseIpv6(s) {
+  let t = String(s || "").toLowerCase();
+  if (t.startsWith("[") && t.endsWith("]")) t = t.slice(1, -1);
+  if (!t.includes(":")) return null;
+  let head = t, tail = null;
+  const dc = t.indexOf("::");
+  if (dc >= 0) { head = t.slice(0, dc); tail = t.slice(dc + 2); }
+  const groups = (part) => (part ? part.split(":") : []);
+  const headG = groups(head), tailG = groups(tail);
+  const bytes = [];
+  const pushGroup = (g) => {
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(g)) {
+      const n = awardParseIpv4(g);
+      if (n === null) return false;
+      bytes.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+      return true;
+    }
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return false;
+    const v = parseInt(g, 16);
+    bytes.push((v >> 8) & 255, v & 255);
+    return true;
+  };
+  for (const g of headG) if (!pushGroup(g)) return null;
+  if (tail !== null) {
+    const left = 16 - bytes.length;
+    if (left < 0) return null;
+    const tailBytes = [];
+    for (const g of tailG) {
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(g)) {
+        const n = awardParseIpv4(g);
+        if (n === null) return null;
+        tailBytes.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+      } else {
+        if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+        const v = parseInt(g, 16);
+        tailBytes.push((v >> 8) & 255, v & 255);
+      }
+      if (bytes.length + tailBytes.length > 16) return null;
+    }
+    const voidCount = 16 - bytes.length - tailBytes.length;
+    if (voidCount < 0) return null;
+    for (let i = 0; i < voidCount; i++) bytes.push(0);
+    bytes.push(...tailBytes);
+  }
+  if (bytes.length !== 16) return null;
+  return bytes;
+}
+export function awardClassifyIpv6(bytes) {
+  const allZero = bytes.every((b) => b === 0);
+  if (allZero) return "unspecified";
+  if (bytes.slice(0, 15).every((b) => b === 0) && bytes[15] === 1) return "loopback";
+  const first10 = bytes.slice(0, 10).every((b) => b === 0);
+  const mapped = first10 && bytes[10] === 0xff && bytes[11] === 0xff; // ::ffff:0:0/96
+  const compatible = first10 && bytes[10] === 0 && bytes[11] === 0 && bytes.slice(12, 15).some((b) => b !== 0); // deprecated ::a.b.c.d
+  if (mapped || compatible) {
+    const v4 = awardClassifyIpv4(awardIpv4Number(bytes[12], bytes[13], bytes[14], bytes[15]));
+    return mapped ? v4 : (v4 === "public" ? "reserved" : v4);
+  }
+  // NAT64 well-known prefix 64:ff9b::/96 embeds an IPv4 destination.
+  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && bytes.slice(4, 12).every((b) => b === 0)) {
+    return awardClassifyIpv4(awardIpv4Number(bytes[12], bytes[13], bytes[14], bytes[15]));
+  }
+  if ((bytes[0] & 0xfe) === 0xfc) return "private"; // fc00::/7 unique-local
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return "link-local"; // fe80::/10
+  if (bytes[0] === 0xff) return "multicast";
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return "reserved"; // 2001:db8::/32 documentation
+  return "public";
+}
+export function awardClassifyHost(hostname) {
+  let h = String(hostname ?? "").toLowerCase().replace(/\.+$/, "");
+  if (!h) return { kind: "invalid", host: String(hostname ?? "") };
+  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
+  if (h.includes(":")) {
+    const bytes = awardParseIpv6(h);
+    if (!bytes) return { kind: "invalid", host: h };
+    return { kind: awardClassifyIpv6(bytes), version: 6, host: h };
+  }
+  const v4 = awardParseIpv4(h);
+  if (v4 !== null) return { kind: awardClassifyIpv4(v4), version: 4, host: h };
+  if (/^[0-9.]+$/.test(h)) return { kind: "invalid", host: h }; // numeric-looking but unparseable
+  if (h === "localhost" || h.endsWith(".localhost")) return { kind: "loopback", version: null, host: h };
+  if (AWARD_METADATA_HOSTNAMES.has(h)) return { kind: "metadata", version: null, host: h };
+  if (AWARD_LOCAL_HOST_SUFFIXES.some((suf) => h.endsWith(suf))) return { kind: "local-name", version: null, host: h };
+  return { kind: "public", version: null, host: h };
+}
 export function awardIsBlockedHost(hostname) {
-  const h = String(hostname || "").toLowerCase().replace(/\.$/, "");
-  for (const re of AWARD_BLOCKED_HOST_RES) if (re.test(h)) return true;
-  return false;
+  return awardClassifyHost(hostname).kind !== "public";
 }
 export function awardValidateHttpUrl(raw, { allowLocal = false } = {}) {
   if (typeof raw !== "string" || !raw.trim()) throw awardBad("url must be a non-empty http(s) string");
@@ -54,17 +193,67 @@ export function awardValidateHttpUrl(raw, { allowLocal = false } = {}) {
   try { u = new URL(raw.trim()); } catch { throw awardBad("url is not parseable: " + raw.slice(0, 120)); }
   if (u.protocol !== "http:" && u.protocol !== "https:") throw awardBad("only http/https urls are allowed, got: " + u.protocol);
   if (u.username || u.password) throw awardBad("urls with credentials are not allowed");
-  if (awardIsBlockedHost(u.hostname) && !allowLocal) {
-    const e = new Error("private/local target blocked (pass allowLocal:true for loopback dev builds): " + u.hostname);
-    e.code = "UNSUPPORTED_OPERATION";
-    throw e;
+  const cls = awardClassifyHost(u.hostname);
+  if (cls.kind === "public") return u.toString();
+  if (allowLocal && cls.kind === "loopback") return u.toString();
+  const e = new Error(awardBlockedReason(cls, u.hostname));
+  e.code = "UNSUPPORTED_OPERATION";
+  e.hostKind = cls.kind;
+  throw e;
+}
+function awardBlockedReason(cls, hostname) {
+  const h = String(hostname);
+  if (cls.kind === "loopback") return "loopback target blocked (pass allowLocal:true for intended local dev builds): " + h;
+  if (cls.kind === "metadata") return "cloud metadata endpoints are never fetched: " + h;
+  if (cls.kind === "private") return "private-network targets are never fetched, even with allowLocal:true (allowLocal permits loopback only): " + h;
+  if (cls.kind === "link-local") return "link-local targets are never fetched (" + h + ")";
+  if (cls.kind === "unspecified" || cls.kind === "multicast" || cls.kind === "reserved") return "non-routable target blocked (" + cls.kind + "): " + h;
+  if (cls.kind === "local-name") return "local-network hostname blocked (" + h + "); only loopback dev targets are permitted with allowLocal:true";
+  return "unrecognized host is not fetched: " + h;
+}
+
+// ---- DNS resolution guard ----
+// Best-effort and positive-blocking only: a hostname that RESOLVES to a
+// prohibited address is refused; a lookup that fails (offline DNS) is not an
+// error here — the real connection decides, and every redirect hop is
+// re-validated anyway. Bounded: lookups that take too long return unchecked
+// instead of stalling a tool call.
+export async function awardCheckHostResolution(rawUrl, { lookup = null, allowLocal = false, timeoutMs = 1500 } = {}) {
+  const out = { url: String(rawUrl), host: null, checked: false, blocked: false, addresses: [], blockedAddresses: [], reason: null };
+  let u;
+  try { u = new URL(String(rawUrl)); } catch { out.reason = "unparseable url"; return out; }
+  const cls = awardClassifyHost(u.hostname);
+  out.host = cls.host;
+  if (cls.version !== null) { out.checked = true; return out; } // IP literals were classified at validation time
+  const fn = lookup || awardDefaultLookup();
+  if (typeof fn !== "function") { out.reason = "no dns lookup available"; return out; }
+  let addrs;
+  let timer = null;
+  try {
+    addrs = await Promise.race([
+      Promise.resolve(fn(cls.host, { all: true })),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+    ]);
+  } catch (e) { out.reason = "dns lookup failed: " + String((e && e.message) || e).slice(0, 120); return out; }
+  finally { if (timer) clearTimeout(timer); }
+  if (addrs === null || addrs === undefined) { out.reason = "dns lookup timed out"; return out; }
+  const list = Array.isArray(addrs) ? addrs : [addrs];
+  out.checked = true;
+  for (const a of list) {
+    const address = typeof a === "string" ? a : (a && a.address) || "";
+    if (!address) continue;
+    out.addresses.push(address);
+    const k = awardClassifyHost(address).kind;
+    const loopbackOk = allowLocal && k === "loopback";
+    if (k !== "public" && !loopbackOk) out.blockedAddresses.push(address);
   }
-  if (u.hostname === "169.254.169.254" || /metadata/i.test(u.hostname)) {
-    const e = new Error("cloud metadata endpoints are never fetched");
-    e.code = "UNSUPPORTED_OPERATION";
-    throw e;
-  }
-  return u.toString();
+  out.blocked = out.blockedAddresses.length > 0;
+  return out;
+}
+function awardDefaultLookup() {
+  const g = globalThis.process && globalThis.process.getBuiltinModule ? globalThis.process.getBuiltinModule : null;
+  if (typeof g !== "function") return null;
+  try { return g.call(globalThis.process, "node:dns").promises.lookup; } catch { return null; }
 }
 export function awardValidateAwardPath(pathOrUrl) {
   const s = String(pathOrUrl ?? "");
@@ -106,39 +295,47 @@ export function awardElementUrl(mediaPath) { return AWARD_ASSETS_URL + "/awards/
 
 // ---- Parsers (scoped, fixture-driven, resilient to missing fields) ----
 const AWARD_LABELS = { sotd: "Site of the Day", dev: "Developer Award", hm: "Honorable Mention", sotm: "Site of the Month", mobile: "Mobile Excellence", ecom: "E-Commerce Award" };
-export function awardParseListing(html) {
+// Bump when the listing parser's expectations about upstream markup change;
+// diagnostics carry it so callers can tell "page is empty" from "parser can
+// no longer read the page" without guessing.
+export const AWARD_PARSER_VERSION = 1;
+const AWARD_FIELD_BOUNDS = { slug: 120, title: 200, tag: 40, tags: 20, studio: 120, liveUrl: 500, thumb: 500 };
+function awardBoundStr(v, max) { return String(v ?? "").slice(0, max); }
+export function awardParseListingEx(html) {
   const src = String(html || "");
-  if (!src) return [];
+  const diagnostics = { parserVersion: AWARD_PARSER_VERSION, bytes: src.length, blobs: 0, parsed: 0, filtered: 0, malformed: 0, anchors: 0, verdict: "empty-input" };
+  if (!src) return { sites: [], diagnostics };
   const sites = [];
   const seen = new Set();
   const parts = src.split('data-collectable-model-value="');
   const blobParts = parts.slice(1);
+  diagnostics.blobs = blobParts.length;
   for (const part of blobParts) {
     const end = part.indexOf('">');
-    if (end < 0 || end > 20000) continue;
+    if (end < 0 || end > 20000) { diagnostics.malformed++; continue; }
     let meta;
-    try { meta = JSON.parse(awardDecodeEntities(part.slice(0, end))); } catch { continue; }
-    if (!meta || !meta.slug || !meta.title) continue;
-    if (meta.type && meta.type !== "submission") continue;
-    const slug = String(meta.slug).toLowerCase();
-    if (seen.has(slug)) continue;
+    try { meta = JSON.parse(awardDecodeEntities(part.slice(0, end))); } catch { diagnostics.malformed++; continue; }
+    if (!meta || !meta.slug || !meta.title) { diagnostics.filtered++; continue; }
+    if (meta.type && meta.type !== "submission") { diagnostics.filtered++; continue; }
+    const slug = awardBoundStr(String(meta.slug).toLowerCase(), AWARD_FIELD_BOUNDS.slug);
+    if (seen.has(slug)) { diagnostics.filtered++; continue; }
     const card = part.slice(end, end + 8000);
     const detailMatch = card.match(/href="(\/sites\/[^"#?]+)"/);
-    if (!detailMatch) continue;
+    if (!detailMatch) { diagnostics.filtered++; continue; }
     const liveMatch = card.match(/class="figure-rollover__bt"[^>]*href="(https?:\/\/[^"]+)"/);
     const awards = [...new Set([...card.matchAll(/budget-tag--([a-z-]+)/g)].map((m) => AWARD_LABELS[m[1]] ?? m[1]))];
     const studioMatch = card.match(/avatar-name__title">([^<]+)</);
     seen.add(slug);
     sites.push({
       slug,
-      title: awardDecodeEntities(meta.title).trim(),
+      title: awardBoundStr(awardDecodeEntities(meta.title).trim(), AWARD_FIELD_BOUNDS.title),
       createdAt: Number(meta.createdAt) || 0,
-      tags: Array.isArray(meta.tags) ? meta.tags.map((t) => awardDecodeEntities(t)).filter(Boolean) : [],
-      thumbnailPath: (meta.images && meta.images.thumbnail) ? String(meta.images.thumbnail) : "",
-      liveUrl: liveMatch ? awardDecodeEntities(liveMatch[1]) : null,
+      tags: Array.isArray(meta.tags) ? meta.tags.map((t) => awardBoundStr(awardDecodeEntities(t), AWARD_FIELD_BOUNDS.tag)).filter(Boolean).slice(0, AWARD_FIELD_BOUNDS.tags) : [],
+      thumbnailPath: (meta.images && meta.images.thumbnail) ? awardBoundStr(meta.images.thumbnail, AWARD_FIELD_BOUNDS.thumb) : "",
+      liveUrl: liveMatch ? awardBoundStr(awardDecodeEntities(liveMatch[1]), AWARD_FIELD_BOUNDS.liveUrl) : null,
       detailPath: detailMatch[1],
       awards,
-      studio: studioMatch ? awardDecodeEntities(studioMatch[1]).trim() : null,
+      studio: studioMatch ? awardBoundStr(awardDecodeEntities(studioMatch[1]).trim(), AWARD_FIELD_BOUNDS.studio) : null,
       source: "awwwards",
       sourceUrl: AWARD_BASE_URL + detailMatch[1],
     });
@@ -155,8 +352,22 @@ export function awardParseListing(html) {
       sites.push({ slug, title: awardStripTags(m[2]) || slug, createdAt: 0, tags: [], thumbnailPath: "", liveUrl: null, detailPath: "/sites/" + slug, awards: [], studio: null, source: "awwwards", sourceUrl: AWARD_BASE_URL + "/sites/" + slug });
       if (sites.length >= 50) break;
     }
+    diagnostics.anchors = sites.length;
   }
-  return sites;
+  diagnostics.parsed = sites.length;
+  // Verdict: "ok" whenever cards were read. With zero cards, distinguish a
+  // page the parser understood (filtered/empty listing) from markup it can
+  // no longer read (drift) — callers can keep trust on the former and warn
+  // or abort on the latter instead of treating 0 as an error everywhere.
+  if (sites.length) diagnostics.verdict = "ok";
+  else if (diagnostics.malformed > 0) diagnostics.verdict = "drift-empty";
+  else if (blobParts.length > 0) diagnostics.verdict = "filtered-empty";
+  else if (/awwwards|data-collectable|\/sites\//i.test(src)) diagnostics.verdict = "empty-listing";
+  else diagnostics.verdict = "drift-empty";
+  return { sites, diagnostics };
+}
+export function awardParseListing(html) {
+  return awardParseListingEx(html).sites;
 }
 export function awardIsNomineePage(html) { return /<h2 class="text-default">\s*Nominee\b/.test(String(html || "")); }
 export function awardParseScore(html) {
@@ -410,6 +621,45 @@ export function awardSiteIdeas(detail) {
   return ideas.slice(0, 6);
 }
 
+// ---- Bounded body reader ----
+// Reads at most maxBytes from a fetch Response without trusting
+// content-length: a streaming read stops as soon as the threshold is
+// crossed, so a missing or lying header cannot balloon memory. Falls back
+// to res.text() (with a size post-check) when the response exposes no byte
+// stream, which keeps plain test doubles working.
+export async function awardReadBoundedBody(res, maxBytes, label = "response") {
+  if (!res) throw awardUpstream(label + " has no response body");
+  const len = res.headers && typeof res.headers.get === "function" ? Number(res.headers.get("content-length")) : NaN;
+  if (Number.isFinite(len) && len > maxBytes) throw awardUpstream(label + " exceeds " + maxBytes + " bytes");
+  const body = res.body;
+  if (body && typeof body.getReader === "function") {
+    const reader = body.getReader();
+    const chunks = [];
+    let total = 0;
+    let oversize = false;
+    try {
+      for (;;) {
+        const step = await reader.read();
+        if (!step || step.done) break;
+        const value = step.value;
+        if (value === undefined || value === null) continue;
+        total += typeof value === "string" ? value.length : (value.byteLength || 0);
+        if (total > maxBytes) { oversize = true; throw awardUpstream(label + " exceeds " + maxBytes + " bytes"); }
+        chunks.push(value);
+      }
+    } finally {
+      if (oversize) { try { await reader.cancel(); } catch { /* stream already errored */ } }
+    }
+    const decoder = new TextDecoder("utf-8");
+    let text = "";
+    for (const c of chunks) text += typeof c === "string" ? c : decoder.decode(c, { stream: true });
+    return text + decoder.decode();
+  }
+  const text = await res.text();
+  if (typeof text === "string" && text.length > maxBytes) throw awardUpstream(label + " exceeds " + maxBytes + " bytes");
+  return text || "";
+}
+
 // ---- Polite fetch client (1 req/s, bounded, distinct errors) ----
 export function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rateMs = AWARD_RATE_MS, userAgent = AWARD_USER_AGENT } = {}) {
   const fetchFn = fetchImpl || globalThis.fetch;
@@ -426,63 +676,87 @@ export function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rat
     return next;
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function fetchOnce(url, label) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(new Error("timeout after " + timeoutMs + "ms fetching " + label)), timeoutMs);
-    try {
-      const res = await fetchFn(url, { headers: { "user-agent": userAgent, accept: "text/html,*/*" }, redirect: "manual", signal: ctrl.signal });
-      return res;
-    } finally { clearTimeout(timer); }
-  }
-  async function readBounded(res, label) {
-    const len = res.headers && typeof res.headers.get === "function" ? Number(res.headers.get("content-length")) : NaN;
-    if (Number.isFinite(len) && len > AWARD_MAX_BYTES) throw awardUpstream(label + " exceeds " + AWARD_MAX_BYTES + " bytes");
-    const text = await res.text();
-    if (text && text.length > AWARD_MAX_BYTES) throw awardUpstream(label + " exceeds " + AWARD_MAX_BYTES + " bytes");
-    return text || "";
-  }
+  const isRedirect = (status) => status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
   async function getAwardHtml(pathOrUrl) {
     const path = awardValidateAwardPath(pathOrUrl);
     const startUrl = AWARD_BASE_URL + path;
     let url = startUrl;
-    let lastErr = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    let retried = false;   // single retry shared by 5xx and network failures
+    let redirects = 0;     // redirects do not consume the retry budget
+    for (;;) {
       await acquire();
-      let res;
-      try { res = await fetchOnce(url, "awwwards page"); }
-      catch (e) {
-        if (e && e.name === "AbortError") throw awardUpstream("timeout fetching " + url);
-        lastErr = e;
-        if (attempt < 1) { await sleep(300); continue; }
-        throw awardUpstream("network error fetching " + url + ": " + String((e && e.message) || e).slice(0, 200));
-      }
-      if (res.status === 301 || res.status === 302 || res.status === 303 || res.status === 307 || res.status === 308) {
-        const loc = res.headers && res.headers.get ? res.headers.get("location") : null;
-        if (!loc || attempt === 1) throw awardUpstream("redirect without location for " + url);
+      const ctrl = new AbortController();
+      let timedOut = false;
+      // One deadline covers connect AND body read: a stalled stream aborts too.
+      const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
+      let res = null;
+      let outcome = null;
+      try {
         try {
-          const next = new URL(loc, url).toString();
-          const nu = new URL(next);
-          if (!AWARD_ALLOWED_HOSTS.includes(nu.hostname.toLowerCase())) throw awardUpstream("redirect leaves award hosts: " + nu.hostname);
-          url = next;
-          continue;
-        } catch (e) { if (e && e.code === "UPSTREAM_ERROR") throw e; throw awardUpstream("bad redirect for " + url); }
+          res = await fetchFn(url, { headers: { "user-agent": userAgent, accept: "text/html,*/*" }, redirect: "manual", signal: ctrl.signal });
+        } catch (e) {
+          outcome = { kind: timedOut ? "timeout" : "network", error: e };
+        }
+        if (!outcome) {
+          const status = res.status;
+          if (isRedirect(status)) {
+            const loc = res.headers && typeof res.headers.get === "function" ? res.headers.get("location") : null;
+            redirects += 1;
+            if (!loc) outcome = { kind: "throw", error: awardUpstream("redirect without location for " + url) };
+            else if (redirects > 5) outcome = { kind: "throw", error: awardUpstream("too many redirects fetching " + startUrl) };
+            else {
+              // Per-hop re-validation: fresh SSRF classification + host allow-list.
+              try {
+                const next = awardValidateHttpUrl(new URL(loc, url).toString());
+                const host = new URL(next).hostname.toLowerCase();
+                if (!AWARD_ALLOWED_HOSTS.includes(host)) throw awardUpstream("redirect leaves award hosts: " + host);
+                url = next;
+                outcome = { kind: "redirect" };
+              } catch (e) {
+                outcome = { kind: "throw", error: e && e.code ? e : awardUpstream("bad redirect for " + url) };
+              }
+            }
+          } else if (status === 404) {
+            outcome = { kind: "throw", error: awardNotFound("awwwards page not found: " + url) };
+          } else if (status === 403 || status === 429) {
+            const e = awardUpstream("awwwards is blocking requests (HTTP " + status + " on " + url + "). Try again later; blocks are never retried.");
+            e.blocked = true;
+            e.status = status;
+            outcome = { kind: "throw", error: e };
+          } else if (status >= 500 && status < 600) {
+            outcome = retried
+              ? { kind: "throw", error: awardUpstream("transient awwwards status " + status + " on " + url) }
+              : { kind: "retry" };
+          } else if (!res.ok) {
+            outcome = { kind: "throw", error: awardUpstream("awwwards HTTP " + status + " on " + url) };
+          } else {
+            try {
+              const html = await awardReadBoundedBody(res, AWARD_MAX_BYTES, "awwwards page");
+              outcome = { kind: "html", html };
+              res = null; // body fully consumed — nothing left to drain
+            } catch (e) {
+              outcome = { kind: "throw", error: e && e.code ? e : awardUpstream((timedOut ? "timeout fetching " : "awwwards body read failed for ") + url) };
+            }
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+        if (res && !res.bodyUsed) { try { if (res.body && typeof res.body.cancel === "function") await res.body.cancel(); } catch { /* socket already released */ } }
       }
-      if (res.status === 404) throw awardNotFound("awwwards page not found: " + url);
-      if (res.status === 403 || res.status === 429) {
-        const e = awardUpstream("awwwards is blocking requests (HTTP " + res.status + " on " + url + "). Try again later; blocks are never retried.");
-        e.blocked = true;
-        e.status = res.status;
-        throw e;
+      if (outcome.kind === "html") return { html: outcome.html, finalUrl: url };
+      if (outcome.kind === "redirect") continue;
+      if (timedOut) throw awardUpstream("timeout fetching " + url);
+      if (outcome.kind === "retry") {
+        retried = true;
+        await sleep(400);
+        continue;
       }
-      if (res.status >= 500 && res.status < 600) {
-        lastErr = awardUpstream("transient awwwards status " + res.status + " on " + url);
-        if (attempt < 1) { await sleep(400); continue; }
-        throw lastErr;
+      if (outcome.kind === "network") {
+        if (!retried) { retried = true; await sleep(300); continue; }
+        throw awardUpstream("network error fetching " + url + ": " + String((outcome.error && outcome.error.message) || outcome.error).slice(0, 200));
       }
-      if (!res.ok) throw awardUpstream("awwwards HTTP " + res.status + " on " + url);
-      return { html: await readBounded(res, "awwwards page"), finalUrl: url };
+      throw outcome.error;
     }
-    throw lastErr instanceof Error ? lastErr : awardUpstream("fetch failed for " + startUrl);
   }
   return { getAwardHtml };
 }
@@ -515,30 +789,80 @@ const AWARD_STATIC_LIBS = [
   { lib: "barba", res: [/barba/i] },
 ];
 const AWARD_STATIC_CUES = ["data-aos", "data-scroll", "scrolltrigger", "sticky", "parallax", "marquee", "reveal", "loader", "preloader"];
-export async function awardStaticMotion(rawUrl, { fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false } = {}) {
+// ---- Guarded HTML fetch (shared by static motion + audit static fallback) ----
+// Manual redirects (≤3 hops) with per-hop URL classification and a
+// best-effort DNS guard, one deadline per hop covering the body read, and a
+// streaming bounded read. Returns {ok:true, url, finalUrl, html} or
+// {ok:false, reason, status?}; only a contract violation (empty input)
+// throws.
+export async function awardFetchGuardedHtml(rawUrl, { fetchImpl, lookup = null, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false, label = "page" } = {}) {
   if (typeof rawUrl !== "string" || !rawUrl.trim()) throw awardErr("BAD_ARGS", "url must be a non-empty string");
-  const fail = (reason) => ({ status: "unavailable", url: String(rawUrl).slice(0, 200), reason: String(reason).slice(0, 200) });
   let target;
   try { target = awardValidateHttpUrl(rawUrl, { allowLocal }); }
-  catch (e) { return fail((e && e.message) || e); }
+  catch (e) { return { ok: false, reason: (e && e.message) || String(e) }; }
   const fetchFn = fetchImpl || globalThis.fetch;
-  let html;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  if (typeof fetchFn !== "function") return { ok: false, reason: "no fetch available" };
+  const guard = async (u) => {
     try {
-      const res = await fetchFn(target, { headers: { "user-agent": AWARD_USER_AGENT, accept: "text/html,*/*" }, redirect: "follow", signal: ctrl.signal });
-      if (res.status === 404) return fail("HTTP 404 for " + target);
-      if (!res.ok) return fail("HTTP " + res.status + " for " + target);
-      html = await res.text();
-    } finally { clearTimeout(timer); }
-  } catch (e) { return fail(e && e.name === "AbortError" ? "timeout fetching " + target : "network error: " + String((e && e.message) || e).slice(0, 120)); }
-  if (!html || !html.length) return fail("empty body for " + target);
+      const dns = await awardCheckHostResolution(u, { lookup, allowLocal });
+      return dns.blocked ? "host resolves to a blocked address (" + dns.blockedAddresses.join(", ") + ")" : null;
+    } catch { return null; }
+  };
+  const firstBlock = await guard(target);
+  if (firstBlock) return { ok: false, reason: firstBlock };
+  let url = target;
+  for (let hop = 0; hop <= 3; hop++) {
+    const ctrl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
+    let res = null;
+    try {
+      try {
+        res = await fetchFn(url, { headers: { "user-agent": AWARD_USER_AGENT, accept: "text/html,*/*" }, redirect: "manual", signal: ctrl.signal });
+      } catch (e) {
+        return { ok: false, reason: timedOut ? "timeout fetching " + url : "network error: " + String((e && e.message) || e).slice(0, 120) };
+      }
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers && typeof res.headers.get === "function" ? res.headers.get("location") : null;
+        if (!loc) return { ok: false, reason: "redirect without location for " + url, status: res.status };
+        if (hop === 3) return { ok: false, reason: "too many redirects for " + target };
+        let next;
+        try { next = awardValidateHttpUrl(new URL(loc, url).toString(), { allowLocal }); }
+        catch (e) { return { ok: false, reason: "redirect blocked: " + ((e && e.message) || e), status: res.status }; }
+        const hopBlock = await guard(next);
+        if (hopBlock) return { ok: false, reason: hopBlock, status: res.status };
+        url = next;
+        continue;
+      }
+      if (res.status === 404) return { ok: false, reason: "HTTP 404 for " + url, status: 404 };
+      if (!res.ok) return { ok: false, reason: "HTTP " + res.status + " for " + url, status: res.status };
+      let html;
+      try {
+        html = await awardReadBoundedBody(res, maxBytes, label);
+        res = null;
+      } catch (e) {
+        return { ok: false, reason: timedOut ? "timeout fetching " + url : String((e && e.message) || e).slice(0, 160) };
+      }
+      if (!html || !html.length) return { ok: false, reason: "empty body for " + url, status: 200 };
+      return { ok: true, url: target, finalUrl: url, html };
+    } finally {
+      clearTimeout(timer);
+      if (res && !res.bodyUsed) { try { if (res.body && typeof res.body.cancel === "function") await res.body.cancel(); } catch { /* socket already released */ } }
+    }
+  }
+  return { ok: false, reason: "redirect loop for " + target };
+}
+export async function awardStaticMotion(rawUrl, { fetchImpl, lookup = null, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false } = {}) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) throw awardErr("BAD_ARGS", "url must be a non-empty string");
+  const fail = (reason) => ({ status: "unavailable", url: String(rawUrl).slice(0, 200), reason: String(reason).slice(0, 200) });
+  const got = await awardFetchGuardedHtml(rawUrl, { fetchImpl, lookup, timeoutMs, maxBytes, allowLocal, label: "static page" });
+  if (!got.ok) return fail(got.reason);
+  const html = got.html;
   const src = html.slice(0, maxBytes);
   const count = (re) => Math.min(999, (src.match(re) || []).length);
   const libs = AWARD_STATIC_LIBS.filter(({ res }) => res.some((re) => re.test(src))).map(({ lib }) => lib);
   return {
-    status: "static-markup", url: target,
+    status: "static-markup", url: got.url,
     libs, keyframes: count(/@keyframes\s/gi), animations: count(/animation\s*:/gi), transitions: count(/transition\s*:/gi),
     canvases: count(/<canvas/gi), videos: count(/<video/gi),
     scrollCues: AWARD_STATIC_CUES.filter((c) => src.toLowerCase().includes(c)),
@@ -623,7 +947,7 @@ export function awardCompareSites(entries) {
   }));
   return { per, sharedTech, sharedTechFamilies, sharedElements: elements.filter((t) => t.frequency >= 2), sharedElementKeywords: elemKeywords.filter((t) => t.frequency >= 2), sharedPalette: palette.filter((t) => t.frequency >= 2), sharedBands: bands, directionHints: direction };
 }
-export function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes, motionNotes, constraints = [], technology = null, visualDirection = null, responsive = null, requestedPalette = [], gaps: extraGaps = [] }) {
+export function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes, motionNotes, motionRecorded = false, constraints = [], technology = null, visualDirection = null, responsive = null, requestedPalette = [], gaps: extraGaps = [] }) {
   if (!goal || !String(goal).trim()) throw awardBad("goal is required");
   const usable = (details || []).filter((d) => d && d.detail);
   const threshold = usable.length === 2 ? 2 : usable.length >= 3 ? Math.ceil(usable.length / 2) : Infinity;
@@ -718,15 +1042,17 @@ export function awardBuildBlueprint({ goal, refs, details, auraMatches, structur
   if (gaps.length) { for (const g of gaps) lines.push("- " + g); }
   else lines.push("- None material: refs, motion/structure evidence as cited above, catalogue matches listed.");
   // Evidence-scored confidence: base from usable ref count, +1 per
-  // independent axis actually present (matched sections, recorded motion,
-  // measured structure, fully-parsed tech). Thin evidence stays low;
-  // rich evidence may reach high — same honesty, both directions.
+  // independent axis actually present (matched sections, RECORDED motion,
+  // measured structure, fully-parsed tech). Static markup cues describe the
+  // page source, not observed runtime behavior, so they never add a point.
+  // Thin evidence stays low; rich evidence may reach high — same honesty,
+  // both directions.
   const why = [];
   let points = Math.min(usable.length, 3);
   why.push(usable.length + " usable ref" + (usable.length === 1 ? "" : "s"));
   const sectionHits = matches.filter((m) => m.section !== "tokens" && !m.editorial).length;
   if (sectionHits >= 4) { points++; why.push(sectionHits + " catalogue sections matched"); }
-  if (motionNotes) { points++; why.push("recorded motion evidence"); }
+  if (motionRecorded) { points++; why.push("recorded motion evidence"); }
   if (structureNotes && structureNotes.includes("(live-dom)")) { points++; why.push("measured structure"); }
   if (usable.length >= 2 && usable.every((d) => (d.detail.technologies || []).length && !d.detail.technologiesInferred)) { points++; why.push("fully-parsed technologies (not inferred)"); }
   const confidence = points <= 1 ? "low" : points <= 3 ? "low-medium" : points === 4 ? "medium" : "high";

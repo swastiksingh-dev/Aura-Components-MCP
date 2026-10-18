@@ -102,6 +102,42 @@ export function cdpBandsFromHtml(html, url) {
   return { url, title: (src.match(/<title>([^<]{1,120})<\/title>/i) || [])[1] || url, totalHeight: null, bands, source: "static-html", note: "offsets/heights unavailable without layout; use capture/structure via browser for measured bands" };
 }
 
+  // Bounded artifact retention: only ever prunes tool-created files/dirs in
+  // tool-owned locations (tmp default dirs), never caller-passed saveDirs.
+export function cdpPruneOldFiles(dir, { prefix, keepNewest = 20 } = {}) {
+  try {
+    const { fs, path } = cdpBuiltins();
+    const entries = fs.readdirSync(dir).filter((n) => n.startsWith(prefix)).map((n) => {
+      const full = path.join(dir, n);
+      let t = 0;
+      try { t = fs.statSync(full).mtimeMs || 0; } catch { /* skipped below by mtime 0 */ }
+      return { full, t };
+    }).filter((e) => e.t > 0).sort((a, b) => b.t - a.t);
+    let removed = 0;
+    for (const e of entries.slice(Math.max(1, keepNewest))) { try { fs.rmSync(e.full, { force: true }); removed++; } catch { /* ignore */ } }
+    return removed;
+  } catch { return 0; }
+}
+export function cdpPruneOldDirs(parentDir, { prefix, maxAgeMs = 24 * 60 * 60 * 1000, skip = null } = {}) {
+  try {
+    const { fs, path } = cdpBuiltins();
+    const nowMs = Date.now();
+    let removed = 0;
+    const skipResolved = skip ? path.resolve(skip) : null;
+    for (const n of fs.readdirSync(parentDir)) {
+      if (!n.startsWith(prefix)) continue;
+      const full = path.join(parentDir, n);
+      if (skipResolved && path.resolve(full) === skipResolved) continue;
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      if (!st.isDirectory()) continue;
+      if (nowMs - (st.mtimeMs || 0) < maxAgeMs) continue;
+      try { fs.rmSync(full, { recursive: true, force: true }); removed++; } catch { /* ignore */ }
+    }
+    return removed;
+  } catch { return 0; }
+}
+
 // CDP connection: id-keyed commands over a WebSocket-like transport.
 // Messages without an id are domain events (Page.loadEventFired, ...)
 // dispatched to onEvent subscribers.
@@ -307,6 +343,26 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
       return out;
     } finally { clearTimeout(stopTimer); cleanup(); }
   }
+  // Post-navigation URL guard: the pre-flight only validates the REQUESTED
+  // url, but Chrome follows server-side redirects on its own — a public URL
+  // that lands on a blocked host (private IP, metadata endpoint, localhost)
+  // must not be read any further. Reads the committed URL via CDP; a
+  // non-string value (test doubles, detached contexts) is skipped rather
+  // than failed, so honest timeouts stay honest.
+  async function cdpNavGuard(send, allowLocal) {
+    let href = null;
+    try {
+      const res = await send("Runtime.evaluate", { expression: "location.href", returnByValue: true }, 5000);
+      href = res && res.result && typeof res.result.value === "string" ? res.result.value : null;
+    } catch { return; }
+    if (!href || !/^https?:\/\//i.test(href)) return;
+    try { awardValidateHttpUrl(href, { allowLocal }); }
+    catch (e) {
+      const err = awardErr("UNSUPPORTED_OPERATION", "navigation ended on a blocked URL: " + href + " (" + String((e && e.message) || e).slice(0, 160) + ")");
+      err.blockedUrl = href;
+      throw err;
+    }
+  }
   return {
     status() {
       let exe = null;
@@ -326,6 +382,7 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
           const settled = waitForSettled(conn, send, waitStrategy);
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, settle));
           // Pre-scroll for lazy sections (bounded).
           try { await send("Runtime.evaluate", { expression: "(async()=>{for(let y=0;y<Math.min(document.documentElement.scrollHeight,10800);y+=450){scrollTo(0,y);await new Promise(r=>setTimeout(r,40));}scrollTo(0,0);await new Promise(r=>setTimeout(r,150));})()", awaitPromise: true }, 8000); } catch { /* best-effort */ }
@@ -335,11 +392,27 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
         },
       });
       const dir = saveDir || path.join(os.tmpdir(), "aura-captures");
-      try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
-      const name = "capture-" + String(now()) + ".png";
-      const file = path.join(dir, name);
-      try { fs.writeFileSync(file, Buffer.from(shot.png, "base64")); } catch { /* return inline only */ }
-      return { url: target, viewport, viewportPx: cdpResolveViewport(viewport), capturedAt: startedAt, artifactPath: file, bytes: Buffer.from(shot.png, "base64").length, page: shot.meta, limitations: ["lazy-loaded sections below the fold may still be placeholders", "blocked third-party resources are not retried"], source: "live-browser" };
+      const png = Buffer.from(shot.png, "base64");
+      let artifactPath = null;
+      let artifactNote = null;
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, "capture-" + String(now()) + ".png");
+        fs.writeFileSync(file, png);
+        artifactPath = file;
+      } catch (e) {
+        artifactNote = "screenshot kept in memory only — could not write to " + dir + " (" + String((e && e.message) || e).slice(0, 120) + ")";
+      }
+      // Retention: only for tool-owned tmp dirs (never a caller saveDir) —
+      // keep the newest 20 captures so long agent sessions cannot fill tmp.
+      let retentionNote = null;
+      if (!saveDir) {
+        try {
+          const removed = cdpPruneOldFiles(dir, { prefix: "capture-", keepNewest: 20 });
+          if (removed > 0) retentionNote = "pruned " + removed + " older capture file(s) (newest 20 kept in " + dir + "; pass saveDir to manage your own directory)";
+        } catch { /* best-effort */ }
+      }
+      return { url: target, viewport, viewportPx: cdpResolveViewport(viewport), capturedAt: startedAt, ...(artifactPath ? { artifactPath } : {}), ...(artifactNote ? { artifactNote } : {}), ...(retentionNote ? { retentionNote } : {}), bytes: png.length, page: shot.meta, limitations: ["lazy-loaded sections below the fold may still be placeholders", "blocked third-party resources are not retried"], source: "live-browser" };
     },
     async structure(url, { viewport = "desktop", allowLocal = false } = {}) {
       const target = awardValidateHttpUrl(url, { allowLocal });
@@ -351,6 +424,7 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
           const settled = waitForSettled(conn, send, "load");
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           const res = await send("Runtime.evaluate", { expression: CDP_SCAN_JS, returnByValue: true }, 10000);
           return (res && res.result && res.result.value) || { title: target, totalHeight: 0, candidates: [] };
         },
@@ -368,6 +442,7 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
           const settled = waitForSettled(conn, send, "load");
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, 1500));
           const res = await send("Runtime.evaluate", { expression: CDP_MOTION_JS, returnByValue: true }, 10000);
           return (res && res.result && res.result.value) || { libs: [], render: [], scrollTrigger: { count: 0 }, tweens: { durations: [], eases: [] }, cssBeziers: [] };
@@ -393,6 +468,7 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
           const settled = waitForSettled(conn, send, "load");
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, Math.min(4000, stepMs)));
           const files = [];
           for (let i = 0; i < n; i++) {
@@ -416,17 +492,34 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
         },
       });
       const study = out.inspect ? reduceCdpScan(target, out.inspect, now(), viewport) : null;
-      return { url: target, viewport, startedAt, frames: out.files, frameCount: out.files.length, study, dir };
+      // Retention: only prunes tool-created sibling dirs in tmp (never a
+      // caller saveDir), and never the current run's directory.
+      let retentionNote = null;
+      if (!saveDir) {
+        try {
+          const removed = cdpPruneOldDirs(os.tmpdir(), { prefix: "aura-motion-", maxAgeMs: 24 * 60 * 60 * 1000, skip: dir });
+          if (removed > 0) retentionNote = "pruned " + removed + " prior motion-study dir(s) older than 24h (this run's frames kept at " + dir + ")";
+        } catch { /* best-effort */ }
+      }
+      return { url: target, viewport, startedAt, frames: out.files, frameCount: out.files.length, study, dir, ...(retentionNote ? { retentionNote } : {}) };
     },
     async encodeWebm(frameFiles, { ffmpegPath = null } = {}) {
+      if (!Array.isArray(frameFiles) || !frameFiles.length) throw cdpBad("no frames to encode");
       const bin = ffmpegPath || findFfmpeg({});
       if (!bin) return { video: null, available: false, hint: "ffmpeg not found; install ffmpeg or set AURA_FFMPEG_PATH for .webm output" };
-      if (!Array.isArray(frameFiles) || !frameFiles.length) throw cdpBad("no frames to encode");
-      const dir = path.dirname(frameFiles[0]);
+      // Only encode frames that actually exist on disk, bounded to the
+      // recording cap; verify they share one directory before shelling out.
+      const requested = frameFiles.slice(0, CDP_MAX_FRAMES).filter((f) => typeof f === "string" && f);
+      const existing = requested.filter((f) => { try { return fs.existsSync(f); } catch { return false; } });
+      if (!existing.length) return { video: null, available: false, hint: "frame files are gone (nothing on disk to encode); re-run mode:record to capture frames" };
+      const dir = path.dirname(existing[0]);
+      if (!existing.every((f) => path.dirname(f) === dir)) return { video: null, available: false, hint: "frame files span multiple directories; cannot encode as one sequence" };
+      const first = /-(\d+)\.jpg$/i.exec(path.basename(existing[0]));
+      const startNumber = first ? String(parseInt(first[1], 10)) : "0";
       const video = path.join(dir, "motion.webm");
-      const args = ["-y", "-framerate", "2", "-i", path.join(dir, "frame-%02d.jpg"), "-c:v", "libvpx", "-pix_fmt", "yuv420p", video];
+      const args = ["-y", "-framerate", "2", "-start_number", startNumber, "-i", path.join(dir, "frame-%02d.jpg"), "-c:v", "libvpx", "-pix_fmt", "yuv420p", video];
       const res = cp.spawnSync(bin, args, { timeout: 60000, windowsHide: true });
-      if (res && res.status === 0 && fs.existsSync(video)) return { video, available: true, bytes: fs.statSync(video).size };
+      if (res && res.status === 0 && fs.existsSync(video)) return { video, available: true, bytes: fs.statSync(video).size, framesUsed: existing.length };
       return { video: null, available: false, hint: "ffmpeg encode failed (" + String(res && res.status) + "); frame JPEGs retained" };
     },
   };
@@ -452,6 +545,6 @@ export function reduceCdpScan(url, scan, t, viewport) {
     scroll: { triggerCount: st.count || 0, scrubCount: st.scrub || 0, pinCount: st.pin || 0, scrubRatio: st.count ? (st.scrub || 0) / st.count : 0, sample: (st.sample || []).slice(0, 20) },
     easingVocab: [...agg.values()].sort((a, b) => b.uses - a.uses).slice(0, 15),
     durationVocab: ms.length ? { p25: q(0.25), median: q(0.5), p75: q(0.75) } : null,
-    capturedAt: t, toolVersion: "aura/1.7.2", source: "live-browser",
+    capturedAt: t, toolVersion: "aura/1.7.3", source: "live-browser",
   };
 }

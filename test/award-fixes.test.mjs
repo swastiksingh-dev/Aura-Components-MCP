@@ -397,9 +397,14 @@ test("P1: confidence is evidence-scored with reasons", () => {
   assert.ok(thin.spec.confidenceWhy.includes("2 usable refs"));
   const richDetails = ["aa", "bb"].map((slug) => ({ slug, detail: { slug, title: slug, palette: ["#0A0A0B"], technologies: ["GSAP"], technologiesInferred: false, elements: ["Hero"], awards: [], sourceUrl: "https://www.awwwards.com/sites/" + slug } }));
   const richMatches = ["hero", "features", "pricing", "footer"].map((s, i) => ({ section: s, componentId: i + 1, componentTitle: "T" + i, pageUrl: "u", why: "w" }));
-  const rich = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: richDetails, auraMatches: richMatches, motionNotes: "recorded", structureNotes: "aa: 5 bands (live-dom)", requestedPalette: [], gaps: [] });
+  const rich = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: richDetails, auraMatches: richMatches, motionNotes: "recorded", motionRecorded: true, structureNotes: "aa: 5 bands (live-dom)", requestedPalette: [], gaps: [] });
   assert.ok(["medium", "high"].includes(rich.spec.confidence), "rich evidence lifts past low-medium, got: " + rich.spec.confidence);
   assert.ok(rich.spec.confidenceWhy.some((w) => /motion|structure|sections|technologies/.test(w)));
+  // Static markup cues are page-source evidence, not observed motion: they
+  // must never add a confidence point the way a recorded study does.
+  const staticCues = awardBuildBlueprint({ goal: "x", refs: ["aa", "bb"], details: richDetails, auraMatches: richMatches, motionNotes: "Static markup cues (NOT runtime observation): aa: gsap, 2 keyframes", structureNotes: "aa: 5 bands (live-dom)", requestedPalette: [], gaps: [] });
+  assert.equal(staticCues.spec.confidence, rich.spec.confidence, "static cues add no confidence point (motionRecorded was not set)");
+  assert.ok(!staticCues.spec.confidenceWhy.includes("recorded motion evidence"));
 });
 
 test("10/10-1: hex codes never become catalogue search tokens", async () => {

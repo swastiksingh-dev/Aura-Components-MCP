@@ -1,4 +1,6 @@
-<h1 align="center">Aura Components MCP</h1>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/banner.png" alt="Aura Components MCP — every free thing on aura.build, one stdio call away. 2,495 components · 192 skills · 30,688 assets · 725 design systems · 35 tools · zero dependencies.">
+</p>
 
 <p align="center"><sub>FREE MCP SERVER · STDIO · ZERO DEPS · MIT</sub></p>
 
@@ -9,6 +11,7 @@
   <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen" alt="node >= 22"></a>
   <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/dist/server.js"><img src="https://img.shields.io/badge/MCP-stdio-blue" alt="MCP stdio"></a>
   <a href="#the-35-tools"><img src="https://img.shields.io/badge/tools-35-blueviolet" alt="35 tools"></a>
+  <a href="#develop"><img src="https://img.shields.io/badge/live_checks-45-brightgreen" alt="45 live checks"></a>
   <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/actions"><img src="https://github.com/swastiksingh-dev/Aura-Components-MCP/actions/workflows/verify.yml/badge.svg" alt="verify CI"></a>
   <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP"><img src="https://img.shields.io/github/stars/swastiksingh-dev/Aura-Components-MCP?style=social" alt="GitHub stars"></a>
 </p>
@@ -31,7 +34,7 @@
 
 <p align="center">
   <b>2,495</b> free components · <b>192</b> skills · <b>30,688</b> assets · <b>725</b> design systems<br>
-  <b>35</b> tools · <b>0</b> dependencies · <b>226</b> hermetic tests + <b>45</b> live checks green · version-checked hourly against npm
+  <b>35</b> tools · <b>0</b> dependencies · <b>275</b> hermetic tests + <b>45</b> live checks green · version-checked hourly against npm
 </p>
 
 ---
@@ -49,7 +52,14 @@
 - [Develop](#develop)
 - [Credits](#credits)
 
+> **v1.7.3** — hardening release, no new tools, no new dependencies. The whole award layer now fetches through one guarded path (scheme/host/DNS policy, re-checked redirects, size-capped bodies) plus the IPv6 parser fix that had mis-blocked public AAAA/dual-stack hosts. Plan-based index lifecycle (`rebuild` continues, `resume` finishes, `refresh` forces), drift-guarded winner baselines that an empty listing can't wipe, normalized URL watches, and artifact-honest capture/motion. 49 new hermetic tests lock it in: **275 hermetic + 45 live checks, all green**.
+
+<details>
+<summary><b>v1.7.1 changelog</b> — click to expand</summary>
+
 > **v1.7.1** — bug-fix release, no new tools. Central free-only enforcement: Pro components/assets by direct ID are now refused (`-32602`, fail-closed on ambiguous entitlement) instead of returned in full — search, install, bundle, scaffold, and related all inherit it. Search cache isolates explicit `theme` (dark/light no longer share entries). Bundles honor all 8 refs end-to-end with `dropped_refs` disclosure. New `min_views_filtered_out` count (`total` stays upstream). Full icon outages surface as upstream errors, not misses. Upstream hardening: malformed rows disclosed via `malformed_dropped` (single fetch fails loud), non-429 4xx never retried. Node floor raised to maintained releases (engines `>=22`, CI matrix 22.x/24.x). Dead code removed, scaffold merge extracted, verify extended.
+
+</details>
 
 <details>
 <summary><b>v1.7.0 changelog (29 tools)</b> — click to expand</summary>
@@ -113,7 +123,7 @@ node ./dist/server.js
 ```
 
 ```bash
-# Option B — npm (once published)
+# Option B — npm
 npm i -g aura-components-mcp
 aura-components-mcp
 ```
@@ -214,7 +224,6 @@ Start with `aura_status`, then `aura_search_all`. That order matters: status con
 | `aura_docs_check` | Pasted code vs fresh docs (pure): verdict current\|needs-update, look-preserving fixes, pin checks. |
 | `aura_icon` | One free icon as ready SVG (live): FA Free + HackerNoon pixel lib, auto-fallback, license + credit always, font alternative, 24h cache. |
 | `aura_version` | Running vs npm-published version (live, hourly cache). `update_available` + prefer-latest notice. `aura_status` carries the verdict on every call. |
-| `aura_version` | Running vs npm-published version (live, hourly cache). `update_available` + prefer-latest notice. `aura_status` carries the verdict on every call. |
 
 ### Award intelligence (new in v1.7.2 — 6 tools, zero npm deps)
 
@@ -226,9 +235,9 @@ browser; live capture needs Chrome (see setup below).
 | `aura_award_search` | `sites` / `categories` / `elements` / `motion` | Ranked Awwwards refs (title, source URL, tags, awards, studio, preview link, relevance + reasons). Multiword queries get alias expansion (`glassy`→`glassmorphism`, `3d`→`webgl`) plus a `theme:dark/light` boost — reasons always name your word, never the alias. `categories` returns real taxonomy from the index/source, filters paged by `limit`/`offset` (`filtersTotal` tells the full size). `motion` searches stored studies (`emptyCorpus:true` when none recorded yet). Every response carries `source` + `corpusNote`: first run on an empty index seeds from one polite live fetch (`source:live`); after that everything ranks from the local index until you `rebuild`/`refresh`. Empty results carry `suggestions`; upstream failures carry `liveError` instead of fake hits. |
 | `aura_award_inspect` | `site_details` / `site_elements` / `element` / `compare_sites` | Design DNA (palette, tech, elements, awards, score). Empty Technologies sections are backfilled from listing tags and labeled `technologiesInferred:true` (never presented as parsed). Rule-based `ideas` (0–6 by evidence, always `status:suggested` + observed `basis`, contract in `ideas_contract`). Browserless motion evidence in `motion_static` (scripts, keyframes, scroll cues — labeled static-markup, never runtime). Element media URLs with attribution. 2–3-site comparisons with shared signals, fuzzy element-keyword overlap, tech-family canonicalization, luminance-band agreement, `directionHints`, and gaps (missing = unknown, never negative proof). |
 | `aura_design_blueprint` | goal + 2–5 refs | Markdown brief + versioned JSON (`spec.version: 1`): shared patterns, outliers, palette evidence, one catalogue query PER proposed section (tokens/hero/proof/…/footer, capped at 12 matches — slim rows, not full code dumps), real free Aura matches (IDs + page URLs, free-only enforced, fallback-sourced rows marked `(via fallback …)` with `matchEvidence`), requested hexes from your goal synthesized as `proposed` tokens against the refs' observed bands, executable `next_calls` (get/scaffold/motion with real gathered IDs), evidence-scored `confidence` + `confidenceWhy`, sections, motion/a11y/performance guidance, checklist, and an always-present Evidence gaps section. Catalogue failures surface as unavailable evidence. |
-| `aura_visual_audit` | `capture` / `structure` / `compare` | Real browser screenshots + live-DOM band maps when Chrome works (`source: live-browser`, attached via `/json/list` page targets). Any live-dom failure degrades to labeled `static-html` estimates (`fallbackFrom` + `fallbackWhy` disclosed) instead of erroring. Local builds: pass a `file://` path or local file with `allowLocal:true` for direct file estimates (`source: local-file`); screenshots still need a served `http://127.0.0.1` URL. `compare` reports section-count/order, height, palette mismatches + manual-judgment items, with an `estimateNote` when offsets aren't measured. |
-| `aura_motion_study` | `inspect` / `record` / `search` | Live runtime scans (libs, easing vocab, scroll model, ScrollTrigger counts — only what was observed), bounded frame studies (2–16 frames, ≤30s), `.webm` only when system ffmpeg exists. Stored studies are searchable by library/easing/scroll. |
-| `aura_award_index` | `status` / `rebuild` / `resume` / `refresh` / `new_winners` / `watch_add` / `watch_list` / `watch_remove` | Persistent corpus in `~/.aura-mcp/awards` (`AURA_AWARDS_DIR` overrides): counts/freshness/lock, polite ~1 req/s crawl bounded by `maxPages` (default 5, max 20 — `resume` continues), winner baseline-then-delta, studio/tag/url watches. Never auto-crawls on startup. |
+| `aura_visual_audit` | `capture` / `structure` / `compare` | Real browser screenshots + live-DOM band maps when Chrome works (`source: live-browser`, attached via `/json/list` page targets). Any live-dom failure degrades to labeled `static-html` estimates (`fallbackFrom` + `fallbackWhy` disclosed) instead of erroring. Local builds: pass a `file://` path or local file with `allowLocal:true` for direct file estimates (`source: local-file`); screenshots still need a served `http://127.0.0.1` URL. `compare` reports section-count/order, height, palette mismatches + manual-judgment items, with an `estimateNote` when offsets aren't measured. Capture never claims an `artifactPath` it didn't write (see `artifactNote`) and prunes old temp captures (newest 20 kept) with a `retentionNote` when no `saveDir` is set; a navigation to a blocked/non-http(s) URL after settle aborts with `UNSUPPORTED_OPERATION` + `blockedUrl`. |
+| `aura_motion_study` | `inspect` / `record` / `search` | Live runtime scans (libs, easing vocab, scroll model, ScrollTrigger counts — only what was observed), bounded frame studies (2–16 frames, ≤30s), `.webm` only when system ffmpeg exists. Stored studies are searchable by library/easing/scroll. `record` validates frames before encoding and reports `framesUsed`; temp `aura-motion-*` dirs older than 24h are pruned with a `retentionNote` when no `saveDir` is set. |
+| `aura_award_index` | `status` / `rebuild` / `resume` / `refresh` / `new_winners` / `watch_add` / `watch_list` / `watch_remove` | Persistent corpus in `~/.aura-mcp/awards` (`AURA_AWARDS_DIR` overrides): counts/freshness/lock, polite ~1 req/s crawl bounded by `maxPages` per call (default 5, max 20). `rebuild` continues an unfinished cycle (starts a new one after completion), `resume` finishes pending work, `refresh` forces a new crawl. Winner baseline-then-delta is drift-guarded (an empty upstream listing reports `degraded:true` instead of overwriting the baseline). Watches accept studio/tag or canonical `/sites/<slug>` URLs/slugs (legacy raw URLs still match). Never auto-crawls on startup. |
 
 **Browser setup (optional, capture/motion only):** install Chrome/Chromium, or set
 `AURA_CHROME_PATH` to its executable. For `.webm` motion video, also install
@@ -275,7 +284,7 @@ Every row carries `page_url` (open it to see the design) and `author` where Aura
 - **Big code in one call.** Search rows are slim excerpts by design. Skip the 3-chunk manual concat: `aura_get_component {id, full:true}` and `aura_scaffold_page {goal, full:true}` return complete bodies (33,897-char component verified in one call). Default stays chunked to protect context.
 - **Counts are live upstream.** `aura_status` counts mirror the Aura catalogue right now; `freshness` shows max `updated_at` per surface. Counts only grow when Aura publishes — a freshness bump with flat counts means metadata moved, not new components.
 - **`total` means upstream matches** (for limit/offset paging), not post-filter rows. Local drops are disclosed, never silent: `min_views_filtered_out`, `negative_theme_filtered_out`, `deduped`, bundle `dropped_refs`.
-- **Award errors are labeled, never masked.** `NOT_FOUND` (−32004) = unknown slug; `UPSTREAM_ERROR` (−32000) = blocked/failing source (blocks are never retried); `BROWSER_UNAVAILABLE` = install Chrome; `INDEX_BUSY` = crawl already running (`resume` continues); `INDEX_CORRUPT` = file quarantined + rebuilt empty. Empty award results carry `suggestions` or `emptyCorpus:true`; failures carry `liveError`. Refusal means zero rows matched (best-row gate, theme-first ordering kept). Site `ideas` run 0–6 by evidence (1 on thin evidence is valid) and are always `status:suggested` with an observed `basis`. Blueprint `confidence` is evidence-scored (refs + matched sections + recorded motion + measured structure + fully-parsed tech → low…high, with `confidenceWhy`). Known limits: taxonomy/element depth follows the polite crawl (rebuild `maxPages`, `resume` for more); palettes come only from observable page evidence; tech labels are inferences with triggers shown; `static-html` bands have no measured offsets.
+- **Award errors are labeled, never masked.** `NOT_FOUND` (−32004) = unknown slug; `UPSTREAM_ERROR` (−32000) = blocked/failing source (blocks are never retried); `BROWSER_UNAVAILABLE` = install Chrome; `INDEX_BUSY` = crawl already running (`resume` continues); `INDEX_CORRUPT` = file quarantined + rebuilt empty. Empty award results carry `suggestions` or `emptyCorpus:true`; failures carry `liveError`. Award fetches pass a URL policy (http(s) only; private/loopback/link-local/metadata ranges blocked; bounded best-effort DNS check; redirect targets re-checked; bodies size-capped) — `allowLocal` relaxes loopback only. Refusal means zero rows matched (best-row gate, theme-first ordering kept). Site `ideas` run 0–6 by evidence (1 on thin evidence is valid) and are always `status:suggested` with an observed `basis`. Blueprint `confidence` is evidence-scored (refs + matched sections + recorded motion + measured structure + fully-parsed tech → low…high, with `confidenceWhy`). Known limits: taxonomy/element depth follows the polite crawl (`maxPages` is a per-call budget, `resume` continues); palettes come only from observable page evidence; tech labels are inferences with triggers shown; `static-html` bands have no measured offsets.
 
 ---
 ## Prompt for AI agents (start here)
@@ -356,7 +365,7 @@ Optional tuning (all with defaults):
 
 
 ```bash
-npm test      # hermetic tests, no network (226 tests)
+npm test      # hermetic tests, no network (275 tests)
 npm run verify  # 45 live checks against the real catalogue + award validation
 npm run build   # rebundle src/*.mjs into dist/server.js
 ```
@@ -369,7 +378,7 @@ Layout: `src/config.mjs` holds env parsing. `src/http.mjs` hides timeouts and re
 
 Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Components-MCP](https://github.com/swastiksingh-dev/Aura-Components-MCP). Reposits welcome — see [DIRECTION.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/DIRECTION.md) for where this is headed.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=swastiksingh-dev/Aura-Components-MCP&type=Date)](https://star-history.com/#swastiksingh-dev/Aura-Components-MCP&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=swastiksingh-dev/Aura-Components-MCP&type=Date&theme=dark)](https://star-history.com/#swastiksingh-dev/Aura-Components-MCP&Date)
 
 ```text
 built a free design MCP on aura.build: 2495 components, 192 skills, 30k assets, 35 tools. no login. resources are @MengTo's

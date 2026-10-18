@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v1.7.2 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v1.7.3 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -30,7 +30,7 @@ function loadConfig(env = process.env) {
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     freeOnlyDefault: bool(env.AURA_FREE_ONLY_DEFAULT, true),
-    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.2",
+    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.3",
   };
 }
 
@@ -841,7 +841,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.2" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.3" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
@@ -1690,7 +1690,7 @@ function createVersion({ fetcher, running, now = () => Date.now() }) {
 const AWARD_SCHEMA_VERSION = 1;
 const AWARD_BASE_URL = "https://www.awwwards.com";
 const AWARD_ASSETS_URL = "https://assets.awwwards.com";
-const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.2";
+const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.3";
 const AWARD_ALLOWED_HOSTS = ["www.awwwards.com", "awwwards.com", "assets.awwwards.com"];
 const AWARD_TIMEOUT_MS = 10000;
 const AWARD_MAX_BYTES = 2 * 1024 * 1024;
@@ -1720,13 +1720,152 @@ function awardNormalizeSlug(s) {
   if (!v || v.length > 120) throw awardBad("slug must be 1-120 chars of [a-z0-9-], got: " + String(s).slice(0, 80));
   return v;
 }
+// Watches of kind "url" target a site slug. Accept either a bare slug or a
+// canonical Awwwards site URL and reduce both to the same slug, so a stored
+// watch always compares equal to the indexed slug (legacy raw-URL records
+// are normalized at match time too).
+function awardWatchTargetSlug(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) throw awardBad("url watch needs a site slug or an awwwards /sites/<slug> url");
+  let slug = s;
+  if (/^https?:\/\//i.test(s)) {
+    let u;
+    try { u = new URL(s); } catch { throw awardBad("url watch is not a parseable url: " + s.slice(0, 120)); }
+    const host = u.hostname.toLowerCase();
+    if (!AWARD_ALLOWED_HOSTS.includes(host)) throw awardBad("url watch must point at awwwards.com, got: " + host);
+    const m = /^\/sites\/([^/]+)\/?$/.exec(u.pathname);
+    if (!m) throw awardBad("url watch must be an awwwards.com/sites/<slug> url, got path: " + u.pathname.slice(0, 120));
+    slug = m[1];
+  }
+  return awardNormalizeSlug(slug);
+}
 
 // ---- URL safety (SSRF guard) ----
-const AWARD_BLOCKED_HOST_RES = [/^localhost$/i, /^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^169\.254\./, /^0\.0\.0\.0$/, /^\[?::1\]?$/, /\.local$/i, /^metadata\.google\.internal$/i];
+// Parsed-address classification, not regex matching: WHATWG URL already
+// canonicalizes alternate IPv4 spellings (0x7f000001 → 127.0.0.1, 2130706433
+// → 127.0.0.1) and IPv4-mapped IPv6 (::ffff:127.0.0.1 → ::ffff:7f00:1), so
+// policy decisions run on normalized forms. allowLocal relaxes LOOPBACK ONLY
+// (127.0.0.0/8, ::1, localhost names) for intended local dev builds; private
+// ranges, link-local, CGNAT, ULA, multicast/reserved and cloud metadata stay
+// blocked regardless of allowLocal. See SECURITY.md.
+const AWARD_METADATA_HOSTNAMES = new Set(["metadata.google.internal", "metadata.goog", "instance-data", "instance-data.ec2.internal"]);
+const AWARD_LOCAL_HOST_SUFFIXES = [".local", ".internal", ".home.arpa"];
+function awardIpv4Number(a, b, c, d) { return (((a << 24) >>> 0) + (b << 16) + (c << 8) + d) >>> 0; }
+function awardInIpv4Range(n, base, bits) {
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return ((n & mask) >>> 0) === ((base & mask) >>> 0);
+}
+function awardParseIpv4(s) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(s || ""));
+  if (!m) return null;
+  const parts = m.slice(1).map(Number);
+  if (parts.some((p) => p > 255)) return null;
+  return awardIpv4Number(parts[0], parts[1], parts[2], parts[3]);
+}
+function awardClassifyIpv4(n) {
+  if (awardInIpv4Range(n, 0x7f000000, 8)) return "loopback";
+  if (awardInIpv4Range(n, 0x0a000000, 8)) return "private";
+  if (awardInIpv4Range(n, 0xac100000, 12)) return "private";
+  if (awardInIpv4Range(n, 0xc0a80000, 16)) return "private";
+  if (awardInIpv4Range(n, 0x64400000, 10)) return "private"; // 100.64.0.0/10 CGNAT (incl. Alibaba metadata)
+  if (awardInIpv4Range(n, 0xa9fe0000, 16)) return "link-local"; // 169.254/16 (incl. AWS/GCP/Azure IMDS)
+  if (n === 0) return "unspecified";
+  if (awardInIpv4Range(n, 0xe0000000, 4)) return "multicast";
+  if (awardInIpv4Range(n, 0xf0000000, 4)) return "reserved"; // 240/4 incl. broadcast
+  if (awardInIpv4Range(n, 0xc0000000, 24)) return "reserved"; // 192.0.0.0/24 (incl. Oracle metadata .192)
+  if (awardInIpv4Range(n, 0xc0000200, 24)) return "reserved"; // 192.0.2.0/24 TEST-NET-1
+  if (awardInIpv4Range(n, 0xc6120000, 15)) return "reserved"; // 198.18.0.0/15 benchmark
+  if (awardInIpv4Range(n, 0xc6336400, 24)) return "reserved"; // 198.51.100.0/24 TEST-NET-2
+  if (awardInIpv4Range(n, 0xcb007100, 24)) return "reserved"; // 203.0.113.0/24 TEST-NET-3
+  return "public";
+}
+function awardParseIpv6(s) {
+  let t = String(s || "").toLowerCase();
+  if (t.startsWith("[") && t.endsWith("]")) t = t.slice(1, -1);
+  if (!t.includes(":")) return null;
+  let head = t, tail = null;
+  const dc = t.indexOf("::");
+  if (dc >= 0) { head = t.slice(0, dc); tail = t.slice(dc + 2); }
+  const groups = (part) => (part ? part.split(":") : []);
+  const headG = groups(head), tailG = groups(tail);
+  const bytes = [];
+  const pushGroup = (g) => {
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(g)) {
+      const n = awardParseIpv4(g);
+      if (n === null) return false;
+      bytes.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+      return true;
+    }
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return false;
+    const v = parseInt(g, 16);
+    bytes.push((v >> 8) & 255, v & 255);
+    return true;
+  };
+  for (const g of headG) if (!pushGroup(g)) return null;
+  if (tail !== null) {
+    const left = 16 - bytes.length;
+    if (left < 0) return null;
+    const tailBytes = [];
+    for (const g of tailG) {
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(g)) {
+        const n = awardParseIpv4(g);
+        if (n === null) return null;
+        tailBytes.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+      } else {
+        if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+        const v = parseInt(g, 16);
+        tailBytes.push((v >> 8) & 255, v & 255);
+      }
+      if (bytes.length + tailBytes.length > 16) return null;
+    }
+    const voidCount = 16 - bytes.length - tailBytes.length;
+    if (voidCount < 0) return null;
+    for (let i = 0; i < voidCount; i++) bytes.push(0);
+    bytes.push(...tailBytes);
+  }
+  if (bytes.length !== 16) return null;
+  return bytes;
+}
+function awardClassifyIpv6(bytes) {
+  const allZero = bytes.every((b) => b === 0);
+  if (allZero) return "unspecified";
+  if (bytes.slice(0, 15).every((b) => b === 0) && bytes[15] === 1) return "loopback";
+  const first10 = bytes.slice(0, 10).every((b) => b === 0);
+  const mapped = first10 && bytes[10] === 0xff && bytes[11] === 0xff; // ::ffff:0:0/96
+  const compatible = first10 && bytes[10] === 0 && bytes[11] === 0 && bytes.slice(12, 15).some((b) => b !== 0); // deprecated ::a.b.c.d
+  if (mapped || compatible) {
+    const v4 = awardClassifyIpv4(awardIpv4Number(bytes[12], bytes[13], bytes[14], bytes[15]));
+    return mapped ? v4 : (v4 === "public" ? "reserved" : v4);
+  }
+  // NAT64 well-known prefix 64:ff9b::/96 embeds an IPv4 destination.
+  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && bytes.slice(4, 12).every((b) => b === 0)) {
+    return awardClassifyIpv4(awardIpv4Number(bytes[12], bytes[13], bytes[14], bytes[15]));
+  }
+  if ((bytes[0] & 0xfe) === 0xfc) return "private"; // fc00::/7 unique-local
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return "link-local"; // fe80::/10
+  if (bytes[0] === 0xff) return "multicast";
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return "reserved"; // 2001:db8::/32 documentation
+  return "public";
+}
+function awardClassifyHost(hostname) {
+  let h = String(hostname ?? "").toLowerCase().replace(/\.+$/, "");
+  if (!h) return { kind: "invalid", host: String(hostname ?? "") };
+  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
+  if (h.includes(":")) {
+    const bytes = awardParseIpv6(h);
+    if (!bytes) return { kind: "invalid", host: h };
+    return { kind: awardClassifyIpv6(bytes), version: 6, host: h };
+  }
+  const v4 = awardParseIpv4(h);
+  if (v4 !== null) return { kind: awardClassifyIpv4(v4), version: 4, host: h };
+  if (/^[0-9.]+$/.test(h)) return { kind: "invalid", host: h }; // numeric-looking but unparseable
+  if (h === "localhost" || h.endsWith(".localhost")) return { kind: "loopback", version: null, host: h };
+  if (AWARD_METADATA_HOSTNAMES.has(h)) return { kind: "metadata", version: null, host: h };
+  if (AWARD_LOCAL_HOST_SUFFIXES.some((suf) => h.endsWith(suf))) return { kind: "local-name", version: null, host: h };
+  return { kind: "public", version: null, host: h };
+}
 function awardIsBlockedHost(hostname) {
-  const h = String(hostname || "").toLowerCase().replace(/\.$/, "");
-  for (const re of AWARD_BLOCKED_HOST_RES) if (re.test(h)) return true;
-  return false;
+  return awardClassifyHost(hostname).kind !== "public";
 }
 function awardValidateHttpUrl(raw, { allowLocal = false } = {}) {
   if (typeof raw !== "string" || !raw.trim()) throw awardBad("url must be a non-empty http(s) string");
@@ -1735,17 +1874,67 @@ function awardValidateHttpUrl(raw, { allowLocal = false } = {}) {
   try { u = new URL(raw.trim()); } catch { throw awardBad("url is not parseable: " + raw.slice(0, 120)); }
   if (u.protocol !== "http:" && u.protocol !== "https:") throw awardBad("only http/https urls are allowed, got: " + u.protocol);
   if (u.username || u.password) throw awardBad("urls with credentials are not allowed");
-  if (awardIsBlockedHost(u.hostname) && !allowLocal) {
-    const e = new Error("private/local target blocked (pass allowLocal:true for loopback dev builds): " + u.hostname);
-    e.code = "UNSUPPORTED_OPERATION";
-    throw e;
+  const cls = awardClassifyHost(u.hostname);
+  if (cls.kind === "public") return u.toString();
+  if (allowLocal && cls.kind === "loopback") return u.toString();
+  const e = new Error(awardBlockedReason(cls, u.hostname));
+  e.code = "UNSUPPORTED_OPERATION";
+  e.hostKind = cls.kind;
+  throw e;
+}
+function awardBlockedReason(cls, hostname) {
+  const h = String(hostname);
+  if (cls.kind === "loopback") return "loopback target blocked (pass allowLocal:true for intended local dev builds): " + h;
+  if (cls.kind === "metadata") return "cloud metadata endpoints are never fetched: " + h;
+  if (cls.kind === "private") return "private-network targets are never fetched, even with allowLocal:true (allowLocal permits loopback only): " + h;
+  if (cls.kind === "link-local") return "link-local targets are never fetched (" + h + ")";
+  if (cls.kind === "unspecified" || cls.kind === "multicast" || cls.kind === "reserved") return "non-routable target blocked (" + cls.kind + "): " + h;
+  if (cls.kind === "local-name") return "local-network hostname blocked (" + h + "); only loopback dev targets are permitted with allowLocal:true";
+  return "unrecognized host is not fetched: " + h;
+}
+
+// ---- DNS resolution guard ----
+// Best-effort and positive-blocking only: a hostname that RESOLVES to a
+// prohibited address is refused; a lookup that fails (offline DNS) is not an
+// error here — the real connection decides, and every redirect hop is
+// re-validated anyway. Bounded: lookups that take too long return unchecked
+// instead of stalling a tool call.
+async function awardCheckHostResolution(rawUrl, { lookup = null, allowLocal = false, timeoutMs = 1500 } = {}) {
+  const out = { url: String(rawUrl), host: null, checked: false, blocked: false, addresses: [], blockedAddresses: [], reason: null };
+  let u;
+  try { u = new URL(String(rawUrl)); } catch { out.reason = "unparseable url"; return out; }
+  const cls = awardClassifyHost(u.hostname);
+  out.host = cls.host;
+  if (cls.version !== null) { out.checked = true; return out; } // IP literals were classified at validation time
+  const fn = lookup || awardDefaultLookup();
+  if (typeof fn !== "function") { out.reason = "no dns lookup available"; return out; }
+  let addrs;
+  let timer = null;
+  try {
+    addrs = await Promise.race([
+      Promise.resolve(fn(cls.host, { all: true })),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+    ]);
+  } catch (e) { out.reason = "dns lookup failed: " + String((e && e.message) || e).slice(0, 120); return out; }
+  finally { if (timer) clearTimeout(timer); }
+  if (addrs === null || addrs === undefined) { out.reason = "dns lookup timed out"; return out; }
+  const list = Array.isArray(addrs) ? addrs : [addrs];
+  out.checked = true;
+  for (const a of list) {
+    const address = typeof a === "string" ? a : (a && a.address) || "";
+    if (!address) continue;
+    out.addresses.push(address);
+    const k = awardClassifyHost(address).kind;
+    const loopbackOk = allowLocal && k === "loopback";
+    if (k !== "public" && !loopbackOk) out.blockedAddresses.push(address);
   }
-  if (u.hostname === "169.254.169.254" || /metadata/i.test(u.hostname)) {
-    const e = new Error("cloud metadata endpoints are never fetched");
-    e.code = "UNSUPPORTED_OPERATION";
-    throw e;
-  }
-  return u.toString();
+  out.blocked = out.blockedAddresses.length > 0;
+  return out;
+}
+function awardDefaultLookup() {
+  const g = globalThis.process && globalThis.process.getBuiltinModule ? globalThis.process.getBuiltinModule : null;
+  if (typeof g !== "function") return null;
+  try { return g.call(globalThis.process, "node:dns").promises.lookup; } catch { return null; }
 }
 function awardValidateAwardPath(pathOrUrl) {
   const s = String(pathOrUrl ?? "");
@@ -1787,39 +1976,47 @@ function awardElementUrl(mediaPath) { return AWARD_ASSETS_URL + "/awards/" + Str
 
 // ---- Parsers (scoped, fixture-driven, resilient to missing fields) ----
 const AWARD_LABELS = { sotd: "Site of the Day", dev: "Developer Award", hm: "Honorable Mention", sotm: "Site of the Month", mobile: "Mobile Excellence", ecom: "E-Commerce Award" };
-function awardParseListing(html) {
+// Bump when the listing parser's expectations about upstream markup change;
+// diagnostics carry it so callers can tell "page is empty" from "parser can
+// no longer read the page" without guessing.
+const AWARD_PARSER_VERSION = 1;
+const AWARD_FIELD_BOUNDS = { slug: 120, title: 200, tag: 40, tags: 20, studio: 120, liveUrl: 500, thumb: 500 };
+function awardBoundStr(v, max) { return String(v ?? "").slice(0, max); }
+function awardParseListingEx(html) {
   const src = String(html || "");
-  if (!src) return [];
+  const diagnostics = { parserVersion: AWARD_PARSER_VERSION, bytes: src.length, blobs: 0, parsed: 0, filtered: 0, malformed: 0, anchors: 0, verdict: "empty-input" };
+  if (!src) return { sites: [], diagnostics };
   const sites = [];
   const seen = new Set();
   const parts = src.split('data-collectable-model-value="');
   const blobParts = parts.slice(1);
+  diagnostics.blobs = blobParts.length;
   for (const part of blobParts) {
     const end = part.indexOf('">');
-    if (end < 0 || end > 20000) continue;
+    if (end < 0 || end > 20000) { diagnostics.malformed++; continue; }
     let meta;
-    try { meta = JSON.parse(awardDecodeEntities(part.slice(0, end))); } catch { continue; }
-    if (!meta || !meta.slug || !meta.title) continue;
-    if (meta.type && meta.type !== "submission") continue;
-    const slug = String(meta.slug).toLowerCase();
-    if (seen.has(slug)) continue;
+    try { meta = JSON.parse(awardDecodeEntities(part.slice(0, end))); } catch { diagnostics.malformed++; continue; }
+    if (!meta || !meta.slug || !meta.title) { diagnostics.filtered++; continue; }
+    if (meta.type && meta.type !== "submission") { diagnostics.filtered++; continue; }
+    const slug = awardBoundStr(String(meta.slug).toLowerCase(), AWARD_FIELD_BOUNDS.slug);
+    if (seen.has(slug)) { diagnostics.filtered++; continue; }
     const card = part.slice(end, end + 8000);
     const detailMatch = card.match(/href="(\/sites\/[^"#?]+)"/);
-    if (!detailMatch) continue;
+    if (!detailMatch) { diagnostics.filtered++; continue; }
     const liveMatch = card.match(/class="figure-rollover__bt"[^>]*href="(https?:\/\/[^"]+)"/);
     const awards = [...new Set([...card.matchAll(/budget-tag--([a-z-]+)/g)].map((m) => AWARD_LABELS[m[1]] ?? m[1]))];
     const studioMatch = card.match(/avatar-name__title">([^<]+)</);
     seen.add(slug);
     sites.push({
       slug,
-      title: awardDecodeEntities(meta.title).trim(),
+      title: awardBoundStr(awardDecodeEntities(meta.title).trim(), AWARD_FIELD_BOUNDS.title),
       createdAt: Number(meta.createdAt) || 0,
-      tags: Array.isArray(meta.tags) ? meta.tags.map((t) => awardDecodeEntities(t)).filter(Boolean) : [],
-      thumbnailPath: (meta.images && meta.images.thumbnail) ? String(meta.images.thumbnail) : "",
-      liveUrl: liveMatch ? awardDecodeEntities(liveMatch[1]) : null,
+      tags: Array.isArray(meta.tags) ? meta.tags.map((t) => awardBoundStr(awardDecodeEntities(t), AWARD_FIELD_BOUNDS.tag)).filter(Boolean).slice(0, AWARD_FIELD_BOUNDS.tags) : [],
+      thumbnailPath: (meta.images && meta.images.thumbnail) ? awardBoundStr(meta.images.thumbnail, AWARD_FIELD_BOUNDS.thumb) : "",
+      liveUrl: liveMatch ? awardBoundStr(awardDecodeEntities(liveMatch[1]), AWARD_FIELD_BOUNDS.liveUrl) : null,
       detailPath: detailMatch[1],
       awards,
-      studio: studioMatch ? awardDecodeEntities(studioMatch[1]).trim() : null,
+      studio: studioMatch ? awardBoundStr(awardDecodeEntities(studioMatch[1]).trim(), AWARD_FIELD_BOUNDS.studio) : null,
       source: "awwwards",
       sourceUrl: AWARD_BASE_URL + detailMatch[1],
     });
@@ -1836,8 +2033,22 @@ function awardParseListing(html) {
       sites.push({ slug, title: awardStripTags(m[2]) || slug, createdAt: 0, tags: [], thumbnailPath: "", liveUrl: null, detailPath: "/sites/" + slug, awards: [], studio: null, source: "awwwards", sourceUrl: AWARD_BASE_URL + "/sites/" + slug });
       if (sites.length >= 50) break;
     }
+    diagnostics.anchors = sites.length;
   }
-  return sites;
+  diagnostics.parsed = sites.length;
+  // Verdict: "ok" whenever cards were read. With zero cards, distinguish a
+  // page the parser understood (filtered/empty listing) from markup it can
+  // no longer read (drift) — callers can keep trust on the former and warn
+  // or abort on the latter instead of treating 0 as an error everywhere.
+  if (sites.length) diagnostics.verdict = "ok";
+  else if (diagnostics.malformed > 0) diagnostics.verdict = "drift-empty";
+  else if (blobParts.length > 0) diagnostics.verdict = "filtered-empty";
+  else if (/awwwards|data-collectable|\/sites\//i.test(src)) diagnostics.verdict = "empty-listing";
+  else diagnostics.verdict = "drift-empty";
+  return { sites, diagnostics };
+}
+function awardParseListing(html) {
+  return awardParseListingEx(html).sites;
 }
 function awardIsNomineePage(html) { return /<h2 class="text-default">\s*Nominee\b/.test(String(html || "")); }
 function awardParseScore(html) {
@@ -2091,6 +2302,45 @@ function awardSiteIdeas(detail) {
   return ideas.slice(0, 6);
 }
 
+// ---- Bounded body reader ----
+// Reads at most maxBytes from a fetch Response without trusting
+// content-length: a streaming read stops as soon as the threshold is
+// crossed, so a missing or lying header cannot balloon memory. Falls back
+// to res.text() (with a size post-check) when the response exposes no byte
+// stream, which keeps plain test doubles working.
+async function awardReadBoundedBody(res, maxBytes, label = "response") {
+  if (!res) throw awardUpstream(label + " has no response body");
+  const len = res.headers && typeof res.headers.get === "function" ? Number(res.headers.get("content-length")) : NaN;
+  if (Number.isFinite(len) && len > maxBytes) throw awardUpstream(label + " exceeds " + maxBytes + " bytes");
+  const body = res.body;
+  if (body && typeof body.getReader === "function") {
+    const reader = body.getReader();
+    const chunks = [];
+    let total = 0;
+    let oversize = false;
+    try {
+      for (;;) {
+        const step = await reader.read();
+        if (!step || step.done) break;
+        const value = step.value;
+        if (value === undefined || value === null) continue;
+        total += typeof value === "string" ? value.length : (value.byteLength || 0);
+        if (total > maxBytes) { oversize = true; throw awardUpstream(label + " exceeds " + maxBytes + " bytes"); }
+        chunks.push(value);
+      }
+    } finally {
+      if (oversize) { try { await reader.cancel(); } catch { /* stream already errored */ } }
+    }
+    const decoder = new TextDecoder("utf-8");
+    let text = "";
+    for (const c of chunks) text += typeof c === "string" ? c : decoder.decode(c, { stream: true });
+    return text + decoder.decode();
+  }
+  const text = await res.text();
+  if (typeof text === "string" && text.length > maxBytes) throw awardUpstream(label + " exceeds " + maxBytes + " bytes");
+  return text || "";
+}
+
 // ---- Polite fetch client (1 req/s, bounded, distinct errors) ----
 function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rateMs = AWARD_RATE_MS, userAgent = AWARD_USER_AGENT } = {}) {
   const fetchFn = fetchImpl || globalThis.fetch;
@@ -2107,63 +2357,87 @@ function createAwardClient({ fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, rateMs = A
     return next;
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function fetchOnce(url, label) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(new Error("timeout after " + timeoutMs + "ms fetching " + label)), timeoutMs);
-    try {
-      const res = await fetchFn(url, { headers: { "user-agent": userAgent, accept: "text/html,*/*" }, redirect: "manual", signal: ctrl.signal });
-      return res;
-    } finally { clearTimeout(timer); }
-  }
-  async function readBounded(res, label) {
-    const len = res.headers && typeof res.headers.get === "function" ? Number(res.headers.get("content-length")) : NaN;
-    if (Number.isFinite(len) && len > AWARD_MAX_BYTES) throw awardUpstream(label + " exceeds " + AWARD_MAX_BYTES + " bytes");
-    const text = await res.text();
-    if (text && text.length > AWARD_MAX_BYTES) throw awardUpstream(label + " exceeds " + AWARD_MAX_BYTES + " bytes");
-    return text || "";
-  }
+  const isRedirect = (status) => status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
   async function getAwardHtml(pathOrUrl) {
     const path = awardValidateAwardPath(pathOrUrl);
     const startUrl = AWARD_BASE_URL + path;
     let url = startUrl;
-    let lastErr = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    let retried = false;   // single retry shared by 5xx and network failures
+    let redirects = 0;     // redirects do not consume the retry budget
+    for (;;) {
       await acquire();
-      let res;
-      try { res = await fetchOnce(url, "awwwards page"); }
-      catch (e) {
-        if (e && e.name === "AbortError") throw awardUpstream("timeout fetching " + url);
-        lastErr = e;
-        if (attempt < 1) { await sleep(300); continue; }
-        throw awardUpstream("network error fetching " + url + ": " + String((e && e.message) || e).slice(0, 200));
-      }
-      if (res.status === 301 || res.status === 302 || res.status === 303 || res.status === 307 || res.status === 308) {
-        const loc = res.headers && res.headers.get ? res.headers.get("location") : null;
-        if (!loc || attempt === 1) throw awardUpstream("redirect without location for " + url);
+      const ctrl = new AbortController();
+      let timedOut = false;
+      // One deadline covers connect AND body read: a stalled stream aborts too.
+      const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
+      let res = null;
+      let outcome = null;
+      try {
         try {
-          const next = new URL(loc, url).toString();
-          const nu = new URL(next);
-          if (!AWARD_ALLOWED_HOSTS.includes(nu.hostname.toLowerCase())) throw awardUpstream("redirect leaves award hosts: " + nu.hostname);
-          url = next;
-          continue;
-        } catch (e) { if (e && e.code === "UPSTREAM_ERROR") throw e; throw awardUpstream("bad redirect for " + url); }
+          res = await fetchFn(url, { headers: { "user-agent": userAgent, accept: "text/html,*/*" }, redirect: "manual", signal: ctrl.signal });
+        } catch (e) {
+          outcome = { kind: timedOut ? "timeout" : "network", error: e };
+        }
+        if (!outcome) {
+          const status = res.status;
+          if (isRedirect(status)) {
+            const loc = res.headers && typeof res.headers.get === "function" ? res.headers.get("location") : null;
+            redirects += 1;
+            if (!loc) outcome = { kind: "throw", error: awardUpstream("redirect without location for " + url) };
+            else if (redirects > 5) outcome = { kind: "throw", error: awardUpstream("too many redirects fetching " + startUrl) };
+            else {
+              // Per-hop re-validation: fresh SSRF classification + host allow-list.
+              try {
+                const next = awardValidateHttpUrl(new URL(loc, url).toString());
+                const host = new URL(next).hostname.toLowerCase();
+                if (!AWARD_ALLOWED_HOSTS.includes(host)) throw awardUpstream("redirect leaves award hosts: " + host);
+                url = next;
+                outcome = { kind: "redirect" };
+              } catch (e) {
+                outcome = { kind: "throw", error: e && e.code ? e : awardUpstream("bad redirect for " + url) };
+              }
+            }
+          } else if (status === 404) {
+            outcome = { kind: "throw", error: awardNotFound("awwwards page not found: " + url) };
+          } else if (status === 403 || status === 429) {
+            const e = awardUpstream("awwwards is blocking requests (HTTP " + status + " on " + url + "). Try again later; blocks are never retried.");
+            e.blocked = true;
+            e.status = status;
+            outcome = { kind: "throw", error: e };
+          } else if (status >= 500 && status < 600) {
+            outcome = retried
+              ? { kind: "throw", error: awardUpstream("transient awwwards status " + status + " on " + url) }
+              : { kind: "retry" };
+          } else if (!res.ok) {
+            outcome = { kind: "throw", error: awardUpstream("awwwards HTTP " + status + " on " + url) };
+          } else {
+            try {
+              const html = await awardReadBoundedBody(res, AWARD_MAX_BYTES, "awwwards page");
+              outcome = { kind: "html", html };
+              res = null; // body fully consumed — nothing left to drain
+            } catch (e) {
+              outcome = { kind: "throw", error: e && e.code ? e : awardUpstream((timedOut ? "timeout fetching " : "awwwards body read failed for ") + url) };
+            }
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+        if (res && !res.bodyUsed) { try { if (res.body && typeof res.body.cancel === "function") await res.body.cancel(); } catch { /* socket already released */ } }
       }
-      if (res.status === 404) throw awardNotFound("awwwards page not found: " + url);
-      if (res.status === 403 || res.status === 429) {
-        const e = awardUpstream("awwwards is blocking requests (HTTP " + res.status + " on " + url + "). Try again later; blocks are never retried.");
-        e.blocked = true;
-        e.status = res.status;
-        throw e;
+      if (outcome.kind === "html") return { html: outcome.html, finalUrl: url };
+      if (outcome.kind === "redirect") continue;
+      if (timedOut) throw awardUpstream("timeout fetching " + url);
+      if (outcome.kind === "retry") {
+        retried = true;
+        await sleep(400);
+        continue;
       }
-      if (res.status >= 500 && res.status < 600) {
-        lastErr = awardUpstream("transient awwwards status " + res.status + " on " + url);
-        if (attempt < 1) { await sleep(400); continue; }
-        throw lastErr;
+      if (outcome.kind === "network") {
+        if (!retried) { retried = true; await sleep(300); continue; }
+        throw awardUpstream("network error fetching " + url + ": " + String((outcome.error && outcome.error.message) || outcome.error).slice(0, 200));
       }
-      if (!res.ok) throw awardUpstream("awwwards HTTP " + res.status + " on " + url);
-      return { html: await readBounded(res, "awwwards page"), finalUrl: url };
+      throw outcome.error;
     }
-    throw lastErr instanceof Error ? lastErr : awardUpstream("fetch failed for " + startUrl);
   }
   return { getAwardHtml };
 }
@@ -2196,30 +2470,80 @@ const AWARD_STATIC_LIBS = [
   { lib: "barba", res: [/barba/i] },
 ];
 const AWARD_STATIC_CUES = ["data-aos", "data-scroll", "scrolltrigger", "sticky", "parallax", "marquee", "reveal", "loader", "preloader"];
-async function awardStaticMotion(rawUrl, { fetchImpl, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false } = {}) {
+// ---- Guarded HTML fetch (shared by static motion + audit static fallback) ----
+// Manual redirects (≤3 hops) with per-hop URL classification and a
+// best-effort DNS guard, one deadline per hop covering the body read, and a
+// streaming bounded read. Returns {ok:true, url, finalUrl, html} or
+// {ok:false, reason, status?}; only a contract violation (empty input)
+// throws.
+async function awardFetchGuardedHtml(rawUrl, { fetchImpl, lookup = null, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false, label = "page" } = {}) {
   if (typeof rawUrl !== "string" || !rawUrl.trim()) throw awardErr("BAD_ARGS", "url must be a non-empty string");
-  const fail = (reason) => ({ status: "unavailable", url: String(rawUrl).slice(0, 200), reason: String(reason).slice(0, 200) });
   let target;
   try { target = awardValidateHttpUrl(rawUrl, { allowLocal }); }
-  catch (e) { return fail((e && e.message) || e); }
+  catch (e) { return { ok: false, reason: (e && e.message) || String(e) }; }
   const fetchFn = fetchImpl || globalThis.fetch;
-  let html;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  if (typeof fetchFn !== "function") return { ok: false, reason: "no fetch available" };
+  const guard = async (u) => {
     try {
-      const res = await fetchFn(target, { headers: { "user-agent": AWARD_USER_AGENT, accept: "text/html,*/*" }, redirect: "follow", signal: ctrl.signal });
-      if (res.status === 404) return fail("HTTP 404 for " + target);
-      if (!res.ok) return fail("HTTP " + res.status + " for " + target);
-      html = await res.text();
-    } finally { clearTimeout(timer); }
-  } catch (e) { return fail(e && e.name === "AbortError" ? "timeout fetching " + target : "network error: " + String((e && e.message) || e).slice(0, 120)); }
-  if (!html || !html.length) return fail("empty body for " + target);
+      const dns = await awardCheckHostResolution(u, { lookup, allowLocal });
+      return dns.blocked ? "host resolves to a blocked address (" + dns.blockedAddresses.join(", ") + ")" : null;
+    } catch { return null; }
+  };
+  const firstBlock = await guard(target);
+  if (firstBlock) return { ok: false, reason: firstBlock };
+  let url = target;
+  for (let hop = 0; hop <= 3; hop++) {
+    const ctrl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
+    let res = null;
+    try {
+      try {
+        res = await fetchFn(url, { headers: { "user-agent": AWARD_USER_AGENT, accept: "text/html,*/*" }, redirect: "manual", signal: ctrl.signal });
+      } catch (e) {
+        return { ok: false, reason: timedOut ? "timeout fetching " + url : "network error: " + String((e && e.message) || e).slice(0, 120) };
+      }
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers && typeof res.headers.get === "function" ? res.headers.get("location") : null;
+        if (!loc) return { ok: false, reason: "redirect without location for " + url, status: res.status };
+        if (hop === 3) return { ok: false, reason: "too many redirects for " + target };
+        let next;
+        try { next = awardValidateHttpUrl(new URL(loc, url).toString(), { allowLocal }); }
+        catch (e) { return { ok: false, reason: "redirect blocked: " + ((e && e.message) || e), status: res.status }; }
+        const hopBlock = await guard(next);
+        if (hopBlock) return { ok: false, reason: hopBlock, status: res.status };
+        url = next;
+        continue;
+      }
+      if (res.status === 404) return { ok: false, reason: "HTTP 404 for " + url, status: 404 };
+      if (!res.ok) return { ok: false, reason: "HTTP " + res.status + " for " + url, status: res.status };
+      let html;
+      try {
+        html = await awardReadBoundedBody(res, maxBytes, label);
+        res = null;
+      } catch (e) {
+        return { ok: false, reason: timedOut ? "timeout fetching " + url : String((e && e.message) || e).slice(0, 160) };
+      }
+      if (!html || !html.length) return { ok: false, reason: "empty body for " + url, status: 200 };
+      return { ok: true, url: target, finalUrl: url, html };
+    } finally {
+      clearTimeout(timer);
+      if (res && !res.bodyUsed) { try { if (res.body && typeof res.body.cancel === "function") await res.body.cancel(); } catch { /* socket already released */ } }
+    }
+  }
+  return { ok: false, reason: "redirect loop for " + target };
+}
+async function awardStaticMotion(rawUrl, { fetchImpl, lookup = null, timeoutMs = AWARD_TIMEOUT_MS, maxBytes = 1500000, allowLocal = false } = {}) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) throw awardErr("BAD_ARGS", "url must be a non-empty string");
+  const fail = (reason) => ({ status: "unavailable", url: String(rawUrl).slice(0, 200), reason: String(reason).slice(0, 200) });
+  const got = await awardFetchGuardedHtml(rawUrl, { fetchImpl, lookup, timeoutMs, maxBytes, allowLocal, label: "static page" });
+  if (!got.ok) return fail(got.reason);
+  const html = got.html;
   const src = html.slice(0, maxBytes);
   const count = (re) => Math.min(999, (src.match(re) || []).length);
   const libs = AWARD_STATIC_LIBS.filter(({ res }) => res.some((re) => re.test(src))).map(({ lib }) => lib);
   return {
-    status: "static-markup", url: target,
+    status: "static-markup", url: got.url,
     libs, keyframes: count(/@keyframes\s/gi), animations: count(/animation\s*:/gi), transitions: count(/transition\s*:/gi),
     canvases: count(/<canvas/gi), videos: count(/<video/gi),
     scrollCues: AWARD_STATIC_CUES.filter((c) => src.toLowerCase().includes(c)),
@@ -2304,7 +2628,7 @@ function awardCompareSites(entries) {
   }));
   return { per, sharedTech, sharedTechFamilies, sharedElements: elements.filter((t) => t.frequency >= 2), sharedElementKeywords: elemKeywords.filter((t) => t.frequency >= 2), sharedPalette: palette.filter((t) => t.frequency >= 2), sharedBands: bands, directionHints: direction };
 }
-function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes, motionNotes, constraints = [], technology = null, visualDirection = null, responsive = null, requestedPalette = [], gaps: extraGaps = [] }) {
+function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes, motionNotes, motionRecorded = false, constraints = [], technology = null, visualDirection = null, responsive = null, requestedPalette = [], gaps: extraGaps = [] }) {
   if (!goal || !String(goal).trim()) throw awardBad("goal is required");
   const usable = (details || []).filter((d) => d && d.detail);
   const threshold = usable.length === 2 ? 2 : usable.length >= 3 ? Math.ceil(usable.length / 2) : Infinity;
@@ -2399,15 +2723,17 @@ function awardBuildBlueprint({ goal, refs, details, auraMatches, structureNotes,
   if (gaps.length) { for (const g of gaps) lines.push("- " + g); }
   else lines.push("- None material: refs, motion/structure evidence as cited above, catalogue matches listed.");
   // Evidence-scored confidence: base from usable ref count, +1 per
-  // independent axis actually present (matched sections, recorded motion,
-  // measured structure, fully-parsed tech). Thin evidence stays low;
-  // rich evidence may reach high — same honesty, both directions.
+  // independent axis actually present (matched sections, RECORDED motion,
+  // measured structure, fully-parsed tech). Static markup cues describe the
+  // page source, not observed runtime behavior, so they never add a point.
+  // Thin evidence stays low; rich evidence may reach high — same honesty,
+  // both directions.
   const why = [];
   let points = Math.min(usable.length, 3);
   why.push(usable.length + " usable ref" + (usable.length === 1 ? "" : "s"));
   const sectionHits = matches.filter((m) => m.section !== "tokens" && !m.editorial).length;
   if (sectionHits >= 4) { points++; why.push(sectionHits + " catalogue sections matched"); }
-  if (motionNotes) { points++; why.push("recorded motion evidence"); }
+  if (motionRecorded) { points++; why.push("recorded motion evidence"); }
   if (structureNotes && structureNotes.includes("(live-dom)")) { points++; why.push("measured structure"); }
   if (usable.length >= 2 && usable.every((d) => (d.detail.technologies || []).length && !d.detail.technologiesInferred)) { points++; why.push("fully-parsed technologies (not inferred)"); }
   const confidence = points <= 1 ? "low" : points <= 3 ? "low-medium" : points === 4 ? "medium" : "high";
@@ -2466,6 +2792,12 @@ function awardResolveDir(override) {
   return path.join(os.homedir(), ".aura-mcp", "awards");
 }
 function awardIdxBad(m) { return awardErr("BAD_ARGS", m); }
+// url watches may be stored canonically (slug) or as legacy raw records
+// (the old code stored the lowercased URL); both reduce to the same target
+// at match time so legacy entries keep working.
+function awardUrlWatchTarget(pattern) {
+  try { return awardWatchTargetSlug(pattern); } catch { return String(pattern || "").trim().toLowerCase(); }
+}
 
 function createAwardIndex({ dir, now = () => Date.now() } = {}) {
   const { fs, path } = awardIdxBuiltins();
@@ -2508,13 +2840,27 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
   const emptyElements = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items: [] });
   const emptyTax = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), colors: [], filters: [] });
   const emptyMotion = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items: [] });
-  const emptyMeta = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), indexStatus: null, progress: [], baselines: {}, watches: [] });
+  const emptyMeta = () => ({ version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), indexStatus: null, progress: [], baselines: {}, watches: [], crawl: null });
 
   function siteMap() {
     const doc = readJson("sites.json", emptySites());
     const map = new Map();
     for (const s of (doc.items || [])) if (s && s.slug) map.set(String(s.slug).toLowerCase(), s);
     return { doc, map };
+  }
+  function upsertSitesImpl(sites) {
+    const { map } = siteMap();
+    let added = 0, updated = 0;
+    for (const s of (sites || [])) {
+      if (!s || !s.slug) continue;
+      const k = String(s.slug).toLowerCase();
+      if (map.has(k)) { map.set(k, { ...map.get(k), ...s }); updated++; }
+      else { map.set(k, s); added++; }
+    }
+    let items = [...map.values()];
+    if (items.length > AWARD_MAX_SITES) items = items.slice(items.length - AWARD_MAX_SITES);
+    writeAtomic("sites.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items });
+    return { added, updated, total: items.length };
   }
   function acquireLock() {
     const lockFile = path.join(root, "lock.json");
@@ -2530,6 +2876,112 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
     fs.writeFileSync(lockFile, JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 }), "utf8");
   }
   function releaseLock() { try { fs.rmSync(path.join(root, "lock.json"), { force: true }); } catch { /* never mask */ } }
+  // Lock must wrap the whole cycle: acquire first, release in finally; an
+  // INDEX_BUSY throw from acquire never releases someone else's lock.
+  const withLock = async (fn) => { acquireLock(); try { return await fn(); } finally { releaseLock(); } };
+
+  // One crawl cycle. Caller holds the lock. Returns a report naming the plan,
+  // what was fetched this call, and what remains.
+  const runCycle = async ({ client, action = "rebuild", tags = null, maxPages = 5, log = () => {}, fresh = false } = {}) => {
+    if (!client || typeof client.getAwardHtml !== "function") throw awardIdxBad(action + " needs an award client");
+    const startedAt = now();
+    const iso = (t = now()) => new Date(t).toISOString();
+    const budget = Math.max(1, Math.min(Number(maxPages) || 5, 20));
+    const crawlView = (plan) => ({ planId: plan.planId || null, cycle: plan.cycle || 1, pagesTotal: plan.tags.length, pagesDone: plan.done.length, complete: !!plan.finishedAt, startedAt: plan.startedAt || null, finishedAt: plan.finishedAt || null });
+    try {
+      let meta = readJson("meta.json", emptyMeta());
+      const explicit = Array.isArray(tags) && tags.length ? tags.map(String).slice(0, 200) : null;
+      const stored = meta.crawl && Array.isArray(meta.crawl.tags) && meta.crawl.tags.length
+        ? { ...meta.crawl, tags: meta.crawl.tags.map(String).slice(0, 200), done: (meta.crawl.done || []).map(String) }
+        : null;
+      if (action === "resume" && stored && stored.finishedAt) {
+        // Completed cycle: resume is an explicit no-op, not a silent recrawl.
+        return { pagesDone: 0, pagesTotal: stored.tags.length, sitesIndexed: 0, skipped: stored.done.length, completedPages: stored.done.length, complete: true, continued: false, crawl: crawlView(stored), note: "crawl cycle already complete (" + stored.done.length + "/" + stored.tags.length + " pages); use action:refresh to start a new cycle" };
+      }
+      const explicitMatches = !!(explicit && stored && [...stored.tags].sort().join("|") === [...explicit].sort().join("|"));
+      const tagsIgnored = !!(explicit && action === "resume" && stored && !explicitMatches);
+      const continueStored = !!(stored && !stored.finishedAt && !fresh && (action === "resume" || !explicit || explicitMatches));
+      let plan = null;
+      const continued = continueStored;
+      if (continueStored) plan = stored;
+      if (!plan) {
+        // A new plan needs the tag list: explicit tags, or the taxonomy
+        // (bootstrapped with one fetch when the index has none yet).
+        let wanted = explicit;
+        if (!wanted) {
+          let tax = readJson("taxonomy.json", emptyTax());
+          if (!(tax.filters || []).length) {
+            const { html } = await client.getAwardHtml("/websites/");
+            tax = { version: AWARD_INDEX_VERSION, updatedAt: iso(), ...awardParseCategories(html) };
+            if (!(tax.filters || []).length) throw awardErr("UPSTREAM_ERROR", "awwwards layout may have changed: parsed 0 categories");
+            writeAtomic("taxonomy.json", tax);
+          }
+          wanted = (tax.filters || []).map(String).slice(0, 200);
+        }
+        if (!wanted.length) throw awardErr("UPSTREAM_ERROR", "no taxonomy to crawl; index has no filters");
+        // Legacy checkpoint (a cycle from before plans existed): keep the
+        // completed pages that are still part of this plan.
+        const seedDone = [];
+        if (!fresh && !stored && Array.isArray(meta.progress)) {
+          for (const t of meta.progress.map(String)) if (wanted.includes(t) && !seedDone.includes(t)) seedDone.push(t);
+        }
+        plan = { planId: "cycle-" + startedAt, cycle: ((stored && stored.cycle) || 0) + 1, tags: wanted, done: seedDone, sitesIndexed: 0, startedAt: iso(), finishedAt: null };
+        // Persist the plan immediately so a crash before page 1 still leaves
+        // resumable state instead of an orphaned taxonomy fetch.
+        meta.crawl = plan;
+        meta.progress = [...plan.done];
+        meta.updatedAt = iso();
+        writeAtomic("meta.json", meta);
+      }
+      let pagesFetched = 0, sitesIndexed = 0;
+      const skippedAtStart = plan.done.length;
+      for (const tag of plan.tags) {
+        if (plan.done.includes(tag)) continue;
+        if (pagesFetched >= budget) break;
+        const { html } = await client.getAwardHtml("/websites/" + encodeURIComponent(tag) + "/");
+        const scan = awardParseListingEx(html);
+        // Drift (collectable markup we can no longer read) aborts the cycle
+        // with a named reason; a legitimately empty/filtered page is just 0
+        // sites and the plan moves on.
+        if (scan.diagnostics.verdict === "drift-empty") {
+          throw awardErr("UPSTREAM_ERROR", "awwwards collector drift on /websites/" + tag + "/: no readable cards (parser v" + AWARD_PARSER_VERSION + ", blobs=" + scan.diagnostics.blobs + ", malformed=" + scan.diagnostics.malformed + ") — page not indexed, checkpoint kept");
+        }
+        const sites = scan.sites;
+        if (sites.length) upsertSitesImpl(sites.map((s) => ({ ...s, tags: [...new Set([...(s.tags || []), tag])] })));
+        sitesIndexed += sites.length;
+        pagesFetched++;
+        plan.done.push(tag);
+        plan.sitesIndexed = (plan.sitesIndexed || 0) + sites.length;
+        meta = readJson("meta.json", emptyMeta());
+        meta.crawl = plan;
+        meta.progress = [...plan.done];
+        meta.updatedAt = iso();
+        writeAtomic("meta.json", meta);
+        log("[" + plan.done.length + "/" + plan.tags.length + "] " + tag + ": " + sites.length + " sites" + (sites.length ? "" : " (legit empty page)"));
+      }
+      const complete = plan.done.length >= plan.tags.length;
+      if (complete) plan.finishedAt = iso();
+      meta = readJson("meta.json", emptyMeta());
+      meta.crawl = plan;
+      meta.progress = complete ? [] : [...plan.done];
+      if (complete) meta.indexStatus = { startedAt: plan.startedAt, finishedAt: plan.finishedAt, pagesDone: plan.done.length, pagesTotal: plan.tags.length, sitesIndexed: plan.sitesIndexed || 0 };
+      meta.updatedAt = iso();
+      writeAtomic("meta.json", meta);
+      const out = { pagesDone: pagesFetched, pagesTotal: plan.tags.length, sitesIndexed, skipped: skippedAtStart, completedPages: plan.done.length, complete, continued, crawl: crawlView(plan) };
+      if (complete) out.note = "crawl cycle complete (" + plan.done.length + "/" + plan.tags.length + " pages); refresh starts a new cycle";
+      else if (pagesFetched >= budget) out.note = "page budget reached (" + pagesFetched + " this call, " + plan.done.length + "/" + plan.tags.length + " total); action:resume continues the same plan";
+      else out.note = "no pending pages fetched";   // completes mid-call only when the plan finished exactly at the budget boundary
+      if (tagsIgnored) out.note = "tags argument ignored: resume continues the stored plan | " + out.note;
+      return out;
+    } catch (e) {
+      try {
+        const meta = readJson("meta.json", emptyMeta());
+        meta.indexStatus = { ...(meta.indexStatus || {}), lastError: String((e && e.message) || e).slice(0, 300) };
+        writeAtomic("meta.json", meta);
+      } catch { /* never mask */ }
+      throw e;
+    }
+  };
 
   return {
     root,
@@ -2547,14 +2999,33 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
       } catch { lock = { unreadable: true }; }
       const finishedAt = meta.indexStatus && meta.indexStatus.finishedAt;
       const freshness = finishedAt ? new Date(finishedAt).toISOString() : null;
+      const crawl = meta.crawl ? {
+        planId: meta.crawl.planId || null,
+        cycle: meta.crawl.cycle || 1,
+        pagesTotal: (meta.crawl.tags || []).length,
+        pagesDone: (meta.crawl.done || []).length,
+        complete: !!meta.crawl.finishedAt,
+        startedAt: meta.crawl.startedAt || null,
+        finishedAt: meta.crawl.finishedAt || null,
+      } : null;
+      const recovered = [];
+      if (sites.corrupt) recovered.push("sites.json: " + sites.corrupt);
+      if (elements.corrupt) recovered.push("elements.json: " + elements.corrupt);
+      if (motion.corrupt) recovered.push("motion.json: " + motion.corrupt);
+      if (tax.corrupt) recovered.push("taxonomy.json: " + tax.corrupt);
+      if (meta.corrupt) recovered.push("meta.json: " + meta.corrupt);
       return {
         dir: root, version: AWARD_INDEX_VERSION,
         counts: { sites: (sites.items || []).length, elements: (elements.items || []).length, motion: (motion.items || []).length, taxonomyFilters: (tax.filters || []).length, taxonomyColors: (tax.colors || []).length, watches: (meta.watches || []).length },
         freshness, stale: !finishedAt || (now() - finishedAt >= AWARD_INDEX_STALE_MS),
-        progress: meta.indexStatus || null, pendingPages: meta.progress || [],
+        progress: meta.indexStatus || null,
+        pendingPages: meta.progress || [],
+        completedPages: crawl ? crawl.pagesDone : (meta.progress || []).length,
+        crawl,
         lock: lock ? { held: true, since: lock.startedAt ? new Date(lock.startedAt).toISOString() : null } : { held: false },
         ...(sites.corrupt ? { sitesCorrupt: sites.corrupt } : {}),
         ...(meta.corrupt ? { metaCorrupt: meta.corrupt } : {}),
+        ...(recovered.length ? { recovered } : {}),
       };
     },
     listSites(limit = 50) {
@@ -2566,20 +3037,7 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
       const { map } = siteMap();
       return map.get(n) || null;
     },
-    upsertSites(sites) {
-      const { doc, map } = siteMap();
-      let added = 0, updated = 0;
-      for (const s of (sites || [])) {
-        if (!s || !s.slug) continue;
-        const k = String(s.slug).toLowerCase();
-        if (map.has(k)) { map.set(k, { ...map.get(k), ...s }); updated++; }
-        else { map.set(k, s); added++; }
-      }
-      let items = [...map.values()];
-      if (items.length > AWARD_MAX_SITES) items = items.slice(items.length - AWARD_MAX_SITES);
-      writeAtomic("sites.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items });
-      return { added, updated, total: items.length };
-    },
+    upsertSites(sites) { return upsertSitesImpl(sites); },
     getTaxonomy() { return readJson("taxonomy.json", emptyTax()); },
     setTaxonomy(tax) {
       const colors = Array.isArray(tax.colors) ? [...new Set(tax.colors.map(String))].slice(0, 100) : [];
@@ -2626,98 +3084,73 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
       return { total: items.length, items: items.slice(0, Math.max(1, Math.min(limit || 10, 25))), empty: (doc.items || []).length === 0 };
     },
     // Index lifecycle: crawl tag pages via client, resumable, bounded.
-    async rebuild({ client, tags, log = () => {} } = {}) {
-      if (!client || typeof client.getAwardHtml !== "function") throw awardIdxBad("rebuild needs an award client");
-      acquireLock();
-      const startedAt = now();
-      try {
-        let meta = readJson("meta.json", emptyMeta());
-        let tax = readJson("taxonomy.json", emptyTax());
-        if ((!tax.filters || !tax.filters.length)) {
-          const { html } = await client.getAwardHtml("/websites/");
-          tax = { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), ...awardParseCategories(html) };
-          if (!(tax.filters || []).length) throw awardErr("UPSTREAM_ERROR", "awwwards layout may have changed: parsed 0 categories");
-          writeAtomic("taxonomy.json", tax);
-        }
-        const wanted = Array.isArray(tags) && tags.length ? tags.map(String).slice(0, 200) : (tax.filters || []).slice(0, 200);
-        if (!wanted.length) throw awardErr("UPSTREAM_ERROR", "no taxonomy to crawl; index has no filters");
-        const done = new Set(meta.progress || []);
-        // Completed checkpoint from a prior cycle is not resumable work.
-        if (meta.indexStatus && meta.indexStatus.finishedAt && done.size >= (meta.indexStatus.pagesTotal || 0)) { meta.progress = []; done.clear(); }
-        let pagesDone = 0, sitesIndexed = 0;
-        const skipped = [...wanted].filter((t) => done.has(t)).length;
-        for (const tag of wanted) {
-          if (done.has(tag)) continue;
-          const { html } = await client.getAwardHtml("/websites/" + encodeURIComponent(tag) + "/");
-          const sites = awardParseListing(html);
-          if (!sites.length) throw awardErr("UPSTREAM_ERROR", "awwwards layout may have changed: 0 cards on /websites/" + tag + "/");
-          this.upsertSites(sites.map((s) => ({ ...s, tags: [...new Set([...(s.tags || []), tag])] })));
-          sitesIndexed += sites.length;
-          pagesDone++;
-          done.add(tag);
-          meta = readJson("meta.json", emptyMeta());
-          meta.progress = [...done];
-          meta.updatedAt = new Date(now()).toISOString();
-          writeAtomic("meta.json", meta);
-          log("[" + done.size + "/" + wanted.length + "] " + tag + ": " + sites.length + " sites");
-        }
-        meta = readJson("meta.json", emptyMeta());
-        meta.indexStatus = { startedAt, finishedAt: now(), pagesDone: done.size, pagesTotal: wanted.length, sitesIndexed };
-        meta.progress = [];
-        meta.updatedAt = new Date(now()).toISOString();
-        writeAtomic("meta.json", meta);
-        return { pagesDone, pagesTotal: wanted.length, sitesIndexed, skipped };
-      } catch (e) {
-        try {
-          const meta = readJson("meta.json", emptyMeta());
-          meta.indexStatus = { ...(meta.indexStatus || {}), lastError: String((e && e.message) || e).slice(0, 300) };
-          writeAtomic("meta.json", meta);
-        } catch { /* never mask */ }
-        throw e;
-      } finally { releaseLock(); }
-    },
-    async resume(args) { return this.rebuild(args); },
-    async refresh(args) {
-      const meta = readJson("meta.json", emptyMeta());
-      meta.progress = [];
-      writeAtomic("meta.json", meta);
-      return this.rebuild(args);
-    },
-    // Winners: baseline seed then delta (never fabricate dates).
+    // A "cycle" is one plan (full tag list) plus a done-checkpoint set.
+    // rebuild continues an unfinished cycle, or starts a new one when the
+    // previous cycle completed; resume only continues pending work and
+    // reports an explicit no-op when the cycle is complete; refresh resets
+    // and starts a new cycle after the lock is held (no pre-lock mutation).
+    // maxPages caps fetches per call, so a plan advances across calls
+    // instead of restarting the same prefix every resume.
+    async rebuild(args = {}) { return withLock(() => runCycle({ ...args, action: "rebuild" })); },
+    async resume(args = {}) { return withLock(() => runCycle({ ...args, action: "resume" })); },
+    async refresh(args = {}) { return withLock(() => runCycle({ ...args, action: "refresh", fresh: true })); },
+    // Winners: baseline seed then delta. Drift or an empty listing never
+    // wipes the baseline — otherwise every known winner would be re-reported
+    // as new on the next healthy fetch.
     async newWinners({ client, award = "sotd" } = {}) {
       if (!client || typeof client.getAwardHtml !== "function") throw awardIdxBad("newWinners needs an award client");
       if (!AWARD_FILTERS[award]) throw awardIdxBad("award must be sotd|developer|honorable");
       const { html } = await client.getAwardHtml("/" + AWARD_FILTERS[award] + "/");
-      const parsed = awardParseListing(html);
+      const scan = awardParseListingEx(html);
+      const parsed = scan.sites;
+      const diag = scan.diagnostics;
+      const parserStamp = { parserVersion: AWARD_PARSER_VERSION, verdict: diag.verdict, blobs: diag.blobs, malformed: diag.malformed };
       const meta = readJson("meta.json", emptyMeta());
       const key = "baseline_" + award;
       const prev = meta.baselines && meta.baselines[key];
       const day = new Date(now()).toISOString().slice(0, 10);
+      if (diag.verdict === "drift-empty") {
+        return { day, seeded: false, newWinners: [], totalInListing: 0, degraded: true, parser: parserStamp, note: "listing returned no readable cards (collector drift?); baseline preserved — retry later" };
+      }
+      if (!parsed.length) {
+        const prevSlugs = (prev && prev.slugs) || [];
+        if (prevSlugs.length) return { day, seeded: false, newWinners: [], totalInListing: 0, degraded: true, parser: parserStamp, note: "listing had 0 readable cards; kept the previous baseline of " + prevSlugs.length + " slugs so nothing is re-reported as new" };
+        if (!prev) {
+          meta.baselines = { ...(meta.baselines || {}), [key]: { slugs: [], at: new Date(now()).toISOString() } };
+          writeAtomic("meta.json", meta);
+          return { day, seeded: true, newWinners: [], totalInListing: 0, parser: parserStamp, note: "baseline seeded empty; this listing had no readable cards (not drift)" };
+        }
+        return { day, seeded: false, newWinners: [], totalInListing: 0, parser: parserStamp };
+      }
+      const slugs = parsed.map((s) => s.slug);
       if (!prev) {
-        meta.baselines = { ...(meta.baselines || {}), [key]: { slugs: parsed.map((s) => s.slug), at: new Date(now()).toISOString() } };
+        meta.baselines = { ...(meta.baselines || {}), [key]: { slugs, at: new Date(now()).toISOString() } };
         writeAtomic("meta.json", meta);
         this.upsertSites(parsed);
-        return { day, seeded: true, newWinners: [], totalInListing: parsed.length, note: "baseline seeded; no historical delta available yet" };
+        return { day, seeded: true, newWinners: [], totalInListing: parsed.length, parser: parserStamp, note: "baseline seeded; no historical delta available yet" };
       }
       const seen = new Set(prev.slugs || []);
       const fresh = parsed.filter((s) => !seen.has(s.slug));
-      meta.baselines[key] = { slugs: parsed.map((s) => s.slug), at: new Date(now()).toISOString() };
+      meta.baselines[key] = { slugs, at: new Date(now()).toISOString() };
       writeAtomic("meta.json", meta);
-      if (parsed.length) this.upsertSites(parsed);
-      return { day, seeded: false, newWinners: fresh, totalInListing: parsed.length };
+      this.upsertSites(parsed);
+      return { day, seeded: false, newWinners: fresh, totalInListing: parsed.length, parser: parserStamp };
     },
     watchAdd({ kind, pattern, award } = {}) {
       if (!["studio", "tag", "url"].includes(kind)) throw awardIdxBad("watch kind must be studio|tag|url");
       if (typeof pattern !== "string" || !pattern.trim() || pattern.length > 120) throw awardIdxBad("watch pattern must be 1-120 chars");
       const clean = pattern.trim().toLowerCase();
-      if (kind === "url") awardNormalizeSlug(clean);
+      // url watches normalize to the site slug (a URL and its slug are the
+      // same target; storing the raw URL never matched an indexed slug).
+      const stored = kind === "url" ? awardWatchTargetSlug(pattern) : clean;
       if (kind === "tag" && !/^[a-z0-9-]{2,60}$/.test(clean)) throw awardIdxBad("tag watch must be a slug like 'webgl'");
       if (award !== undefined && !["sotd", "developer", "honorable"].includes(award)) throw awardIdxBad("watch award must be sotd|developer|honorable");
       const meta = readJson("meta.json", emptyMeta());
       const watches = meta.watches || [];
-      if (watches.some((w) => w.kind === kind && w.pattern === clean)) throw awardIdxBad("duplicate watch: " + kind + ":" + clean);
+      const duplicate = watches.some((w) => w.kind === kind && (w.pattern === stored || (kind === "url" && awardUrlWatchTarget(w.pattern) === stored)));
+      if (duplicate) throw awardIdxBad("duplicate watch: " + kind + ":" + stored);
       if (watches.length >= 50) throw awardIdxBad("too many watches (max 50)");
-      const rec = { kind, pattern: clean, award: award || null, createdAt: new Date(now()).toISOString(), lastCheckedAt: null, lastSlugs: null };
+      const rec = { kind, pattern: stored, ...(stored !== clean ? { input: pattern.trim() } : {}), award: award || null, createdAt: new Date(now()).toISOString(), lastCheckedAt: null, lastSlugs: null };
       meta.watches = [...watches, rec];
       writeAtomic("meta.json", meta);
       return rec;
@@ -2729,20 +3162,25 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
     watchRemove({ kind, pattern } = {}) {
       const meta = readJson("meta.json", emptyMeta());
       const clean = String(pattern || "").trim().toLowerCase();
+      const target = kind === "url" ? awardUrlWatchTarget(clean) : clean;
       const before = (meta.watches || []).length;
-      meta.watches = (meta.watches || []).filter((w) => !(w.kind === kind && w.pattern === clean));
+      meta.watches = (meta.watches || []).filter((w) => !(w.kind === kind && (w.pattern === clean || (kind === "url" && awardUrlWatchTarget(w.pattern) === target))));
       writeAtomic("meta.json", meta);
       return { removed: (meta.watches.length < before) };
     },
-    checkWatches() {
+    // First evaluation of a watch seeds its baseline silently (deltas stay
+    // empty). Detailed form discloses the seeds so callers can show what a
+    // watch is now tracking; checkWatches keeps the pinned deltas-only shape.
+    checkWatchesDetailed() {
       const meta = readJson("meta.json", emptyMeta());
       const { map } = siteMap();
       const rows = [...map.values()];
-      const out = [];
+      const deltas = [];
+      const seeded = [];
       const watches = (meta.watches || []).map((w) => ({ ...w }));
       for (const w of watches) {
         const hits = rows.filter((s) => {
-          if (w.kind === "url") return String(s.slug) === w.pattern;
+          if (w.kind === "url") return String(s.slug) === awardUrlWatchTarget(w.pattern);
           if (w.kind === "studio") return String(s.studio || "").toLowerCase().includes(w.pattern);
           return (s.tags || []).some((t) => String(t).toLowerCase().replace(/\W+/g, "-") === w.pattern);
         });
@@ -2750,18 +3188,20 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
         if (w.lastSlugs === null || w.lastSlugs === undefined) {
           w.lastCheckedAt = new Date(now()).toISOString();
           w.lastSlugs = slugs;
+          if (hits.length) seeded.push({ watch: { kind: w.kind, pattern: w.pattern }, baselineMatches: hits.map((s) => ({ slug: s.slug, title: s.title, sourceUrl: s.sourceUrl })) });
           continue;
         }
         const prev = new Set(w.lastSlugs || []);
         const fresh = hits.filter((s) => !prev.has(s.slug));
         w.lastCheckedAt = new Date(now()).toISOString();
         w.lastSlugs = slugs;
-        if (fresh.length) out.push({ watch: { kind: w.kind, pattern: w.pattern }, matches: fresh.map((s) => ({ slug: s.slug, title: s.title, sourceUrl: s.sourceUrl })) });
+        if (fresh.length) deltas.push({ watch: { kind: w.kind, pattern: w.pattern }, matches: fresh.map((s) => ({ slug: s.slug, title: s.title, sourceUrl: s.sourceUrl })) });
       }
       meta.watches = watches;
       writeAtomic("meta.json", meta);
-      return out;
+      return { deltas, seeded };
     },
+    checkWatches() { return this.checkWatchesDetailed().deltas; },
   };
 }
 
@@ -2867,6 +3307,42 @@ function cdpBandsFromHtml(html, url) {
     bands.push({ index: i++, tag, label: tag, background: bg, offsetTop: null, height: null, textStart: h ? String(h).trim().slice(0, 60) : "", media: hasImg });
   }
   return { url, title: (src.match(/<title>([^<]{1,120})<\/title>/i) || [])[1] || url, totalHeight: null, bands, source: "static-html", note: "offsets/heights unavailable without layout; use capture/structure via browser for measured bands" };
+}
+
+  // Bounded artifact retention: only ever prunes tool-created files/dirs in
+  // tool-owned locations (tmp default dirs), never caller-passed saveDirs.
+function cdpPruneOldFiles(dir, { prefix, keepNewest = 20 } = {}) {
+  try {
+    const { fs, path } = cdpBuiltins();
+    const entries = fs.readdirSync(dir).filter((n) => n.startsWith(prefix)).map((n) => {
+      const full = path.join(dir, n);
+      let t = 0;
+      try { t = fs.statSync(full).mtimeMs || 0; } catch { /* skipped below by mtime 0 */ }
+      return { full, t };
+    }).filter((e) => e.t > 0).sort((a, b) => b.t - a.t);
+    let removed = 0;
+    for (const e of entries.slice(Math.max(1, keepNewest))) { try { fs.rmSync(e.full, { force: true }); removed++; } catch { /* ignore */ } }
+    return removed;
+  } catch { return 0; }
+}
+function cdpPruneOldDirs(parentDir, { prefix, maxAgeMs = 24 * 60 * 60 * 1000, skip = null } = {}) {
+  try {
+    const { fs, path } = cdpBuiltins();
+    const nowMs = Date.now();
+    let removed = 0;
+    const skipResolved = skip ? path.resolve(skip) : null;
+    for (const n of fs.readdirSync(parentDir)) {
+      if (!n.startsWith(prefix)) continue;
+      const full = path.join(parentDir, n);
+      if (skipResolved && path.resolve(full) === skipResolved) continue;
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      if (!st.isDirectory()) continue;
+      if (nowMs - (st.mtimeMs || 0) < maxAgeMs) continue;
+      try { fs.rmSync(full, { recursive: true, force: true }); removed++; } catch { /* ignore */ }
+    }
+    return removed;
+  } catch { return 0; }
 }
 
 // CDP connection: id-keyed commands over a WebSocket-like transport.
@@ -3074,6 +3550,26 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
       return out;
     } finally { clearTimeout(stopTimer); cleanup(); }
   }
+  // Post-navigation URL guard: the pre-flight only validates the REQUESTED
+  // url, but Chrome follows server-side redirects on its own — a public URL
+  // that lands on a blocked host (private IP, metadata endpoint, localhost)
+  // must not be read any further. Reads the committed URL via CDP; a
+  // non-string value (test doubles, detached contexts) is skipped rather
+  // than failed, so honest timeouts stay honest.
+  async function cdpNavGuard(send, allowLocal) {
+    let href = null;
+    try {
+      const res = await send("Runtime.evaluate", { expression: "location.href", returnByValue: true }, 5000);
+      href = res && res.result && typeof res.result.value === "string" ? res.result.value : null;
+    } catch { return; }
+    if (!href || !/^https?:\/\//i.test(href)) return;
+    try { awardValidateHttpUrl(href, { allowLocal }); }
+    catch (e) {
+      const err = awardErr("UNSUPPORTED_OPERATION", "navigation ended on a blocked URL: " + href + " (" + String((e && e.message) || e).slice(0, 160) + ")");
+      err.blockedUrl = href;
+      throw err;
+    }
+  }
   return {
     status() {
       let exe = null;
@@ -3093,6 +3589,7 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
           const settled = waitForSettled(conn, send, waitStrategy);
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, settle));
           // Pre-scroll for lazy sections (bounded).
           try { await send("Runtime.evaluate", { expression: "(async()=>{for(let y=0;y<Math.min(document.documentElement.scrollHeight,10800);y+=450){scrollTo(0,y);await new Promise(r=>setTimeout(r,40));}scrollTo(0,0);await new Promise(r=>setTimeout(r,150));})()", awaitPromise: true }, 8000); } catch { /* best-effort */ }
@@ -3102,11 +3599,27 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
         },
       });
       const dir = saveDir || path.join(os.tmpdir(), "aura-captures");
-      try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
-      const name = "capture-" + String(now()) + ".png";
-      const file = path.join(dir, name);
-      try { fs.writeFileSync(file, Buffer.from(shot.png, "base64")); } catch { /* return inline only */ }
-      return { url: target, viewport, viewportPx: cdpResolveViewport(viewport), capturedAt: startedAt, artifactPath: file, bytes: Buffer.from(shot.png, "base64").length, page: shot.meta, limitations: ["lazy-loaded sections below the fold may still be placeholders", "blocked third-party resources are not retried"], source: "live-browser" };
+      const png = Buffer.from(shot.png, "base64");
+      let artifactPath = null;
+      let artifactNote = null;
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, "capture-" + String(now()) + ".png");
+        fs.writeFileSync(file, png);
+        artifactPath = file;
+      } catch (e) {
+        artifactNote = "screenshot kept in memory only — could not write to " + dir + " (" + String((e && e.message) || e).slice(0, 120) + ")";
+      }
+      // Retention: only for tool-owned tmp dirs (never a caller saveDir) —
+      // keep the newest 20 captures so long agent sessions cannot fill tmp.
+      let retentionNote = null;
+      if (!saveDir) {
+        try {
+          const removed = cdpPruneOldFiles(dir, { prefix: "capture-", keepNewest: 20 });
+          if (removed > 0) retentionNote = "pruned " + removed + " older capture file(s) (newest 20 kept in " + dir + "; pass saveDir to manage your own directory)";
+        } catch { /* best-effort */ }
+      }
+      return { url: target, viewport, viewportPx: cdpResolveViewport(viewport), capturedAt: startedAt, ...(artifactPath ? { artifactPath } : {}), ...(artifactNote ? { artifactNote } : {}), ...(retentionNote ? { retentionNote } : {}), bytes: png.length, page: shot.meta, limitations: ["lazy-loaded sections below the fold may still be placeholders", "blocked third-party resources are not retried"], source: "live-browser" };
     },
     async structure(url, { viewport = "desktop", allowLocal = false } = {}) {
       const target = awardValidateHttpUrl(url, { allowLocal });
@@ -3118,6 +3631,7 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
           const settled = waitForSettled(conn, send, "load");
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           const res = await send("Runtime.evaluate", { expression: CDP_SCAN_JS, returnByValue: true }, 10000);
           return (res && res.result && res.result.value) || { title: target, totalHeight: 0, candidates: [] };
         },
@@ -3135,6 +3649,7 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
           const settled = waitForSettled(conn, send, "load");
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, 1500));
           const res = await send("Runtime.evaluate", { expression: CDP_MOTION_JS, returnByValue: true }, 10000);
           return (res && res.result && res.result.value) || { libs: [], render: [], scrollTrigger: { count: 0 }, tweens: { durations: [], eases: [] }, cssBeziers: [] };
@@ -3160,6 +3675,7 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
           const settled = waitForSettled(conn, send, "load");
           await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
           await settled;
+          await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, Math.min(4000, stepMs)));
           const files = [];
           for (let i = 0; i < n; i++) {
@@ -3183,17 +3699,34 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
         },
       });
       const study = out.inspect ? reduceCdpScan(target, out.inspect, now(), viewport) : null;
-      return { url: target, viewport, startedAt, frames: out.files, frameCount: out.files.length, study, dir };
+      // Retention: only prunes tool-created sibling dirs in tmp (never a
+      // caller saveDir), and never the current run's directory.
+      let retentionNote = null;
+      if (!saveDir) {
+        try {
+          const removed = cdpPruneOldDirs(os.tmpdir(), { prefix: "aura-motion-", maxAgeMs: 24 * 60 * 60 * 1000, skip: dir });
+          if (removed > 0) retentionNote = "pruned " + removed + " prior motion-study dir(s) older than 24h (this run's frames kept at " + dir + ")";
+        } catch { /* best-effort */ }
+      }
+      return { url: target, viewport, startedAt, frames: out.files, frameCount: out.files.length, study, dir, ...(retentionNote ? { retentionNote } : {}) };
     },
     async encodeWebm(frameFiles, { ffmpegPath = null } = {}) {
+      if (!Array.isArray(frameFiles) || !frameFiles.length) throw cdpBad("no frames to encode");
       const bin = ffmpegPath || findFfmpeg({});
       if (!bin) return { video: null, available: false, hint: "ffmpeg not found; install ffmpeg or set AURA_FFMPEG_PATH for .webm output" };
-      if (!Array.isArray(frameFiles) || !frameFiles.length) throw cdpBad("no frames to encode");
-      const dir = path.dirname(frameFiles[0]);
+      // Only encode frames that actually exist on disk, bounded to the
+      // recording cap; verify they share one directory before shelling out.
+      const requested = frameFiles.slice(0, CDP_MAX_FRAMES).filter((f) => typeof f === "string" && f);
+      const existing = requested.filter((f) => { try { return fs.existsSync(f); } catch { return false; } });
+      if (!existing.length) return { video: null, available: false, hint: "frame files are gone (nothing on disk to encode); re-run mode:record to capture frames" };
+      const dir = path.dirname(existing[0]);
+      if (!existing.every((f) => path.dirname(f) === dir)) return { video: null, available: false, hint: "frame files span multiple directories; cannot encode as one sequence" };
+      const first = /-(\d+)\.jpg$/i.exec(path.basename(existing[0]));
+      const startNumber = first ? String(parseInt(first[1], 10)) : "0";
       const video = path.join(dir, "motion.webm");
-      const args = ["-y", "-framerate", "2", "-i", path.join(dir, "frame-%02d.jpg"), "-c:v", "libvpx", "-pix_fmt", "yuv420p", video];
+      const args = ["-y", "-framerate", "2", "-start_number", startNumber, "-i", path.join(dir, "frame-%02d.jpg"), "-c:v", "libvpx", "-pix_fmt", "yuv420p", video];
       const res = cp.spawnSync(bin, args, { timeout: 60000, windowsHide: true });
-      if (res && res.status === 0 && fs.existsSync(video)) return { video, available: true, bytes: fs.statSync(video).size };
+      if (res && res.status === 0 && fs.existsSync(video)) return { video, available: true, bytes: fs.statSync(video).size, framesUsed: existing.length };
       return { video: null, available: false, hint: "ffmpeg encode failed (" + String(res && res.status) + "); frame JPEGs retained" };
     },
   };
@@ -3219,7 +3752,7 @@ function reduceCdpScan(url, scan, t, viewport) {
     scroll: { triggerCount: st.count || 0, scrubCount: st.scrub || 0, pinCount: st.pin || 0, scrubRatio: st.count ? (st.scrub || 0) / st.count : 0, sample: (st.sample || []).slice(0, 20) },
     easingVocab: [...agg.values()].sort((a, b) => b.uses - a.uses).slice(0, 15),
     durationVocab: ms.length ? { p25: q(0.25), median: q(0.5), p75: q(0.75) } : null,
-    capturedAt: t, toolVersion: "aura/1.7.2", source: "live-browser",
+    capturedAt: t, toolVersion: "aura/1.7.3", source: "live-browser",
   };
 }
 
@@ -3783,10 +4316,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
         const line = awardStaticSummary(d.slug, d.motion_static);
         if (line) staticCues.push(line);
       }
+      let motionRecorded = false;
       try {
         const mr = awardIndex.searchMotion({ limit: 25 });
         const hits = (mr.items || []).filter((m) => normed.some((s) => String(m.url || '').toLowerCase().includes(s)));
-        if (hits.length) motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; ');
+        if (hits.length) { motionRecorded = true; motionNotes = 'Recorded motion for ' + hits.map((h) => h.url).join(', ') + ': prefer ' + hits.map((h) => (h.stack && h.stack.libs || []).join('+') || 'css').join('; '); }
         else {
           if (staticCues.length) motionNotes = 'Static markup cues (NOT runtime observation — record a study for trigger counts/easing): ' + staticCues.join(' | ');
           gaps.push('motion: no recorded studies for these refs — run aura_motion_study {mode:inspect} on their live URLs, or follow the hand-written <500ms + prefers-reduced-motion guidance');
@@ -3798,7 +4332,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
       // PROPOSED tokens (never presented as observed ref evidence), mapped
       // against the refs' observed luminance bands.
       const requestedPalette = [...new Set([...String(goal + ' ' + (visualDirection || '')).matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)].map((m) => { const h = m[1]; return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toUpperCase(); }))].slice(0, 6);
-      const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
+      const built = awardBuildBlueprint({ goal, refs: normed, details, auraMatches, structureNotes, motionNotes, motionRecorded, constraints, technology, visualDirection, responsive, requestedPalette, gaps });
       // next_calls: immediately executable follow-ups built ONLY from real
       // ids/urls gathered above — the agent acts without another search round.
       const compMatches = auraMatches.filter((m) => m.section !== 'tokens' && !m.editorial).slice(0, 3);
@@ -3839,11 +4373,16 @@ function createHandlers(catalog, icons, version, awardDeps) {
       };
       const isLocalInput = (raw) => typeof raw === 'string' && (/^file:\/\//i.test(raw) || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || /^[^/:?#]+\.html?([?#]|$)/i.test(raw));
       const fetchStatic = async (target) => {
-        const res = await globalThis.fetch(target, { headers: { 'user-agent': 'aura-components-mcp/1.7.2' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
-        if (res.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
-        if (!res.ok) throw awardErr('UPSTREAM_ERROR', 'HTTP ' + res.status + ' for ' + target);
-        const text = await res.text();
-        return text.slice(0, 1500000);
+        // Shared guarded fetch: manual redirects with per-hop URL
+        // classification + DNS guard, streaming bounded read. The old
+        // redirect:'follow' fetch could land on a blocked host after a
+        // server-side redirect; this one re-validates every hop.
+        const got = await awardFetchGuardedHtml(target, { fetchImpl: globalThis.fetch, allowLocal, label: 'audited page' });
+        if (!got.ok) {
+          if (got.status === 404) { const e = new Error('page not found: ' + target); e.code = 'NOT_FOUND'; throw e; }
+          throw awardErr('UPSTREAM_ERROR', 'static fetch failed for ' + target + ': ' + String(got.reason).slice(0, 200));
+        }
+        return got.html;
       };
       const structureOf = async (rawTarget, label) => {
         if (isLocalInput(rawTarget)) return readLocalSource(rawTarget, label || 'url');
@@ -3874,7 +4413,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
         if (!awardBrowser) throw awardErr('BROWSER_UNAVAILABLE', 'capture needs Chrome: install it or set AURA_CHROME_PATH. Fallback: aura_visual_audit {mode:structure} estimates sections from static HTML without a browser.');
         try { return textResult(await awardBrowser.capture(target, { viewport, waitStrategy, settleMs, allowLocal })); }
         catch (e) {
-          if (e && e.code === 'BROWSER_UNAVAILABLE') throw e;
+          if (e && (e.code === 'BROWSER_UNAVAILABLE' || e.code === 'UNSUPPORTED_OPERATION')) throw e;
           throw awardErr('UPSTREAM_ERROR', 'capture failed: ' + String((e && e.message) || e).slice(0, 220) + ' — retry, or use mode:structure for a static estimate');
         }
       }
@@ -3928,7 +4467,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
         video = enc.video; videoAvailable = !!enc.available; videoHint = enc.hint || null;
       } catch (e) { videoHint = String((e && e.message) || e).slice(0, 160); }
       if (!videoAvailable && !videoHint) videoHint = 'ffmpeg not found; install ffmpeg or set AURA_FFMPEG_PATH for .webm output — frame JPEGs retained';
-      return textResult({ mode, url: target, study: rec.study, frames: rec.frames, frameCount: rec.frameCount, video, video_available: videoAvailable, ...(videoHint ? { videoHint } : {}) }); },
+      return textResult({ mode, url: target, study: rec.study, frames: rec.frames, frameCount: rec.frameCount, video, video_available: videoAvailable, ...(videoHint ? { videoHint } : {}), ...(rec.retentionNote ? { retentionNote: rec.retentionNote } : {}) }); },
     aura_award_index: async (a) => { a = a || {}; const action = awardMode(a.action, ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'], 'action');
       if (action === 'status') return textResult({ action, ...awardIndex.getStatus() });
       if (action === 'watch_list') return textResult({ action, watches: awardIndex.watchList() });
@@ -3945,18 +4484,22 @@ function createHandlers(catalog, icons, version, awardDeps) {
       if (action === 'new_winners') {
         if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', 'new_winners needs an award client (server wiring)');
         const r = await awardIndex.newWinners({ client: awardClient, award: a.award || 'sotd' });
-        let deltas = [];
-        try { deltas = awardIndex.checkWatches ? awardIndex.checkWatches() : []; } catch { deltas = []; }
-        return textResult({ action, ...r, watchDeltas: deltas });
+        let deltas = []; let seeded = [];
+        try {
+          if (awardIndex.checkWatchesDetailed) { const w = awardIndex.checkWatchesDetailed(); deltas = w.deltas || []; seeded = w.seeded || []; }
+          else deltas = awardIndex.checkWatches ? awardIndex.checkWatches() : [];
+        } catch { deltas = []; seeded = []; }
+        return textResult({ action, ...r, watchDeltas: deltas, ...(seeded.length ? { watchBaselineSeeded: seeded, watchBaselineNote: 'first check for these watches seeded their baseline silently — future deltas report newly indexed matches only' } : {}) });
       }
       if (!awardClient) throw awardErr('UNSUPPORTED_OPERATION', action + ' needs an award client (server wiring)');
       const maxPages = a.maxPages === undefined ? 5 : toolFn_num(a.maxPages, 'maxPages');
       if (typeof maxPages !== 'number' || maxPages < 1 || maxPages > 20) toolFn_bad('maxPages must be 1-20 (bounded crawl per call; resume for more)');
-      // Bounded crawl: cap the taxonomy to maxPages per call, keep resume state.
-      const tax = awardIndex.getTaxonomy();
-      const tags = (tax.filters || []).slice(0, Math.floor(maxPages));
-      const r = action === 'refresh' ? await awardIndex.refresh({ client: awardClient, tags }) : action === 'resume' ? await awardIndex.resume({ client: awardClient, tags: tags.length ? tags : undefined }) : await awardIndex.rebuild({ client: awardClient, tags: tags.length ? tags : undefined });
-      return textResult({ action, ...r, note: 'bounded per call (maxPages); call resume to continue' }); },
+      // Bounded crawl: the index layer owns the plan; maxPages caps fetches
+      // THIS call so a plan advances across calls instead of re-crawling the
+      // same prefix. No tag slicing here — the stored plan defines the pages.
+      const args = { client: awardClient, maxPages: Math.floor(maxPages) };
+      const r = action === 'refresh' ? await awardIndex.refresh(args) : action === 'resume' ? await awardIndex.resume(args) : await awardIndex.rebuild(args);
+      return textResult({ action, ...r, note: r.note || 'page budget reached; call resume to continue the same plan' }); },
   };
 };
 
