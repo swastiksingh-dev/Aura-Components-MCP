@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ WATCH THE 10-SECOND TOUR (MP4) ▲</b></a>
+  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ WATCH THE 12-SECOND TOUR (MP4) ▲</b></a>
 </p>
 
 > I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
@@ -163,7 +163,7 @@ claude mcp add aura-components -- node ./dist/server.js
 
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ CLICK TO WATCH THE 10-SECOND FLOW TOUR (MP4) ▲</b></a>
+  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ CLICK TO WATCH THE 12-SECOND FLOW TOUR (MP4) ▲</b></a>
   <br><em>Same file as <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/assets/heart-demo.mp4">assets/heart-demo.mp4</a></em>
 </p>
 
