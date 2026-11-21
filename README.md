@@ -159,6 +159,7 @@ claude mcp add aura-components -- node ./dist/server.js
 ```
 
 ---
+
 ## Demo
 
 
