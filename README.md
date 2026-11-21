@@ -28,7 +28,7 @@
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ WATCH THE 12-SECOND TOUR (MP4) ▲</b></a>
-</p>
+</p>  
 
 > I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
 
@@ -39,6 +39,10 @@
 
 ---
 ## Contents
+
+
+
+
 
 
 - [Why not the official MCP](#why-i-built-this-instead-of-using-the-official-mcp)
