@@ -439,4 +439,5 @@ Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Fre
 ## License
 
 
+
 MIT — see [LICENSE](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/LICENSE).
