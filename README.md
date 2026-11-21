@@ -45,7 +45,7 @@
 - [What is inside](#what-is-inside)
 - [Install](#install)
 - [Demo](#demo)
-- [The 35 tools](#the-35-tools)
+- [The 35 tools](#the-35-tools)  
 - [Fallback rules](#fallback-rules-read-this-once)
 - [Prompt for AI agents](#prompt-for-ai-agents-start-here)
 - [Free only, no login](#free-only-no-login)
