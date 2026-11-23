@@ -1,0 +1,44 @@
+[
+  {
+    "name": "developer portfolio",
+    "brief": "A developer portfolio that makes selected engineering projects easy to evaluate.",
+    "expected_type": "developer portfolio",
+    "expected_component": "case-study cards"
+  },
+  {
+    "name": "SaaS",
+    "brief": "A SaaS product page explaining the workflow and inviting qualified teams to start.",
+    "expected_type": "SaaS",
+    "expected_component": "workflow or product view"
+  },
+  {
+    "name": "editorial article",
+    "brief": "An editorial article page for a long-form reported story.",
+    "expected_type": "editorial",
+    "expected_component": "body typography"
+  },
+  {
+    "name": "dashboard",
+    "brief": "An analytics dashboard that helps an operations user identify what needs attention.",
+    "expected_type": "dashboard",
+    "expected_component": "metric summaries"
+  },
+  {
+    "name": "ecommerce storefront",
+    "brief": "An ecommerce storefront for browsing products and making a transparent purchase.",
+    "expected_type": "ecommerce storefront",
+    "expected_component": "variant selection"
+  },
+  {
+    "name": "creative studio",
+    "brief": "A creative studio portfolio showing projects and helping visitors start a conversation.",
+    "expected_type": "creative studio",
+    "expected_component": "project gallery"
+  },
+  {
+    "name": "accessible content-heavy page",
+    "brief": "An accessible content-heavy guide with long sections and useful navigation.",
+    "expected_type": "general",
+    "expected_component": null
+  }
+]

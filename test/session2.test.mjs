@@ -25,7 +25,7 @@ test("Inspo mappers are absent and aura_diff is registered", () => {
   const names = TOOL_DEFS.map((tool) => tool.name);
   assert.ok(names.includes("aura_diff"));
   assert.equal(names.filter((name) => name.startsWith("aura_inspo_")).length, 0);
-  assert.equal(TOOL_DEFS.length, 31);
+  assert.equal(TOOL_DEFS.length, 34);
 });
 
 test("search defaults to five records while explicit configured limits remain supported", () => {

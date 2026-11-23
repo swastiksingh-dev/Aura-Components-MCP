@@ -132,7 +132,7 @@ if (bun8 && Array.isArray(bun8.items) && bun8.items.length >= 2) {
 const li2 = await call('tools/list', {});
 {
   const names = li2 && li2.result && Array.isArray(li2.result.tools) ? li2.result.tools.map((t) => t.name) : [];
-  check('tools/list exposes 31 unique tools', names.length === 31 && new Set(names).size === 31, names.length + ':' + names.slice(-2).join(','));
+  check('tools/list exposes 34 unique tools', names.length === 34 && new Set(names).size === 34, names.length + ':' + names.slice(-3).join(','));
 }
 const awBad = await tool('aura_award_search', { mode: 'nope' });
 check('award_search bad mode -> -32602', awBad.error && awBad.error.code === -32602, JSON.stringify(awBad).slice(0, 160));

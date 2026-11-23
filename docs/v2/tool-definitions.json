@@ -1,5 +1,112 @@
 [
   {
+    "name": "aura_plan_design",
+    "description": "Turn a brief into a compact Design Contract. Separates supplied facts, recommendations, and open questions; no catalogue rows or code. Then search a few indicated first-party candidates.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "brief": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "project_type": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "audience": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "goals": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "maxItems": 5
+        },
+        "brand_notes": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "content_outline": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "maxItems": 8
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "maxItems": 5
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "maxItems": 8
+        },
+        "preferred_stack": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "required": [
+        "brief"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_research_search",
+    "description": "Search curated, compact research evidence cards. Returns at most five findings with source links, limitations, and a detail reference; never returns papers or PDFs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "limit": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 5
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_research_read",
+    "description": "Read one selected research evidence card and its source metadata. Returns a compact claim, provenance, limitations, and implication; not source full text.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "aura_status",
     "description": "Catalogue health plus counts (components_free/pro, assets (all) + assets_free/pro, skills, design systems) with a counts_note. Free only, no login. Start here.",
     "inputSchema": {

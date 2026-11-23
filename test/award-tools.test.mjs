@@ -52,10 +52,10 @@ async function callWith(handlers, name, args) {
   return out[1];
 }
 
-test("six new defs exist, unique names, valid schemas; total is 31", () => {
+test("six award defs exist, unique names, valid schemas; total is 34", () => {
   const names = TOOL_DEFS.map((t) => t.name);
-  assert.equal(names.length, 31);
-  assert.equal(new Set(names).size, 31);
+  assert.equal(names.length, 34);
+  assert.equal(new Set(names).size, 34);
   for (const n of ["aura_award_search", "aura_award_inspect", "aura_design_blueprint", "aura_visual_audit", "aura_motion_study", "aura_award_index"]) {
     const d = TOOL_DEFS.find((t) => t.name === n);
     assert.ok(d, n + " defined");
@@ -72,12 +72,12 @@ test("every def has exactly one reachable handler (no orphans)", () => {
   assert.deepEqual(Object.keys(h).sort(), TOOL_DEFS.map((t) => t.name).sort());
 });
 
-test("tools/list exposes 31 through real JSON-RPC", async () => {
+test("tools/list exposes 34 through real JSON-RPC", async () => {
   const out = [];
   const { dispatch } = createSession((m) => out.push(m), { tools: TOOL_DEFS, handlers: createHandlers(fakeCatalog, null, null, deps()) });
   await dispatch({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
   await dispatch({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(out[1].result.tools.length, 31);
+  assert.equal(out[1].result.tools.length, 34);
 });
 
 test("award_search sites: ranked, evidence-carrying, suggestions on empty", async () => {

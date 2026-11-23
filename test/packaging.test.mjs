@@ -29,7 +29,7 @@ test("dist renamer never rewrites method calls (.sort stays .sort)", () => {
   assert.ok(dist.includes(".sort("), "Array.sort calls survive bundling");
 });
 
-test("dist server answers elements search without crashing (bundled 31-tool path)", async () => {
+test("dist server answers elements search without crashing (bundled 34-tool path)", async () => {
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
@@ -63,19 +63,25 @@ test("dist server answers elements search without crashing (bundled 31-tool path
       await call("initialize", {});
       const list = await call("tools/list", {});
       const names = (list.result.tools || []).map((t) => t.name);
-      if (names.length !== 31) { clearTimeout(timer); kill(new Error("dist exposes " + names.length + " tools, want 31")); return; }
+      if (names.length !== 34) { clearTimeout(timer); kill(new Error("dist exposes " + names.length + " tools, want 34")); return; }
       // Empty index + elements mode returns honest-empty WITHOUT network
       // (gallery backfill needs no fetch) — must be a result, never a crash.
       const el = await call("tools/call", { name: "aura_award_search", arguments: { mode: "elements", query: "hero", limit: 3 } });
+      const design = await call("tools/call", { name: "aura_plan_design", arguments: { brief: "An editorial article for a long-form story." } });
+      const research = await call("tools/call", { name: "aura_research_search", arguments: { query: "layout benchmark", limit: 2 } });
       clearTimeout(timer);
-      kill(el);
+      kill({ el, design, research });
     })().catch((e) => { clearTimeout(timer); kill(e); });
   });
   if (got instanceof Error) throw got;
-  assert.ok(!got.error, "elements search crashed in dist: " + JSON.stringify(got).slice(0, 300));
-  const body = JSON.parse(got.result.content[0].text);
+  assert.ok(!got.el.error, "elements search crashed in dist: " + JSON.stringify(got.el).slice(0, 300));
+  const body = JSON.parse(got.el.result.content[0].text);
   assert.equal(body.mode, "elements");
   assert.ok(Array.isArray(body.items));
+  assert.ok(!got.design.error, "design planning failed in dist: " + JSON.stringify(got.design).slice(0, 300));
+  assert.equal(JSON.parse(got.design.result.content[0].text).contract_version, "1");
+  assert.ok(!got.research.error, "research search failed in dist: " + JSON.stringify(got.research).slice(0, 300));
+  assert.ok(JSON.parse(got.research.result.content[0].text).items.length > 0);
 });
 
 test("dist/cli.cjs boots and answers initialize over stdio", async () => {

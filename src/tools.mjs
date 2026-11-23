@@ -6,6 +6,7 @@ import { installGuide, tokenHints, buildPrompt, buildDocsPlan, buildDocsCheck, d
 import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awardSiteUrl, awardThumbnailUrl, awardElementUrl, awardParseListing, awardParseDetail, awardParseCategories, awardParseElementsSection, awardParseElementPage, awardTokens, awardScoreSites, awardSuggestQueries, awardCompactSite, awardFullSite, awardCompareSites, awardBuildBlueprint, awardSiteIdeas, awardStaticMotion, awardStaticSummary, awardFetchGuardedHtml, AWARD_SECTIONS } from './awards.mjs';
 import { createAwardIndex } from './awards-index.mjs';
 import { cdpBandsFromHtml } from './browser-cdp.mjs';
+import { planDesign, searchResearch, readResearch } from './design-research.mjs';
 const SORTS = ['popular', 'recent', 'trending', 'updated'];
 const CATS = ['hero','section','button','card','background','header','logo','feature','pricing','testimonial','footer','form','heading'];
 function bad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
@@ -80,6 +81,9 @@ function diffFacts(item) {
   };
 }
 export const TOOL_DEFS = [
+  { name: 'aura_plan_design', description: 'Turn a brief into a compact Design Contract. Separates supplied facts, recommendations, and open questions; no catalogue rows or code. Then search a few indicated first-party candidates.', inputSchema: { type: 'object', properties: { brief: { type: 'string', minLength: 1, maxLength: 600 }, project_type: { type: 'string', maxLength: 120 }, audience: { type: 'string', maxLength: 300 }, goals: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 5 }, brand_notes: { type: 'string', maxLength: 600 }, content_outline: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 8 }, references: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 5 }, constraints: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 8 }, preferred_stack: { type: 'string', maxLength: 120 } }, required: ['brief'], additionalProperties: false } },
+  { name: 'aura_research_search', description: 'Search curated, compact research evidence cards. Returns at most five findings with source links, limitations, and a detail reference; never returns papers or PDFs.', inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 300 }, limit: { type: 'number', minimum: 1, maximum: 5 } }, required: ['query'], additionalProperties: false } },
+  { name: 'aura_research_read', description: 'Read one selected research evidence card and its source metadata. Returns a compact claim, provenance, limitations, and implication; not source full text.', inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 100 } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_status', description: 'Catalogue health plus counts (components_free/pro, assets (all) + assets_free/pro, skills, design systems) with a counts_note. Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'aura_search_components', description: 'Find free components by brief, category and theme. Results are metadata-first; even slim:false caps source at 1,200 chars/item. Continue with offset; fetch source via aura_get_component.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, sort: { type: 'string', enum: SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_get_component', description: 'Inspect a free component. Metadata is default; pass chunk for one bounded source chunk or full:true for the first chunk. Numeric id or slug.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
@@ -328,6 +332,28 @@ export function createHandlers(catalog, icons, version, awardDeps) {
       const s = (cats || []).reduce((n, c) => n + (typeof c.free === 'number' ? c.free : 0), 0);
       return textResult({ categories: cats, overlap_note: 'Counts overlap: components carry multiple tags, so per-category free counts sum to ' + s + ' (> 2495 free total). They triage depth, not a partition.' }); },
     aura_prompt: async (a) => { a = a || {}; return textResult(buildPrompt({ goal: typeof a.goal === 'string' ? a.goal : undefined, theme: a.theme, surfaces: a.surfaces, system: a.system, answers: a.answers })); },
+    aura_plan_design: async (a) => { a = a || {};
+      const brief = str(a.brief, 'brief');
+      if (!brief || !brief.trim() || brief.length > 600) bad('brief must contain 1-600 characters');
+      for (const key of ['project_type', 'audience', 'brand_notes', 'preferred_stack']) {
+        if (a[key] !== undefined && (typeof a[key] !== 'string' || a[key].length > (key === 'brand_notes' ? 600 : key === 'audience' ? 300 : key === 'project_type' || key === 'preferred_stack' ? 120 : 600))) bad(key + ' must be a bounded string');
+      }
+      for (const [key, cap] of [['goals', 5], ['content_outline', 8], ['references', 5], ['constraints', 8]]) {
+        if (a[key] !== undefined && (!Array.isArray(a[key]) || a[key].length > cap || a[key].some((v) => typeof v !== 'string' || v.length > 240))) bad(key + ' must be an array of at most ' + cap + ' strings (240 characters each)');
+      }
+      return textResult(planDesign(a)); },
+    aura_research_search: async (a) => { a = a || {};
+      const query = str(a.query, 'query');
+      if (!query || !query.trim() || query.length > 300) bad('query must contain 1-300 characters');
+      const limit = a.limit === undefined ? 3 : num(a.limit, 'limit');
+      if (!Number.isInteger(limit) || limit < 1 || limit > 5) bad('limit must be an integer from 1 to 5');
+      return textResult(searchResearch(query, limit)); },
+    aura_research_read: async (a) => { a = a || {};
+      const id = str(a.id, 'id');
+      if (!id || id.length > 100) bad('id must contain 1-100 characters');
+      const card = readResearch(id);
+      if (!card) { const e = new Error('research claim not found: ' + id); e.code = 'NOT_FOUND'; throw e; }
+      return textResult(card); },
     aura_diff: async (a) => { a = a || {};
       const refs = normRefs(a.components, 'components');
       if (!refs || refs.length < 2 || refs.length > 4) bad('components must contain 2-4 id/slug references');

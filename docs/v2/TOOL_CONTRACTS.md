@@ -1,5 +1,7 @@
 # Session 2 tool contract catalogue
 
+> The three Session 3 design/research tools are documented in the [Design Contract](./DESIGN_CONTRACT.md) and [Research Library](./RESEARCH_LIBRARY.md). They are deterministic local planning/evidence tools; they do not alter the Session 2 catalogue semantics below.
+
 The exact, ordered public names, concise descriptions and JSON input schemas are
 snapshotted in [`tool-definitions.json`](./tool-definitions.json), generated from
 `src/tools.mjs`. The table below adds result semantics, caps, upstream cost,
