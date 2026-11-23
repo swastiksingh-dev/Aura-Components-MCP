@@ -232,7 +232,15 @@ export function isWellFormedRow(kind, row) {
 }
 
 export function pageUrl(kind, row) {
-  if (kind === "components") return SITE + "/component/" + row.slug;
+  if (kind === "components") {
+    // Upstream drift can return a component without a slug. Never publish
+    // /component/undefined: fall back to the catalogue search that the title
+    // can actually resolve, and keep the row usable.
+    const slug = typeof row.slug === "string" ? row.slug.trim() : "";
+    return slug
+      ? SITE + "/component/" + encodeURIComponent(slug)
+      : SITE + "/components?q=" + encodeURIComponent(row.title ?? "");
+  }
   if (kind === "skills") return SITE + "/skills/" + row.id;
   // ISS9: asset pages are query-routed (no /assets/ID route exists). Keep the q= form
   // but ALSO expose a stable key so agents can cite: id + slug + title together.
@@ -629,7 +637,11 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
       ["components_free", "components?select=id&private=eq.false&premium=eq.false&limit=1"],
       ["components_pro", "components?select=id&private=eq.false&premium=eq.true&limit=1"],
       ["skills", "skills?select=id&private=eq.false&limit=1"],
+      // `assets` stays the upstream total (all entitlements); the explicit
+      // free/pro split is what the free-only access policy actually serves.
       ["assets", "assets?select=id&private=eq.false&limit=1"],
+      ["assets_free", "assets?select=id&private=eq.false&premium=eq.false&limit=1"],
+      ["assets_pro", "assets?select=id&private=eq.false&premium=eq.true&limit=1"],
       ["design_systems", "design_systems?select=id&private=eq.false&limit=1"],
     ];
     await Promise.all(jobs.map(async ([k, path]) => {
@@ -646,7 +658,7 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
         freshness[table] = v ? String(v) : null;
       } catch { freshness[table] = null; }
     }));
-    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, freshness, cached: false };
+    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, counts_note: "components_free/components_pro and assets_free/assets_pro are split by premium; assets is all assets (free+pro). skills and design_systems have no premium flag.", freshness, cached: false };
     cacheSet(key, out);
     return out;
   }

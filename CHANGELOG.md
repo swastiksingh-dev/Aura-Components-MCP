@@ -2,6 +2,36 @@
 
 All notable changes to `aura-components-mcp`.
 
+## [Unreleased] — v2 foundation (Session 1)
+
+No public tool added or removed; no dependency added. This pass establishes the
+v2 engineering baseline and fixes confirmed defects.
+
+### Fixed
+
+- `aura_design_blueprint` no longer loses every catalogue match when the
+  `dark`/`light` theme word appears only in `visualDirection` (the matcher
+  tested `goal + visualDirection` but dereferenced `goal.match(...)`, which is
+  null in that case).
+- Component rows without a valid slug no longer produce
+  `https://www.aura.build/component/undefined`; they fall back to the catalogue
+  search URL for their title.
+- `aura_status` now exposes `assets_free` and `assets_pro` alongside the
+  upstream `assets` total, with a `counts_note` explaining the split. At the
+  Session 1 baseline all 30,688 assets were free; the split is now explicit
+  rather than implied.
+- Award index locking uses exclusive create (`wx`) instead of an
+  `existsSync` + write check, closing the cross-process read-then-write window.
+  Busy and stale-lock behaviour is unchanged.
+
+### Build
+
+- `scripts/bundle.mjs` owns assembly, LF normalisation, manifest completeness
+  and bundle guardrails. `scripts/build.mjs` only writes files.
+- Builds are now byte-identical from LF and CRLF checkouts, and
+  `test/build.test.mjs` fails if `dist/server.js` is stale.
+- `SETUP.md` and `llms.txt` version strings aligned to v1.7.3.
+
 ## [1.7.3] — 2026-10-18
 
 Hardening pass over the six award tools and shared infrastructure. No public

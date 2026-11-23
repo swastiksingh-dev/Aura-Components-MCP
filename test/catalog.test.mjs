@@ -22,6 +22,13 @@ test("pageUrl derivations per kind", () => {
   assert.ok(pageUrl("design_systems", { slug: "s" }).includes("/design-systems/s"));
 });
 
+test("pageUrl never publishes /component/undefined for slug-less rows", () => {
+  const u = pageUrl("components", { id: 7, title: "Glassy Hero" });
+  assert.equal(u, "https://www.aura.build/components?q=Glassy%20Hero");
+  assert.ok(!u.includes("undefined"));
+  assert.equal(pageUrl("components", { id: 7, title: "Glassy Hero", slug: "   " }), u);
+});
+
 test("shapeRow truncates code/content and adds page_url", () => {
   const c = shapeRow("components", { slug: "S", code: "x".repeat(200) }, cfg);
   assert.ok(c.code.length < 200 && c.code.includes("truncated") && c.page_url.includes("/component/S"));
@@ -530,6 +537,9 @@ test("getStatus freshness keys present (MAX updated_at per table)", async () => 
   assert.equal(s.freshness.assets, "2026-07-27T00:00:00.000Z");
   assert.equal(s.freshness.design_systems, "2026-07-27T00:00:00.000Z");
   assert.ok("components_free" in s.counts);
+  assert.ok("components_pro" in s.counts);
+  assert.ok("assets" in s.counts && "assets_free" in s.counts && "assets_pro" in s.counts);
+  assert.match(s.counts_note, /assets_free/);
 });
 
 test("malformed rows are disclosed via malformed_dropped, never shaped into junk", async () => {

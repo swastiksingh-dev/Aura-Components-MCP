@@ -154,6 +154,23 @@ test("P0-3: blueprint always has Evidence gaps + requested palette + section cov
   assert.ok(r.auraEvidence.sectionsCovered.length >= 3);
 });
 
+test("blueprint: theme word only in visualDirection still queries the catalogue", async () => {
+  const detail = (slug) => `<html><head><meta property="og:title" content="${slug}" /></head><body></body></html>`;
+  const client = { getAwardHtml: async (raw) => { const p = String(raw).startsWith("http") ? new URL(String(raw)).pathname : String(raw); return { html: detail(p.split("/")[2]) }; } };
+  const themes = [];
+  const catalog = {
+    searchCatalog: async (kind, q) => {
+      if (kind === "components") { themes.push(q.theme); return { items: [{ id: 501, title: "Hero " + q.query, page_url: "https://www.aura.build/component/x", premium: false }] }; }
+      return { items: [{ slug: "sys", title: "Sys", page_url: "https://www.aura.build/design-systems/sys" }] };
+    },
+  };
+  const h = createHandlers(catalog, null, null, { awardClient: client, awardIndex: createAwardIndex({ dir: tmpDir() }), browser: null });
+  const m = await callWith(h, "aura_design_blueprint", { goal: "glassy fintech landing page", references: ["alpha-site", "beta-site"], visualDirection: "dark cinematic" });
+  const r = JSON.parse(m.result.content[0].text);
+  assert.ok(r.auraEvidence.matched > 0, "catalogue matches must survive a visualDirection-only theme: " + JSON.stringify(r.auraEvidence));
+  assert.ok(themes.length > 0 && themes.every((t) => t === "dark"), "dark must reach every component query, got " + JSON.stringify(themes));
+});
+
 test("P1-5: technologies backfilled from tags and labeled inferred", async () => {
   const noTech = "<html><head><meta property=\"og:title\" content=\"Grail\" /></head><body></body></html>";
   const listing = `<div data-collectable-model-value="{&quot;slug&quot;:&quot;grail-app&quot;,&quot;title&quot;:&quot;Grail&quot;,&quot;createdAt&quot;:1,&quot;tags&quot;:[&quot;WebGL&quot;,&quot;3D&quot;],&quot;images&quot;:{},&quot;type&quot;:&quot;submission&quot;}"><a href="/sites/grail-app">x</a></div>`;

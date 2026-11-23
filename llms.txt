@@ -1,4 +1,4 @@
-# aura-components-mcp (v1.7.2 — 35 tools)
+# aura-components-mcp (v1.7.3 — 35 tools)
 
 > Free-only MCP server (stdio, zero deps, no login) for the Aura (aura.build) public catalogue: 2,495 components, 192 skills, 30,688 assets, 725 design systems. Built by swastiksingh-dev (MIT). Catalogue content belongs to Aura (Meng To / DesignCode).
 

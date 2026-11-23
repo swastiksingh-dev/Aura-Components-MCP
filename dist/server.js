@@ -354,7 +354,15 @@ function isWellFormedRow(kind, row) {
 }
 
 function pageUrl(kind, row) {
-  if (kind === "components") return SITE + "/component/" + row.slug;
+  if (kind === "components") {
+    // Upstream drift can return a component without a slug. Never publish
+    // /component/undefined: fall back to the catalogue search that the title
+    // can actually resolve, and keep the row usable.
+    const slug = typeof row.slug === "string" ? row.slug.trim() : "";
+    return slug
+      ? SITE + "/component/" + encodeURIComponent(slug)
+      : SITE + "/components?q=" + encodeURIComponent(row.title ?? "");
+  }
   if (kind === "skills") return SITE + "/skills/" + row.id;
   // ISS9: asset pages are query-routed (no /assets/ID route exists). Keep the q= form
   // but ALSO expose a stable key so agents can cite: id + slug + title together.
@@ -751,7 +759,11 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
       ["components_free", "components?select=id&private=eq.false&premium=eq.false&limit=1"],
       ["components_pro", "components?select=id&private=eq.false&premium=eq.true&limit=1"],
       ["skills", "skills?select=id&private=eq.false&limit=1"],
+      // `assets` stays the upstream total (all entitlements); the explicit
+      // free/pro split is what the free-only access policy actually serves.
       ["assets", "assets?select=id&private=eq.false&limit=1"],
+      ["assets_free", "assets?select=id&private=eq.false&premium=eq.false&limit=1"],
+      ["assets_pro", "assets?select=id&private=eq.false&premium=eq.true&limit=1"],
       ["design_systems", "design_systems?select=id&private=eq.false&limit=1"],
     ];
     await Promise.all(jobs.map(async ([k, path]) => {
@@ -768,7 +780,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         freshness[table] = v ? String(v) : null;
       } catch { freshness[table] = null; }
     }));
-    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, freshness, cached: false };
+    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, counts_note: "components_free/components_pro and assets_free/assets_pro are split by premium; assets is all assets (free+pro). skills and design_systems have no premium flag.", freshness, cached: false };
     cacheSet(key, out);
     return out;
   }
@@ -2862,18 +2874,35 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
     writeAtomic("sites.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items });
     return { added, updated, total: items.length };
   }
+  // Exclusive-create lock (O_EXCL): two processes racing for the same index
+  // cannot both believe they own it. A stale/corrupt lock is removed and the
+  // create retried once; if another process wins the retry, this caller gets
+  // INDEX_BUSY. Stale takeover remains best-effort (see docs/architecture).
   function acquireLock() {
     const lockFile = path.join(root, "lock.json");
-    try {
-      if (fs.existsSync(lockFile)) {
-        const prev = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+    const payload = JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let fd = null;
+      try {
+        fd = fs.openSync(lockFile, "wx");
+        fs.writeFileSync(fd, payload, "utf8");
+        return;
+      } catch (e) {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } fd = null; try { fs.rmSync(lockFile, { force: true }); } catch { /* never mask */ } }
+        if (!e || e.code !== "EEXIST") throw e;
+        let prev = null;
+        try { prev = JSON.parse(fs.readFileSync(lockFile, "utf8")); } catch { prev = null; }
         if (prev && (now() - (prev.startedAt || 0)) < AWARD_LOCK_STALE_MS) {
-          const e = awardErr("INDEX_BUSY", "another index run is in progress (lock held since " + new Date(prev.startedAt).toISOString() + ")");
-          throw e;
+          throw awardErr("INDEX_BUSY", "another index run is in progress (lock held since " + new Date(prev.startedAt).toISOString() + ")");
         }
+        // Stale or corrupt: remove and retry the exclusive create. Another
+        // process may win the retry first — then EEXIST is re-evaluated above.
+        try { fs.rmSync(lockFile, { force: true }); } catch { /* retry decides */ }
+      } finally {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } }
       }
-    } catch (e) { if (e && e.code === "INDEX_BUSY") throw e; /* corrupt lock treated as stale */ }
-    fs.writeFileSync(lockFile, JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 }), "utf8");
+    }
+    throw awardErr("INDEX_BUSY", "another index run is in progress (lock contested)");
   }
   function releaseLock() { try { fs.rmSync(path.join(root, "lock.json"), { force: true }); } catch { /* never mask */ } }
   // Lock must wrap the whole cycle: acquire first, release in finally; an
@@ -3797,7 +3826,7 @@ function inspoEvidence(v, name) {
   return v;
 }
 const TOOL_DEFS = [
-  { name: 'aura_status', description: 'Catalogue health plus free counts (components, skills, assets, design systems). Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'aura_status', description: 'Catalogue health plus counts (components_free/pro, assets (all) + assets_free/pro, skills, design systems) with a counts_note. Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, theme dark|light filter, negative_theme exclusion, min_views floor, sorts. Slim rows by default (excerpt + fetch pointer, no full code; slim:false for full). exact_match:true skips fallbacks (honest empty).', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug. Chunk param pages large code (see code_info). full:true returns full code (ignores chunk).', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_search_skills', description: 'Search free Aura agent skills (192). Metadata only, slim by default; use aura_get_skill for the full SKILL.md content. exact_match:true skips fallbacks.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
@@ -4233,7 +4262,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const SECTIONS = AWARD_SECTIONS;
       try {
         if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
-        const themeWord = /\b(dark|light)\b/i.test(goal + ' ' + (visualDirection || '')) ? goal.match(/\b(dark|light)\b/i)[1].toLowerCase() : undefined;
+        // Test the combined text, then extract from the same combined text.
+        // (Testing goal+visualDirection but matching goal alone null-dereferenced
+        // whenever the theme word appeared only in visualDirection.)
+        const themeMatch = (goal + ' ' + (visualDirection || '')).match(/\b(dark|light)\b/i);
+        const themeWord = themeMatch ? themeMatch[1].toLowerCase() : undefined;
         const seen = new Set();
         const queries = [];
         for (const sec of SECTIONS) {

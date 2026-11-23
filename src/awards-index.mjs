@@ -105,18 +105,35 @@ export function createAwardIndex({ dir, now = () => Date.now() } = {}) {
     writeAtomic("sites.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items });
     return { added, updated, total: items.length };
   }
+  // Exclusive-create lock (O_EXCL): two processes racing for the same index
+  // cannot both believe they own it. A stale/corrupt lock is removed and the
+  // create retried once; if another process wins the retry, this caller gets
+  // INDEX_BUSY. Stale takeover remains best-effort (see docs/architecture).
   function acquireLock() {
     const lockFile = path.join(root, "lock.json");
-    try {
-      if (fs.existsSync(lockFile)) {
-        const prev = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+    const payload = JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let fd = null;
+      try {
+        fd = fs.openSync(lockFile, "wx");
+        fs.writeFileSync(fd, payload, "utf8");
+        return;
+      } catch (e) {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } fd = null; try { fs.rmSync(lockFile, { force: true }); } catch { /* never mask */ } }
+        if (!e || e.code !== "EEXIST") throw e;
+        let prev = null;
+        try { prev = JSON.parse(fs.readFileSync(lockFile, "utf8")); } catch { prev = null; }
         if (prev && (now() - (prev.startedAt || 0)) < AWARD_LOCK_STALE_MS) {
-          const e = awardErr("INDEX_BUSY", "another index run is in progress (lock held since " + new Date(prev.startedAt).toISOString() + ")");
-          throw e;
+          throw awardErr("INDEX_BUSY", "another index run is in progress (lock held since " + new Date(prev.startedAt).toISOString() + ")");
         }
+        // Stale or corrupt: remove and retry the exclusive create. Another
+        // process may win the retry first — then EEXIST is re-evaluated above.
+        try { fs.rmSync(lockFile, { force: true }); } catch { /* retry decides */ }
+      } finally {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } }
       }
-    } catch (e) { if (e && e.code === "INDEX_BUSY") throw e; /* corrupt lock treated as stale */ }
-    fs.writeFileSync(lockFile, JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 }), "utf8");
+    }
+    throw awardErr("INDEX_BUSY", "another index run is in progress (lock contested)");
   }
   function releaseLock() { try { fs.rmSync(path.join(root, "lock.json"), { force: true }); } catch { /* never mask */ } }
   // Lock must wrap the whole cycle: acquire first, release in finally; an
