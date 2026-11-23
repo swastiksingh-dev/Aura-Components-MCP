@@ -7,6 +7,7 @@ import { awardErr, awardNormalizeSlug, awardValidateHttpUrl, awardFilterUrl, awa
 import { createAwardIndex } from './awards-index.mjs';
 import { cdpBandsFromHtml } from './browser-cdp.mjs';
 import { planDesign, searchResearch, readResearch } from './design-research.mjs';
+import { planMotion } from './motion-plan.mjs';
 const SORTS = ['popular', 'recent', 'trending', 'updated'];
 const CATS = ['hero','section','button','card','background','header','logo','feature','pricing','testimonial','footer','form','heading'];
 function bad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
@@ -82,6 +83,7 @@ function diffFacts(item) {
 }
 export const TOOL_DEFS = [
   { name: 'aura_plan_design', description: 'Turn a brief into a compact Design Contract. Separates supplied facts, recommendations, and open questions; no catalogue rows or code. Then search a few indicated first-party candidates.', inputSchema: { type: 'object', properties: { brief: { type: 'string', minLength: 1, maxLength: 600 }, project_type: { type: 'string', maxLength: 120 }, audience: { type: 'string', maxLength: 300 }, goals: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 5 }, brand_notes: { type: 'string', maxLength: 600 }, content_outline: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 8 }, references: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 5 }, constraints: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 8 }, preferred_stack: { type: 'string', maxLength: 120 } }, required: ['brief'], additionalProperties: false } },
+  { name: 'aura_motion_plan', description: 'Create a compact motion contract for purpose, trigger, target, properties, timing, interruption, reduced-motion, responsive fallback and accessibility. Supplied observation summaries are attributed and not independently verified.', inputSchema: { type: 'object', properties: { purpose: { type: 'string', maxLength: 240 }, trigger: { type: 'string', maxLength: 120 }, target: { type: 'string', maxLength: 160 }, properties: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 40 } }, interaction: { type: 'string', maxLength: 120 }, stack: { type: 'string', maxLength: 120 }, constraints: { type: 'string', maxLength: 360 }, observation: { type: 'object', properties: { source: { type: 'string', maxLength: 300 }, viewport: { type: 'string', maxLength: 80 }, trigger: { type: 'string', maxLength: 120 }, target: { type: 'string', maxLength: 160 }, changes: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 160 } }, limitations: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 200 } } }, additionalProperties: false } }, additionalProperties: false } },
   { name: 'aura_research_search', description: 'Search curated, compact research evidence cards. Returns at most five findings with source links, limitations, and a detail reference; never returns papers or PDFs.', inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 300 }, limit: { type: 'number', minimum: 1, maximum: 5 } }, required: ['query'], additionalProperties: false } },
   { name: 'aura_research_read', description: 'Read one selected research evidence card and its source metadata. Returns a compact claim, provenance, limitations, and implication; not source full text.', inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 100 } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_status', description: 'Catalogue health plus counts (components_free/pro, assets (all) + assets_free/pro, skills, design systems) with a counts_note. Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
@@ -112,7 +114,7 @@ export const TOOL_DEFS = [
   { name: 'aura_award_search', description: 'Search award-winning website references (Awwwards). Modes: sites (ranked refs with preview links), categories (real taxonomy from the index/source), elements (hero/nav/pricing/footer examples), motion (previously recorded motion studies). Local index first, one polite live refresh when empty.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['sites', 'categories', 'elements', 'motion'] }, query: { type: 'string' }, slug: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, category: { type: 'string' }, color: { type: 'string' }, technology: { type: 'string' }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, studio: { type: 'string' }, limit: { type: 'number' }, offset: { type: 'number' }, full: { type: 'boolean' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_award_inspect', description: 'Inspect award refs: site_details (palette/tech/awards/evidence), site_elements (section visuals with media URLs), element (one gallery record), compare_sites (2-3 refs: shared vs gaps, missing marked unknown).', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['site_details', 'site_elements', 'element', 'compare_sites'] }, slug: { type: 'string' }, elementSlug: { type: 'string' }, slugs: { type: 'array', items: { type: 'string' } } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_design_blueprint', description: 'Evidence-backed build plan from 2-5 award refs + goal: Markdown brief + versioned JSON, mapped to real free Aura components/systems (free-only enforced, failures marked unavailable). Never copies third-party source.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, references: { type: 'array', items: { type: 'string' } }, technology: { type: 'string' }, visualDirection: { type: 'string' }, responsive: { type: 'string' }, constraints: { type: 'array', items: { type: 'string' } }, includeStructure: { type: 'boolean' } }, required: ['goal', 'references'], additionalProperties: false } },
-  { name: 'aura_visual_audit', description: 'Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), compare (reference vs build mismatches). Needs Chrome for live capture; honest BROWSER_UNAVAILABLE otherwise. Loopback only with allowLocal:true.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['capture', 'structure', 'compare'] }, url: { type: 'string' }, referenceUrl: { type: 'string' }, buildUrl: { type: 'string' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, waitStrategy: { type: 'string', enum: ['load', 'networkidle'] }, settleMs: { type: 'number' }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_visual_audit', description: 'Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), responsive (measured viewport-width matrix), compare (reference vs build mismatches). Browser unavailable is explicit; loopback only with allowLocal:true.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['capture', 'structure', 'responsive', 'compare'] }, url: { type: 'string' }, referenceUrl: { type: 'string' }, buildUrl: { type: 'string' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, viewports: { type: 'array', minItems: 1, maxItems: 7, items: { type: 'integer', minimum: 320, maximum: 1920 } }, waitStrategy: { type: 'string', enum: ['load', 'networkidle'] }, settleMs: { type: 'number' }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_motion_study', description: 'Evidence-backed motion guidance. Modes: inspect (live runtime scan: libs/easing/scroll), record (bounded frame study; .webm only when ffmpeg present), search (stored studies by library/easing/scroll). Never claims unobserved library state.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['inspect', 'record', 'search'] }, url: { type: 'string' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' }, frames: { type: 'number' }, durationMs: { type: 'number' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_award_index', description: 'Local award corpus: status (counts/freshness/lock), rebuild/resume/refresh (bounded polite crawl), new_winners (baseline then delta), watch_add/list/remove (studio/tag/url watches). Never auto-crawls on startup.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'] }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, maxPages: { type: 'number' }, kind: { type: 'string', enum: ['studio', 'tag', 'url'] }, pattern: { type: 'string' } }, required: ['action'], additionalProperties: false } },
 ];
@@ -342,6 +344,24 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         if (a[key] !== undefined && (!Array.isArray(a[key]) || a[key].length > cap || a[key].some((v) => typeof v !== 'string' || v.length > 240))) bad(key + ' must be an array of at most ' + cap + ' strings (240 characters each)');
       }
       return textResult(planDesign(a)); },
+    aura_motion_plan: async (a) => { a = a || {};
+      for (const [key, cap] of [['purpose', 240], ['trigger', 120], ['target', 160], ['interaction', 120], ['stack', 120], ['constraints', 360]]) {
+        if (a[key] !== undefined && (typeof a[key] !== 'string' || a[key].length > cap)) bad(key + ' must be a string of at most ' + cap + ' characters');
+      }
+      if (a.properties !== undefined && (!Array.isArray(a.properties) || a.properties.length > 5 || a.properties.some((x) => typeof x !== 'string' || x.length > 40))) bad('properties must contain at most 5 strings (40 characters each)');
+      if (a.observation !== undefined) {
+        if (!a.observation || typeof a.observation !== 'object' || Array.isArray(a.observation)) bad('observation must be an object');
+        const observationKeys = new Set(['source', 'viewport', 'trigger', 'target', 'changes', 'limitations']);
+        if (Object.keys(a.observation).some((key) => !observationKeys.has(key))) bad('observation contains an unsupported field');
+        for (const [key, cap] of [['source', 300], ['viewport', 80], ['trigger', 120], ['target', 160]]) {
+          if (a.observation[key] !== undefined && (typeof a.observation[key] !== 'string' || a.observation[key].length > cap)) bad('observation.' + key + ' must be a bounded string');
+        }
+        for (const [key, cap] of [['changes', 160], ['limitations', 200]]) {
+          const values = a.observation[key];
+          if (values !== undefined && (!Array.isArray(values) || values.length > 5 || values.some((x) => typeof x !== 'string' || x.length > cap))) bad('observation.' + key + ' must contain at most 5 bounded strings');
+        }
+      }
+      return textResult(planMotion(a)); },
     aura_research_search: async (a) => { a = a || {};
       const query = str(a.query, 'query');
       if (!query || !query.trim() || query.length > 300) bad('query must contain 1-300 characters');
@@ -670,7 +690,7 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         if (nextCalls.length >= 6) break;
       }
       return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, next_calls: nextCalls, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
-    aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'compare'], 'mode');
+    aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'responsive', 'compare'], 'mode');
       const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
       const waitStrategy = a.waitStrategy === undefined ? 'load' : awardMode(a.waitStrategy, ['load', 'networkidle'], 'waitStrategy');
       const settleMs = a.settleMs === undefined ? 1500 : num(a.settleMs, 'settleMs');
@@ -710,11 +730,11 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         }
         return got.html;
       };
-      const structureOf = async (rawTarget, label) => {
+      const structureOf = async (rawTarget, label, requestedViewport = viewport) => {
         if (isLocalInput(rawTarget)) return readLocalSource(rawTarget, label || 'url');
         const target = rawTarget;
         if (awardBrowser) {
-          try { return await awardBrowser.structure(target, { viewport, allowLocal }); }
+          try { return await awardBrowser.structure(target, { viewport: requestedViewport, allowLocal }); }
           catch (e) {
             // Any live-dom failure degrades to labeled static estimates —
             // the audit stays usable, and the downgrade is disclosed.
@@ -747,6 +767,96 @@ export function createHandlers(catalog, icons, version, awardDeps) {
         const raw = a.url || bad('url (string) is required');
         const target = isLocalInput(raw) ? raw : awardValidateHttpUrl(raw, { allowLocal });
         return textResult({ mode, ...(await structureOf(target, 'url')) });
+      }
+      if (mode === 'responsive') {
+        const raw = a.url || bad('url (string) is required');
+        const target = isLocalInput(raw) ? raw : awardValidateHttpUrl(raw, { allowLocal });
+        const requested = a.viewports === undefined ? [320, 360, 390, 768, 1024, 1280, 1440] : a.viewports;
+        if (!Array.isArray(requested) || requested.length < 1 || requested.length > 7
+          || requested.some((w) => !Number.isInteger(w) || w < 320 || w > 1920)) {
+          bad('viewports must contain 1-7 integer widths from 320 to 1920');
+        }
+        const widths = [...new Set(requested)];
+        const results = [];
+        const findings = [];
+        let pages;
+        if (isLocalInput(target)) {
+          const estimate = await readLocalSource(target, 'url');
+          pages = widths.map((width) => ({ width, source: estimate.source, responsive: null }));
+        } else if (awardBrowser && typeof awardBrowser.responsiveAudit === 'function') {
+          try {
+            pages = (await awardBrowser.responsiveAudit(target, { viewports: widths, allowLocal })).results;
+          } catch (e) {
+            if (!e || !['BROWSER_UNAVAILABLE', 'CAPTURE_TIMEOUT', 'UPSTREAM_ERROR'].includes(e.code)) throw e;
+            const estimate = isLocalInput(target)
+              ? await readLocalSource(target, 'url')
+              : cdpBandsFromHtml(await fetchStatic(target), target);
+            pages = widths.map((width) => ({ width, source: estimate.source, responsive: null }));
+          }
+        } else if (!awardBrowser) {
+          const estimate = isLocalInput(target)
+            ? await readLocalSource(target, 'url')
+            : cdpBandsFromHtml(await fetchStatic(target), target);
+          pages = widths.map((width) => ({ width, source: estimate.source, responsive: null }));
+        } else {
+          pages = [];
+          for (const width of widths) pages.push(await structureOf(target, 'url', width));
+        }
+        let findingCount = 0;
+        const truncatedViewports = [];
+        for (let index = 0; index < widths.length; index++) {
+          const width = widths[index];
+          const page = pages[index] || { source: 'unavailable' };
+          const m = page.responsive;
+          const measured = page.source === 'live-dom' && m && Number.isFinite(m.viewportWidth) && Number.isFinite(m.scrollWidth);
+          results.push({
+            width,
+            source: page.source,
+            ...(measured ? {
+              measurements: {
+                viewportWidth: m.viewportWidth,
+                scrollWidth: m.scrollWidth,
+                documentHeight: m.documentHeight,
+                focusableCount: m.focusableCount,
+                prefersReducedMotion: m.reducedMotion,
+              },
+            } : { measurements: { status: 'unavailable', reason: 'Static HTML does not expose layout geometry or computed styles.' } }),
+          });
+          if (measured && m.horizontalOverflow) {
+            findingCount += 1 + (Array.isArray(m.offenders) ? m.offenders.length : 0);
+            findings.push({
+              severity: 'high', kind: 'horizontal-overflow', viewport: width,
+              element: 'document', evidence: 'document scroll width ' + m.scrollWidth + 'px exceeds viewport width ' + m.viewportWidth + 'px.',
+              impact: 'Page content may require horizontal scrolling or be clipped.',
+              suggestedCorrection: 'Find the wide child and constrain its intrinsic/minimum width or allow intentional local scrolling.',
+              confidence: 'measured',
+            });
+            for (const item of (Array.isArray(m.offenders) ? m.offenders : []).slice(0, 2)) {
+              findings.push({
+                severity: 'info', kind: 'offscreen-element-candidate', viewport: width, element: item.selector,
+                evidence: 'bounding box spans ' + item.left + 'px to ' + item.right + 'px at ' + m.viewportWidth + 'px viewport width.',
+                impact: 'This element extends outside the viewport bounds; it may be intentional or inside a local scroller and is not asserted as the document-overflow cause.',
+                suggestedCorrection: 'Inspect its overflow/scrolling ancestors and confirm whether the offscreen position is intentional.',
+                confidence: 'measured-bounds-not-causality',
+              });
+            }
+            if ((m.offenders || []).length > 2) truncatedViewports.push(width);
+          }
+        }
+        return textResult({
+          mode, url: target, widths, results, findings, findingCount,
+          findingsTruncated: findingCount > findings.length,
+          omittedFindingCount: Math.max(0, findingCount - findings.length),
+          truncatedViewports,
+          limitations: [
+            'DOM geometry detects horizontal overflow and off-screen bounds only; it does not judge visual hierarchy or screenshot similarity.',
+            'Off-screen elements are candidates, not proven causes; some may be deliberate or inside local scrollers.',
+            'Focusability count is a structural proxy, not keyboard-order or focus-visibility verification.',
+            'Reduced-motion preference is reported, but this audit does not prove every animation responds to it.',
+            'Static HTML fallback cannot measure layout; no defects are inferred from markup alone.',
+            'Screenshots are not captured by default; use mode:capture at a selected viewport for a saved artifact.',
+          ],
+        });
       }
       const rawRef = a.referenceUrl || bad('referenceUrl (string) is required');
       const rawBuild = a.buildUrl || bad('buildUrl (string) is required');

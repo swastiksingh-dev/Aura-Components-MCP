@@ -16,6 +16,7 @@ export const BUILD_ORDER = [
   "awards-index.mjs",
   "browser-cdp.mjs",
   "design-research.mjs",
+  "motion-plan.mjs",
   "tools.mjs",
 ];
 export const SERVER_MODULE = "server.mjs";

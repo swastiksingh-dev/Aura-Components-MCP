@@ -132,8 +132,10 @@ if (bun8 && Array.isArray(bun8.items) && bun8.items.length >= 2) {
 const li2 = await call('tools/list', {});
 {
   const names = li2 && li2.result && Array.isArray(li2.result.tools) ? li2.result.tools.map((t) => t.name) : [];
-  check('tools/list exposes 34 unique tools', names.length === 34 && new Set(names).size === 34, names.length + ':' + names.slice(-3).join(','));
+  check('tools/list exposes 35 unique tools', names.length === 35 && new Set(names).size === 35, names.length + ':' + names.slice(-4).join(','));
 }
+const motionPlan = J(await tool('aura_motion_plan', { trigger: 'Click Save', target: 'Save button' }));
+check('motion plan separates supplied action from unavailable observation', motionPlan && motionPlan.contract === 'aura-motion-plan/v1' && motionPlan.plan.trigger.status === 'user_stated' && motionPlan.evidence.status === 'unavailable', JSON.stringify(motionPlan).slice(0, 220));
 const awBad = await tool('aura_award_search', { mode: 'nope' });
 check('award_search bad mode -> -32602', awBad.error && awBad.error.code === -32602, JSON.stringify(awBad).slice(0, 160));
 const awIdx = J(await tool('aura_award_index', { action: 'status' }));

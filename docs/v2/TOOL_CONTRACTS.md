@@ -53,6 +53,7 @@ policy.
 | `aura_install_asset` | Download/preview pointers, rights note and file plan; no inferred commercial licence. | One PGRST detail. | `catalog`, `access` |
 | `aura_categories` | 13 overlapping category counts; overlap note retained. | Up to 13 PGRST counts; cached. | `catalog` |
 | `aura_diff` | 2–4 component facts: known theme, dependency flags, fonts, structure, code character count and URLs; unavailable fields explicitly `unknown`. Bundle size, runtime performance and visual quality remain unknown. | 2–4 parallel free-only PGRST details; no extra API/dependency. | `session2`, `access` |
+| `aura_motion_plan` | `aura-motion-plan/v1`: purpose, trigger, target, properties, timing, interruption, reduced-motion alternative, responsive fallback and accessibility. Defaults are recommendations; no live observation is claimed. | Pure local computation. | `motion-plan`, `award-tools` |
 | `aura_prompt` | Compatibility wrapper: draft/questions, then user-customisable final prompt and Aura-only suggested calls. No required recipe or style. | Pure local computation. | `protocol-tools`, `catalog`, `session2` |
 | `aura_docs_plan` | Context7 lookup plan and apply steps. | Pure local computation; Context7 call is performed by the client. | `docs` |
 | `aura_docs_check` | Pasted excerpt check, max 20,000 chars; reports only known markers/pins. | Pure local computation. | `docs` |
@@ -61,8 +62,8 @@ policy.
 | `aura_award_search` | Sites/elements/categories/motion; default 5, max 25, offset paging; local corpus first and one polite refresh where existing policy allows. | Local award index + bounded Awwwards fetch. | `award-tools`, `award-index-lifecycle` |
 | `aura_award_inspect` | Selected site/element/compare detail; missing evidence remains unavailable/unknown. | Local index + bounded Awwwards detail fetch. | `award-tools`, `award-fixes` |
 | `aura_design_blueprint` | Evidence-linked blueprint from 2–5 references; Aura matches stay free-only; unknown evidence disclosed. | Local/Awwwards reference evidence + bounded catalogue lookups. | `award-tools`, `award-output-quality`, `access` |
-| `aura_visual_audit` | Browser evidence or explicit unavailable result; artifact paths are returned only when written. URL and local-network guards apply. | Optional Chrome/CDP; no ordinary catalogue dependency. | `award-artifacts`, `award-fixes`, `browser-cdp` |
-| `aura_motion_study` | Bounded inspect/record/search output; frame/duration caps and honest browser/ffmpeg availability. | Optional Chrome/CDP/ffmpeg + local motion index. | `award-artifacts`, `browser-cdp` |
+| `aura_visual_audit` | Capture/structure/compare plus `responsive` viewport matrix (320–1920px; max 7 widths); geometry findings are measured only with live DOM, static estimates never invent overflow. Screenshot paths only when written. | Optional Chrome/CDP; no ordinary catalogue dependency. | `award-artifacts`, `award-fixes`, `browser-cdp`, `award-tools` |
+| `aura_motion_study` | `inspect` samples runtime/library metadata plus bounded CSS/WAAPI state; `record` is a capped scroll-frame tour, not a named interaction capture; `search` queries the local study index. Inference and unavailable evidence are labeled. | Optional Chrome/CDP/ffmpeg + local motion index. | `award-artifacts`, `browser-cdp`, `award-tools` |
 | `aura_award_index` | Local status/watch operations and bounded crawl reports; crawl page budget is caller-limited. | Local file writes + polite Awwwards crawl when explicitly requested. | `awards-index`, `award-index-lifecycle`, `award-watches` |
 
 ## Inspo bridge retirement

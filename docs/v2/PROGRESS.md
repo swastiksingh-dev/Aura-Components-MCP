@@ -7,7 +7,7 @@ The original `.aura-components version 2.0/03_ENGINEERING_PLAYBOOK/PROGRESS.md` 
 - [x] Session 1 — Foundation & repository reorganisation (historical report remains in committed plan-folder file).
 - [x] Session 2 — MCP intelligence & context efficiency (user-provided baseline: commit `8cdf3e8`; `npm test` 286/0, `npm run verify` 46/0, `npm pack --dry-run` succeeded; no rewrite).
 - [x] Session 3 — Design Intelligence & Research.
-- [ ] Session 4 — Motion, responsive design & verification. **Not started.**
+- [x] Session 4 — Motion, responsive design & verification.
 - [ ] Session 5 — Documentation, brand & release readiness. **Not started.**
 
 ## Session 3 — 2026-11-23
@@ -46,6 +46,43 @@ The original `.aura-components version 2.0/03_ENGINEERING_PLAYBOOK/PROGRESS.md` 
 
 `src/design-research.mjs`, `src/tools.mjs`, `scripts/bundle.mjs`, `scripts/verify.mjs`, `dist/server.js`, `docs/v2/TOOL_CONTRACTS.md`, `docs/v2/tool-definitions.json`, `docs/v2/DESIGN_CONTRACT.md`, `docs/v2/RESEARCH_LIBRARY.md`, `docs/v2/PROGRESS.md`, `test/design-research.test.mjs`, `test/fixtures/design-briefs.json`, and tool-count/integration assertions in `test/award-tools.test.mjs`, `test/icon.test.mjs`, `test/packaging.test.mjs`, and `test/session2.test.mjs`.
 
+## Session 4 — 2026-11-23
+
+### Baseline and bounded plan
+
+- Branch `feat/aura-v2-foundation`; HEAD at Session 3 local commit `ed11b0bd87c14d6a91dc21bd462444f3c21975b2`; Node `v24.22.3`.
+- Baseline `npm test`: **295 pass / 0 fail**.
+- Leave the supplied plan-folder deletions and `.gitignore` modification untouched and unstaged.
+- Implement a pure `aura_motion_plan`; improve live motion inspection to sample bounded CSS/WAAPI state and distinguish observation from inference; add multi-width responsive geometry diagnostics; document mode semantics, limits and optional REA workflow. Do not add dependencies or begin Session 5.
+
+### Completed
+
+- Added `aura_motion_plan` with stated/recommended/observed attribution; caller-supplied REA observation summaries remain explicitly unverified by Aura. The contract covers purpose, trigger, target, properties, state, timing, sequencing, interruption, reduced motion, responsive/touch fallback, focus parity and performance risks.
+- Extended live motion inspection with bounded computed CSS/WAAPI samples, reduced-motion preference, explicit WAAPI unavailability, inferred GSAP-global presence, and an explicit statement that named interaction capture is unavailable. Existing `record` remains a bounded scroll tour, not a named-action recorder.
+- Added a responsive width matrix (default 320, 360, 390, 768, 1024, 1280, 1440; max 7 widths). It reuses one CDP page, reports measured document overflow plus candidate off-screen bounds, labels static estimates as unmeasured, caps per-viewport findings with truncation metadata, and keeps screenshots as explicit file artifacts rather than inline data.
+- Documented exact `inspect`, `record`, `search`, capture/structure/compare behavior and limitations, the responsive evidence boundary, and an optional REA evidence-to-contract handoff in `docs/v2/MOTION_RESPONSIVE.md`. REA remains separate; no protected source/assets were copied.
+- Added hermetic motion-plan, CDP, responsive handler, local-file, matrix reuse, truncation, and built-server tests. Updated the build manifest, 35-tool snapshot, live verifier, contract catalogue, and regenerated `dist/server.js`.
+- No dependencies added; Node 22+ and optional-browser behavior preserved.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `npm run build` | exit 0; `dist/server.js` 349,298 characters / 349,646 UTF-8 bytes |
+| `npm test` | **304 pass / 0 fail**, 0 cancelled, 0 skipped |
+| `npm run verify` | **47 pass / 0 fail**; live network checks ran |
+| `npm pack --dry-run --json` | exit 0; **8 package files**, no bundled dependencies |
+| Focused Session 4 suite | **34 pass / 0 fail** after the local-file packaging fix; includes packaging, motion, CDP, responsive and artifact cases |
+| Tool snapshot | `docs/v2/tool-definitions.json` matches all **35** definitions |
+| Syntax and whitespace | `node --check` for changed source modules and `git diff --check` pass |
+
+### Review and remaining limitations
+
+- Independent review found silent responsive-finding truncation, repeated browser startup per width, ambiguous off-screen candidates, and an overstated timeout. The report now exposes truncation counts, reuses one browser session, labels off-screen bounds as candidates, and documents the roughly 75-second process-kill ceiling (not a strict response deadline). Reviewer confirmed these fixes and reported no remaining actionable findings.
+- No live Chrome session was run in this environment; CDP behavior is covered with deterministic mocked transport. Browser-specific rendering differences remain unverified.
+- The 100ms post-load resize settle can miss late font/image/content shifts; the report discloses this.
+- Aura does not yet invoke named interactions itself. The scroll recorder is not represented as an interaction capture; the optional REA workflow documents how to supply a concise captured summary.
+
 ### Exact next step
 
-Session 3 complete. Exact next step: await a separate user instruction to start Session 4; do not begin it in this continuation.
+Await a separate user instruction to start Session 5. Do not begin it in this continuation.

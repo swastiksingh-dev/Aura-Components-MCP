@@ -42,11 +42,16 @@ function cdpSetupFailed(op, err) {
 }
 export function cdpResolveViewport(name) {
   if (name === undefined || name === null) return CDP_VIEWPORTS.desktop;
+  if (Number.isInteger(name) && name >= 320 && name <= 1920) {
+    return { width: name, height: 900, ...(name <= 600 ? { deviceScaleFactor: 2, isMobile: true, hasTouch: true } : {}) };
+  }
   if (!CDP_VIEWPORTS[name]) throw cdpBad("viewport must be desktop|mobile");
   return CDP_VIEWPORTS[name];
 }
 // Self-contained page snippets (no closures; run via Runtime.evaluate).
 export const CDP_SCAN_JS = `(() => { const doc = document; const out = { title: doc.title, totalHeight: Math.round(doc.documentElement.scrollHeight), candidates: [] }; const bodyW = (doc.body.getBoundingClientRect().width || 1); const push = (tag, label, bg, top, height, textStart) => out.candidates.push({ tag, label, bg, top: Math.round(top), height: Math.round(height), textStart }); push("body", "body", getComputedStyle(doc.body).backgroundColor, 0, out.totalHeight, ""); const seen = new Set(); const visit = (el, depth) => { if (depth > 6 || out.candidates.length >= 300 || seen.has(el)) return; seen.add(el); try { const r = el.getBoundingClientRect(); if (el !== doc.body && r.width >= 0.6 * bodyW && r.height >= 120) { const bg = getComputedStyle(el).backgroundColor || ""; const m = /rgba?\\(([^)]+)\\)/.exec(bg); let a = 0; if (m) { const parts = m[1].replace(/\\//g, " ").trim().split(/[\\s,]+/).filter(Boolean); const raw = parts.length >= 4 ? parts[3] : "1"; a = raw.endsWith("%") ? parseFloat(raw) / 100 : parseFloat(raw); if (Number.isNaN(a)) a = 0; } else if (/^(oklch|oklab|lab|lch|hwb|color)\\(/.test(bg.trim())) a = 1; if (a > 0) push(el.tagName.toLowerCase(), (el.id ? "#" + el.id : "") + (el.classList.length ? "." + el.classList[0] : ""), bg, r.top + window.scrollY, r.height, (el.textContent || "").trim().slice(0, 60)); } } catch {} for (const ch of el.children) visit(ch, depth + 1); }; visit(doc.body, 0); return out; })()`;
+export const CDP_RESPONSIVE_JS = `(() => { const width=innerWidth, root=document.documentElement, body=document.body, scrollWidth=Math.max(root.scrollWidth,body?body.scrollWidth:0); const offenders=[]; for(const el of document.querySelectorAll("body *")){ if(offenders.length>=20) break; try{const r=el.getBoundingClientRect(),s=getComputedStyle(el); if(r.width>0&&r.height>0&&s.display!=="none"&&s.visibility!=="hidden"&&(r.right>width+1||r.left< -1)){offenders.push({selector:(el.tagName.toLowerCase()+(el.id?"#"+el.id:"")+(el.classList&&el.classList.length?"."+String(el.classList[0]).slice(0,40):"")).slice(0,100),left:Math.round(r.left),right:Math.round(r.right),width:Math.round(r.width),overflowX:s.overflowX});}}catch{}} const focusable=document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])').length; return {viewportWidth:width,scrollWidth,documentHeight:root.scrollHeight,horizontalOverflow:scrollWidth>width+1,offenders,focusableCount:focusable,reducedMotion:matchMedia("(prefers-reduced-motion: reduce)").matches}; })()`;
+export const CDP_MOTION_EVIDENCE_JS = `(() => { const observed=[], seen=new Set(), selector=e=>(e.tagName.toLowerCase()+(e.id?"#"+e.id:"")+(e.classList&&e.classList.length?"."+String(e.classList[0]).slice(0,40):"")).slice(0,100); try{for(const el of document.querySelectorAll("body *")){if(observed.length>=12)break;const s=getComputedStyle(el);const active=s.animationName&&s.animationName!=="none";const transition=s.transitionDuration&&s.transitionDuration.split(",").some(x=>parseFloat(x)>0);if(active||transition){const key=selector(el);if(seen.has(key))continue;seen.add(key);observed.push({target:key,source:active?"computed-css-animation":"computed-css-transition-declaration",animationName:active?s.animationName:null,properties:s.transitionProperty||null,duration:s.animationDuration||s.transitionDuration||null,delay:s.animationDelay||s.transitionDelay||null,easing:s.animationTimingFunction||s.transitionTimingFunction||null,playState:s.animationPlayState||null});}}}catch{} const waapiAvailable=typeof document.getAnimations==="function",waapi=[]; try{for(const a of (waapiAvailable?document.getAnimations():[]).slice(0,12)){const e=a.effect&&a.effect.target,t=a.effect&&a.effect.getComputedTiming&&a.effect.getComputedTiming();if(!e)continue;waapi.push({target:selector(e),playState:a.playState,currentTime:typeof a.currentTime==="number"?Math.round(a.currentTime):null,duration:t&&typeof t.duration==="number"?t.duration:null,delay:t&&typeof t.delay==="number"?t.delay:null,easing:t&&t.easing||null,iterations:t&&t.iterations||null});}}catch{} const gsapPresent=!!(window.gsap||window.TweenMax); return {observed,waapi,waapiAvailable,gsapPresent,reducedMotion:typeof matchMedia==="function"?matchMedia("(prefers-reduced-motion: reduce)").matches:null,interactionCapture:"unavailable: inspect mode does not invoke named actions or capture before/transition/after states"}; })()`;
 export const CDP_MOTION_JS = `(() => { const g = window; const libs = []; const add = (s) => { if (!libs.includes(s)) libs.push(s); }; try { if (g.gsap || g.TweenMax) add("gsap"); if (g.ScrollTrigger && g.ScrollTrigger.getAll) add("scrolltrigger"); if (g.Lenis || (document.documentElement.classList && document.documentElement.classList.contains("lenis"))) add("lenis"); if (document.querySelector("[data-scroll-container]")) add("locomotive"); if (document.querySelector("[data-aos]")) add("aos"); if (g.Swiper || document.querySelector(".swiper")) add("swiper"); } catch {} const render = []; try { const cs = [...document.querySelectorAll("canvas")]; if (g.THREE) render.push("three"); if (g.PIXI) render.push("pixi"); if (cs.length && !render.length) render.push("webgl"); } catch {} let st = { count: 0, scrub: 0, pin: 0, sample: [] }; try { if (g.ScrollTrigger && g.ScrollTrigger.getAll) { const all = g.ScrollTrigger.getAll(); st.count = all.length; for (const s of all.slice(0, 20)) { const v = (s.vars || {}); if (v.scrub) st.scrub++; if (v.pin) st.pin++; st.sample.push({ start: v.start != null ? String(v.start) : null, end: v.end != null ? String(v.end) : null, scrub: !!v.scrub, pin: !!v.pin, duration: null, ease: null }); } } } catch {} const tweens = { durations: [], eases: [] }; try { const kids = (g.gsap && g.gsap.globalTimeline && g.gsap.globalTimeline.getChildren(true, true, true)) || []; for (const k of kids.slice(0, 100)) { try { const d = typeof k.duration === "function" ? k.duration() : k.vars && k.vars.duration; if (typeof d === "number") tweens.durations.push(d); if (k.vars && k.vars.ease) tweens.eases.push(String(k.vars.ease)); } catch {} } } catch {} let css = []; try { const anims = (document.getAnimations && document.getAnimations()) || []; for (const a of anims.slice(0, 200)) { try { const t = a.effect && a.effect.getComputedTiming && a.effect.getComputedTiming(); if (t && t.easing && String(t.easing).includes("bezier")) css.push(String(t.easing)); if (t && typeof t.duration === "number") tweens.durations.push(t.duration / 1000); } catch {} } } catch {} return { libs, render, scrollTrigger: st, tweens, cssBeziers: css }; })()`;
 
 // Pure band reducer (mirrors upstream sweep; tested with fixture DOM).
@@ -426,11 +431,51 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
           await settled;
           await cdpNavGuard(send, allowLocal);
           const res = await send("Runtime.evaluate", { expression: CDP_SCAN_JS, returnByValue: true }, 10000);
-          return (res && res.result && res.result.value) || { title: target, totalHeight: 0, candidates: [] };
+          const metrics = await send("Runtime.evaluate", { expression: CDP_RESPONSIVE_JS, returnByValue: true }, 8000);
+          return { scan: (res && res.result && res.result.value) || { title: target, totalHeight: 0, candidates: [] }, responsive: (metrics && metrics.result && metrics.result.value) || null };
         },
       });
-      const collapsed = cdpCollapseBands(bands.candidates || [], bands.totalHeight || 0);
-      return { url: target, title: bands.title || target, totalHeight: bands.totalHeight || 0, bands: collapsed, viewport, viewportPx: cdpResolveViewport(viewport), source: "live-dom" };
+      const scan = bands.scan || { candidates: [], totalHeight: 0 };
+      const collapsed = cdpCollapseBands(scan.candidates || [], scan.totalHeight || 0);
+      return { url: target, title: scan.title || target, totalHeight: scan.totalHeight || 0, bands: collapsed, viewport, viewportPx: cdpResolveViewport(viewport), responsive: bands.responsive || null, source: "live-dom" };
+    },
+    async responsiveAudit(url, { viewports = [320, 360, 390, 768, 1024, 1280, 1440], allowLocal = false } = {}) {
+      const target = awardValidateHttpUrl(url, { allowLocal });
+      if (!Array.isArray(viewports) || !viewports.length || viewports.length > 7
+        || viewports.some((w) => !Number.isInteger(w) || w < 320 || w > 1920)) {
+        throw cdpBad("viewports must contain 1-7 integer widths from 320 to 1920");
+      }
+      const widths = [...new Set(viewports)];
+      const exe = executable();
+      if (!exe) throw cdpUnavailable("");
+      const results = await withPage({
+        // withPage kills the Chrome child timeoutMs+15s after startup;
+        // launch has its own 15s bound. Document this as a process-kill
+        // ceiling, not as a strict response deadline.
+        viewport: widths[0], timeoutMs: 45000, op: "structure",
+        async fn({ send, conn }) {
+          const settled = waitForSettled(conn, send, "load");
+          await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
+          await settled;
+          await cdpNavGuard(send, allowLocal);
+          const samples = [];
+          for (const width of widths) {
+            const mobile = width <= 600;
+            await send("Emulation.setDeviceMetricsOverride", {
+              width, height: 900, deviceScaleFactor: mobile ? 2 : 1, mobile,
+            }, 2500);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            const res = await send("Runtime.evaluate", { expression: CDP_RESPONSIVE_JS, returnByValue: true }, 2500);
+            samples.push({ width, responsive: (res && res.result && res.result.value) || null });
+          }
+          return samples;
+        },
+      });
+      return {
+        url: target, widths,
+        results: results.map((sample) => ({ width: sample.width, source: "live-dom", responsive: sample.responsive })),
+        source: "live-dom",
+      };
     },
     async motionInspect(url, { viewport = "desktop", allowLocal = false } = {}) {
       const target = awardValidateHttpUrl(url, { allowLocal });
@@ -445,10 +490,14 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
           await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, 1500));
           const res = await send("Runtime.evaluate", { expression: CDP_MOTION_JS, returnByValue: true }, 10000);
-          return (res && res.result && res.result.value) || { libs: [], render: [], scrollTrigger: { count: 0 }, tweens: { durations: [], eases: [] }, cssBeziers: [] };
+          const evidence = await send("Runtime.evaluate", { expression: CDP_MOTION_EVIDENCE_JS, returnByValue: true }, 8000);
+          return {
+            scan: (res && res.result && res.result.value) || { libs: [], render: [], scrollTrigger: { count: 0 }, tweens: { durations: [], eases: [] }, cssBeziers: [] },
+            evidence: (evidence && evidence.result && evidence.result.value) || null,
+          };
         },
       });
-      return reduceCdpScan(target, scan, now(), viewport);
+      return reduceCdpScan(target, scan.scan || scan, now(), viewport, scan.evidence || null);
     },
     // Bounded motion record: one session, N screenshots across a scroll tour.
     // Returns frame files + inspect evidence; webm only when ffmpeg exists.
@@ -524,7 +573,7 @@ export function createBrowserAdapter({ chromePath = null, fetchImpl = null, sock
     },
   };
 }
-export function reduceCdpScan(url, scan, t, viewport) {
+export function reduceCdpScan(url, scan, t, viewport, evidence = null) {
   const libs = Array.isArray(scan.libs) ? scan.libs : [];
   const render = Array.isArray(scan.render) ? scan.render : [];
   const st = scan.scrollTrigger || { count: 0, scrub: 0, pin: 0, sample: [] };
@@ -545,6 +594,16 @@ export function reduceCdpScan(url, scan, t, viewport) {
     scroll: { triggerCount: st.count || 0, scrubCount: st.scrub || 0, pinCount: st.pin || 0, scrubRatio: st.count ? (st.scrub || 0) / st.count : 0, sample: (st.sample || []).slice(0, 20) },
     easingVocab: [...agg.values()].sort((a, b) => b.uses - a.uses).slice(0, 15),
     durationVocab: ms.length ? { p25: q(0.25), median: q(0.5), p75: q(0.75) } : null,
+    motionEvidence: evidence ? {
+      status: "observed",
+      basis: "Computed CSS and Web Animations API state sampled once after page load; this is not a full timeline or trigger reconstruction.",
+      cssSamples: (Array.isArray(evidence.observed) ? evidence.observed : []).slice(0, 12),
+      waapiSamples: (Array.isArray(evidence.waapi) ? evidence.waapi : []).slice(0, 12),
+      waapiStatus: evidence.waapiAvailable === false ? "unavailable" : "observed",
+      reducedMotion: typeof evidence.reducedMotion === "boolean" ? evidence.reducedMotion : null,
+      gsapPresence: evidence.gsapPresent ? { status: "inferred", basis: "A GSAP global was present; its complete timeline and target semantics were not reconstructed." } : { status: "unavailable", basis: "No GSAP global was detected in this page context." },
+      interactionCapture: evidence.interactionCapture || "unavailable",
+    } : { status: "unavailable", basis: "No motion evidence object was returned by the browser evaluation." },
     capturedAt: t, toolVersion: "aura/1.7.3", source: "live-browser",
   };
 }

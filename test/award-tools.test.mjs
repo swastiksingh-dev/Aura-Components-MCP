@@ -52,10 +52,11 @@ async function callWith(handlers, name, args) {
   return out[1];
 }
 
-test("six award defs exist, unique names, valid schemas; total is 34", () => {
+test("award and planning defs exist, unique names, valid schemas; total is 35", () => {
   const names = TOOL_DEFS.map((t) => t.name);
-  assert.equal(names.length, 34);
-  assert.equal(new Set(names).size, 34);
+  assert.equal(names.length, 35);
+  assert.equal(new Set(names).size, 35);
+  assert.ok(names.includes("aura_motion_plan"));
   for (const n of ["aura_award_search", "aura_award_inspect", "aura_design_blueprint", "aura_visual_audit", "aura_motion_study", "aura_award_index"]) {
     const d = TOOL_DEFS.find((t) => t.name === n);
     assert.ok(d, n + " defined");
@@ -72,12 +73,75 @@ test("every def has exactly one reachable handler (no orphans)", () => {
   assert.deepEqual(Object.keys(h).sort(), TOOL_DEFS.map((t) => t.name).sort());
 });
 
-test("tools/list exposes 34 through real JSON-RPC", async () => {
+test("tools/list exposes 35 through real JSON-RPC", async () => {
   const out = [];
   const { dispatch } = createSession((m) => out.push(m), { tools: TOOL_DEFS, handlers: createHandlers(fakeCatalog, null, null, deps()) });
   await dispatch({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
   await dispatch({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(out[1].result.tools.length, 34);
+  assert.equal(out[1].result.tools.length, 35);
+});
+
+test("motion plan tool is pure and rejects overlong input", async () => {
+  const h = createHandlers(fakeCatalog, null, null, deps());
+  const good = await callWith(h, "aura_motion_plan", { trigger: "Click Save", target: "Save button" });
+  const result = JSON.parse(good.result.content[0].text);
+  assert.equal(result.user_stated.trigger, "Click Save");
+  assert.equal(result.plan.trigger.status, "user_stated");
+  assert.ok(result.plan.reduced_motion);
+  const bad = await callWith(h, "aura_motion_plan", { target: "x".repeat(161) });
+  assert.equal(bad.error.code, -32602);
+  const observed = await callWith(h, "aura_motion_plan", { observation: { trigger: "Click", target: "Dialog", changes: ["opacity 0 to 1"] } });
+  const observedResult = JSON.parse(observed.result.content[0].text);
+  assert.equal(observedResult.plan.trigger.status, "observed");
+  assert.equal(observedResult.user_stated.trigger, undefined);
+  const invalidObservation = await callWith(h, "aura_motion_plan", { observation: { extra: "not allowed" } });
+  assert.equal(invalidObservation.error.code, -32602);
+});
+
+test("responsive audit returns viewport-specific measured overflow findings", async () => {
+  const seen = [];
+  const browser = {
+    structure: async (_url, { viewport }) => {
+      seen.push(viewport);
+      return {
+        source: "live-dom", bands: [],
+        responsive: {
+          viewportWidth: viewport, scrollWidth: viewport + (viewport === 320 ? 28 : 0), documentHeight: 900,
+          focusableCount: 4, reducedMotion: false, horizontalOverflow: viewport === 320,
+          offenders: viewport === 320 ? [
+            { selector: "#wide-card", left: 0, right: viewport + 28 },
+            { selector: ".fixed-menu", left: -20, right: 80 },
+            { selector: ".carousel-card", left: 300, right: 420 },
+          ] : [],
+        },
+      };
+    },
+  };
+  const h = createHandlers(fakeCatalog, null, null, { ...deps(), browser });
+  const out = await callWith(h, "aura_visual_audit", { mode: "responsive", url: "https://example.com", viewports: [320, 768] });
+  const report = JSON.parse(out.result.content[0].text);
+  assert.deepEqual(seen, [320, 768]);
+  assert.deepEqual(report.widths, [320, 768]);
+  assert.equal(report.findings[0].kind, "horizontal-overflow");
+  assert.equal(report.findings[0].viewport, 320);
+  assert.equal(report.findings[1].element, "#wide-card");
+  assert.equal(report.findings[1].kind, "offscreen-element-candidate");
+  assert.equal(report.findingCount, 4);
+  assert.equal(report.findingsTruncated, true);
+  assert.equal(report.omittedFindingCount, 1);
+  assert.deepEqual(report.truncatedViewports, [320]);
+  assert.ok(report.limitations.some((x) => /Focusability count/.test(x)));
+});
+
+test("responsive audit validates a bounded matrix and labels static fallback as unmeasured", async () => {
+  const h = createHandlers(fakeCatalog, null, null, deps());
+  const invalid = await callWith(h, "aura_visual_audit", { mode: "responsive", url: "https://example.com", viewports: [319] });
+  assert.equal(invalid.error.code, -32602);
+  const out = await callWith(h, "aura_visual_audit", { mode: "responsive", url: "https://example.com", viewports: [320] });
+  const report = JSON.parse(out.result.content[0].text);
+  assert.equal(report.results[0].source, "static-html");
+  assert.equal(report.results[0].measurements.status, "unavailable");
+  assert.equal(report.findings.length, 0);
 });
 
 test("award_search sites: ranked, evidence-carrying, suggestions on empty", async () => {

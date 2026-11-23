@@ -66,6 +66,86 @@
     }
   },
   {
+    "name": "aura_motion_plan",
+    "description": "Create a compact motion contract for purpose, trigger, target, properties, timing, interruption, reduced-motion, responsive fallback and accessibility. Supplied observation summaries are attributed and not independently verified.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "trigger": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "target": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "properties": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "interaction": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "stack": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "constraints": {
+          "type": "string",
+          "maxLength": 360
+        },
+        "observation": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "viewport": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "trigger": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "target": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "changes": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "string",
+                "maxLength": 160
+              }
+            },
+            "limitations": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "aura_research_search",
     "description": "Search curated, compact research evidence cards. Returns at most five findings with source links, limitations, and a detail reference; never returns papers or PDFs.",
     "inputSchema": {
@@ -895,7 +975,7 @@
   },
   {
     "name": "aura_visual_audit",
-    "description": "Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), compare (reference vs build mismatches). Needs Chrome for live capture; honest BROWSER_UNAVAILABLE otherwise. Loopback only with allowLocal:true.",
+    "description": "Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), responsive (measured viewport-width matrix), compare (reference vs build mismatches). Browser unavailable is explicit; loopback only with allowLocal:true.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -904,6 +984,7 @@
           "enum": [
             "capture",
             "structure",
+            "responsive",
             "compare"
           ]
         },
@@ -922,6 +1003,16 @@
             "desktop",
             "mobile"
           ]
+        },
+        "viewports": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "items": {
+            "type": "integer",
+            "minimum": 320,
+            "maximum": 1920
+          }
         },
         "waitStrategy": {
           "type": "string",
@@ -1040,4 +1131,4 @@
       "additionalProperties": false
     }
   }
-]\n
+]
