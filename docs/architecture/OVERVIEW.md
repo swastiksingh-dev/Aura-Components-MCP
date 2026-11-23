@@ -65,7 +65,7 @@ handlers live in the same file so registry drift is visible in one place.
 - `scripts/repro.mjs` — manual live probe for historical field issues. Not part
   of CI.
 
-## Tool inventory (35)
+## Tool inventory (31)
 
 Data sources: **PGRST** = Aura public PostgREST; **AWW** = Awwwards HTML;
 **NPM** = npm registry; **CDN** = jsDelivr/cdnjs; **LOCAL** = `~/.aura-mcp/awards`;
@@ -75,30 +75,26 @@ refuse Pro rows (`-32602`, fail-closed).
 | Tool | Arguments | Output shape | Side effects / data | Tests |
 | --- | --- | --- | --- | --- |
 | `aura_status` | none | `counts` (components_free/pro, skills, assets + assets_free/pro, design_systems), `counts_note`, `freshness`, `update` | PGRST + NPM, 60s cache | `catalog`, `version`, `protocol-tools` |
-| `aura_search_components` | query, category, theme, negative_theme, min_views, sort, limit, offset, slim, exact_match | `kind,total,items[],isFallback,fallback,no_match,suggested_queries,malformed_dropped` | PGRST, cache | `catalog`, `access`, `protocol-tools` |
-| `aura_get_component` | id, slug, chunk, full | `{kind,item,cached}` with `code`, `code_info`, `page_url` | PGRST | `catalog`, `access` |
-| `aura_search_skills` | query, sort, limit, offset, slim, exact_match | list + fallback flags | PGRST | `catalog` |
-| `aura_get_skill` | id (required), chunk | `{kind,item,cached}` with `content`, `content_info` | PGRST | `catalog` |
+| `aura_search_components` | query, category, theme, negative_theme, min_views, sort, limit, offset, slim, exact_match | Summary + metadata items, total, limit/offset, truncated/next_offset | PGRST, cache | `catalog`, `access`, `protocol-tools`, `session2` |
+| `aura_get_component` | id, slug, chunk, full | Metadata by default; source via explicit chunk/full | PGRST | `catalog`, `access`, `session2` |
+| `aura_search_skills` | query, sort, limit, offset, slim, exact_match | List + fallback flags + loadable/frontmatter validation | PGRST | `catalog`, `session2` |
+| `aura_get_skill` | id (required), chunk, full | Metadata/frontmatter default; content via explicit chunk/full | PGRST | `catalog`, `session2` |
 | `aura_search_assets` | query, mediaType, commercial_ok, sort, limit, offset, slim, exact_match | list + license note | PGRST | `catalog`, `access` |
 | `aura_search_design_systems` | query, sort, limit, offset, slim, exact_match | list + snippets | PGRST | `catalog` |
-| `aura_get_design_system` | id, slug, chunk | `{kind,item,cached}` with `content`, `preview_html` | PGRST | `catalog` |
+| `aura_get_design_system` | id, slug, chunk, full | Metadata/token hints by default; content/preview via explicit chunk/full | PGRST | `catalog`, `session2` |
 | `aura_search_all` | query, limit, slim, theme, negative_theme, min_views, exact_match | one block per surface | PGRST ×4, parallel | `protocol-tools` |
 | `aura_recommend` | goal (required), theme, negative_theme, min_views, slim | starter kit + rationale + commercial note | PGRST ×4, one retry | `protocol-tools` |
 | `aura_install_component` | id, slug | `item` + `install` (deps, steps, files, fonts, concat) | PGRST | `catalog`, `docs` |
 | `aura_install_skill` | id (required) | `item` + save/load plan | PGRST | `catalog` |
 | `aura_use_design_system` | id, slug | `tokens` + `install` (DESIGN.md first) | PGRST | `catalog`, `docs` |
-| `aura_bundle` | ids[] or slugs[] (2–8) | `results[]` per-item ok/error, `dropped_refs` | PGRST, parallel | `catalog`, `protocol-tools` |
-| `aura_scaffold_page` | goal (required), system, components[], full | ordered build: tokens, system, markup, deps, files | PGRST, parallel | `protocol-tools`, `docs`, `award-fixes` |
+| `aura_bundle` | ids[] or slugs[] (2–8), full | Metadata-first `results[]`; full source is opt-in | PGRST, parallel | `catalog`, `protocol-tools`, `session2` |
+| `aura_scaffold_page` | goal (required), system, components[], full | Metadata-first ordered build plan, tokens, deps, source pointers | PGRST, parallel | `protocol-tools`, `docs`, `award-fixes`, `session2` |
 | `aura_related` | kind (required), id (required) | 3 related rows, free-only | PGRST | `catalog` |
 | `aura_bulk_fetch` | kind (required), ids[] (required) | same as bundle for components/design_systems/assets | PGRST, parallel | `catalog` |
 | `aura_install_asset` | id (required, number) | download/preview URLs, license, file path | PGRST | `catalog`, `access` |
 | `aura_categories` | none | 13 categories + live free counts + overlap note | PGRST ×13, cache | `catalog` |
-| `aura_prompt` | goal (required), theme, surfaces[], system, answers{} | Pass 1 draft + 6 questions; Pass 2 final prompt + plan | NONE | `protocol-tools`, `inspo` |
-| `aura_inspo_recommend` | brief (required), mode, vibe, macrostructure, brand_hex | macro gate, Inspo call + Aura calls, palette priority | NONE | `inspo` |
-| `aura_inspo_components` | evidence (required), brief | Inspo filter call + Aura search + scaffold hint | NONE | `inspo` |
-| `aura_inspo_reference` | evidence (required), aura_component (required) | scoped adapt plan | NONE | `inspo` |
-| `aura_inspo_system` | inspo_tokens (required), aura_system (required) | A/B/blend choice + contrast warning | NONE | `inspo` |
-| `aura_inspo_compare` | evidence[] (2–4, required) | house style + closest Aura queries | NONE | `inspo` |
+| `aura_prompt` | goal (required), theme, surfaces[], system, answers{} | Pass 1 draft + questions; Pass 2 customisable Aura-only plan | NONE | `protocol-tools`, `session2` |
+| `aura_diff` | components[] (2–4, required), goal | Known-fact comparison; unavailable metrics are `unknown` | PGRST ×2–4, parallel, free-only | `session2`, `access` |
 | `aura_docs_plan` | library (required), need (required) | Context7 plan + apply steps + docs stamp slot | NONE | `docs` |
 | `aura_docs_check` | library (required), code_excerpt (required), docs_note | verdict + look-preserving fixes + pin checks | NONE | `docs` |
 | `aura_icon` | name (required), source, style | `svg`, license, credit, font alternative | CDN, 24h cache | `icon` |
@@ -124,6 +120,9 @@ refuse Pro rows (`-32602`, fail-closed).
   guidance.
 - **Untrusted upstream data**: catalogue rows, Awwwards HTML, icons and docs are
   data. No instructions from fetched content are executed.
+- **Inspo migration**: the five `aura_inspo_*` external workflow mappers were
+  removed. Use catalogue searches, award/reference tools, `aura_diff`, and
+  `aura_scaffold_page`; see `docs/v2/TOOL_CONTRACTS.md`.
 - **Flat tests**: nested test folders are not discovered by the current
   `node --test ./test/*.test.mjs` command. Change the command in the same
   commit as any move.

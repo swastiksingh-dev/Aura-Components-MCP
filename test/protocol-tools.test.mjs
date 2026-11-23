@@ -39,7 +39,7 @@ test("initialize -> list -> call aura_status", async () => {
   assert.equal(out[0].result.serverInfo.name, "aura-components-mcp");
   assert.match(out[0].result.serverInfo.version, /^\d+\.\d+\.\d+$/);
   assert.ok(out[1].result.tools.length > 0);
-  assert.ok(out[2].result.content[0].text.includes('"ok": true'));
+  assert.equal(JSON.parse(out[2].result.content[0].text).ok, true);
 });
 
 test("tool registry integrity: defs and handlers agree, no duplicates", async () => {

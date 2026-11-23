@@ -93,7 +93,8 @@ test("bundleItems: mixed free/pro/missing keeps batch alive without leaks", asyn
   const out = await cat.bundleItems("components", [1, 2, 999, 3]);
   assert.equal(out.length, 4);
   assert.equal(out[0].ok, true);
-  assert.ok(out[0].item.code.includes(SECRET + "-1"));
+  assert.equal(Object.hasOwn(out[0].item, "code"), false, "bundle defaults to metadata only");
+  assert.equal(out[0].item.detail_fetch.tool, "aura_get_component");
   assert.equal(out[1].ok, false);
   assert.ok(/Pro \(paid\)/.test(out[1].error) && !out[1].error.includes(SECRET));
   assert.equal(out[2].ok, false);

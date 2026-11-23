@@ -25,7 +25,7 @@ function loadConfig(env = process.env) {
     timeoutMs: num(env.AURA_TIMEOUT_MS, 12_000, { min: 1_000, max: 60_000 }),
     retries: num(env.AURA_RETRIES, 2, { min: 0, max: 5 }),
     cacheTtlMs: num(env.AURA_CACHE_TTL_MS, 60_000, { min: 0, max: 3_600_000 }),
-    defaultLimit: num(env.AURA_DEFAULT_LIMIT, 10, { min: 1, max: 50 }),
+    defaultLimit: num(env.AURA_DEFAULT_LIMIT, 5, { min: 1, max: 50 }),
     maxLimit: num(env.AURA_MAX_LIMIT, 25, { min: 1, max: 50 }),
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),
@@ -198,6 +198,30 @@ function stemTok(t) {
   else if (s.length > 4 && s.endsWith("y")) s = s.slice(0, -1);
   return s;
 }
+// Conservative one-edit fallback for already-fetched candidates only. It adds
+// no upstream calls and requires a 4+ character token to avoid noisy matches.
+function tokenNear(a, b) {
+  const rawLeft = String(a || "").toLowerCase();
+  const rawRight = String(b || "").toLowerCase();
+  const near = (left, right) => {
+    if (left === right) return true;
+    if (Math.min(left.length, right.length) < 4 || Math.abs(left.length - right.length) > 1) return false;
+    let i = 0, j = 0, edits = 0;
+    while (i < left.length && j < right.length) {
+      if (left[i] === right[j]) { i++; j++; continue; }
+      if (++edits > 1) return false;
+      if (left.length > right.length) i++;
+      else if (right.length > left.length) j++;
+      else { i++; j++; }
+    }
+    return edits + ((i < left.length || j < right.length) ? 1 : 0) <= 1;
+  };
+  if (near(rawLeft, rawRight)) return true;
+  const left = stemTok(rawLeft);
+  const right = stemTok(rawRight);
+  return near(left, right);
+}
+const fuzzyTitleHit = (token, title) => String(title || "").toLowerCase().split(/[^a-z0-9]+/).some((part) => tokenNear(token, part));
 // Rank rows: +2 per matched token in title, +1 in description/tags, theme match first.
 // Returns { rows, scored } where scored explains the top pick for fallback_score.
 function scoreRows(kind, rows, toks, themeHint) {
@@ -208,7 +232,7 @@ function scoreRows(kind, rows, toks, themeHint) {
     let s = 0;
     for (const raw of toks) {
       const t = stemTok(raw);
-      if (title.includes(raw) || (t !== raw && title.includes(t))) s += 2;
+      if (title.includes(raw) || (t !== raw && title.includes(t)) || fuzzyTitleHit(t, title)) s += 2;
       else if (desc.includes(raw) || tags.includes(raw) || (t !== raw && (desc.includes(t) || tags.includes(t)))) s += 1;
     }
     const th = r.facets && r.facets.theme;
@@ -232,7 +256,7 @@ function matchOverlap(kind, toks, item) {
     for (const t of list) {
       const tok = String(t ?? "").toLowerCase();
       const stem = stemTok(tok);
-      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)))) n++;
+      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)) || fuzzyTitleHit(stem, title))) n++;
     }
     return n;
   }
@@ -246,7 +270,7 @@ function matchOverlap(kind, toks, item) {
   for (const t of list) {
     const tok = String(t ?? "").toLowerCase();
     const stem = stemTok(tok);
-    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)))) n++;
+    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)) || parts.some((part) => fuzzyTitleHit(stem, part)))) n++;
   }
   return n;
 }
@@ -306,17 +330,34 @@ function chunkText(s, n, chunk = 0) {
 
 // Slim lists: drop heavy blobs (full code/content/preview_html) from list rows,
 // keep excerpts + chunk pointers + full_fetch so agents fetch detail on purpose.
-// getItem/bundleItems stay full — detail is their job. Default on (q.slim ?? true).
+// Explicit slim:false remains bounded by boundSearchBodies below.
 function slimRows(kind, items) {
   return (items || []).map((it) => {
     const o = { ...it };
-    if (kind === "components" && typeof o.code === "string") delete o.code; // keep code_excerpt + code_info + full_fetch
-    if (kind === "skills" && typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
+    if (kind === "components" && typeof o.code === "string") {
+      delete o.code; // keep code_excerpt + code_info + full_fetch
+      if (typeof o.code_excerpt === "string") o.code_excerpt = o.code_excerpt.slice(0, 300);
+    }
+    if (kind === "skills" && typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 300); delete o.content; }
     if (kind === "design_systems") {
-      if (typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
-      if (typeof o.preview_html === "string") { o.preview_excerpt = String(o.preview_html).slice(0, 800); delete o.preview_html; }
+      if (typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 300); delete o.content; }
+      if (typeof o.preview_html === "string") { o.preview_excerpt = String(o.preview_html).slice(0, 300); delete o.preview_html; }
     }
     return o;
+  });
+}
+function boundSearchBodies(kind, items, maxChars = 1200) {
+  const fields = kind === "components" ? ["code"] : kind === "skills" ? ["content"] : kind === "design_systems" ? ["content", "preview_html"] : [];
+  return (items || []).map((item) => {
+    const out = { ...item };
+    for (const field of fields) {
+      if (typeof out[field] !== "string" || out[field].length <= maxChars) continue;
+      const fullLength = out[field].length;
+      out[field] = out[field].slice(0, maxChars) + "…[truncated]";
+      out[field + "_info"] = { full_length: fullLength, preview_chars: maxChars, truncated: true };
+      out[field + "_fetch"] = { tool: kind === "components" ? "aura_get_component" : kind === "skills" ? "aura_get_skill" : "aura_get_design_system", id: out.id ?? out.slug, chunk: 0 };
+    }
+    return out;
   });
 }
 
@@ -583,7 +624,9 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         if (isWellFormedRow(kind, r)) formed.push(r);
         else malformed++;
       }
-      const out = { kind, total, limit, offset, items: formed.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      const out = { kind, summary: formed.length + " " + kind.replaceAll("_", " ") + " result(s)", total, limit, offset, items: formed.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false, provenance: { source: "Aura public catalogue" } };
+      out.truncated = typeof total === "number" ? offset + limit < total : null;
+      out.next_offset = out.truncated === true ? offset + limit : null;
       if (malformed) out.malformed_dropped = malformed;
       if (deduped) out.deduped = deduped;
       // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
@@ -669,6 +712,10 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         }
       }
       if (slim) out.items = slimRows(kind, out.items);
+      else {
+        out.items = boundSearchBodies(kind, out.items);
+        out.item_body_limit = 1200;
+      }
       cacheSet(key, out);
       return out;
     })();
@@ -727,21 +774,25 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     }
     if (wantFull) {
       if (kind === "components" && typeof full.code === "string") {
-        item.code = full.code;
-        item.code_info = { full_length: full.code.length, chunks: 1, chunk: 0, truncated: false };
+        const ch = chunkText(full.code, config.codeChars, 0);
+        item.code = ch.text;
+        item.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
       }
       if (kind === "skills" && typeof full.content === "string") {
-        item.content = full.content;
-        item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+        const ch = chunkText(full.content, config.contentChars, 0);
+        item.content = ch.text;
+        item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
       }
       if (kind === "design_systems") {
         if (typeof full.content === "string") {
-          item.content = full.content;
-          item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+          const ch = chunkText(full.content, config.contentChars, 0);
+          item.content = ch.text;
+          item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
         }
         if (typeof full.preview_html === "string") {
-          item.preview_html = full.preview_html;
-          item.preview_info = { full_length: full.preview_html.length, chunks: 1, chunk: 0, truncated: false };
+          const ch = chunkText(full.preview_html, config.codeChars, 0);
+          item.preview_html = ch.text;
+          item.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
         }
       }
     }
@@ -821,7 +872,17 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
   async function bundleItems(kind, ids, max = 8, opts = {}) {
     const list = [...new Set((ids || []).map(String))].slice(0, Math.max(1, Math.min(max, 8)));
     const out = await Promise.all(list.map(async (id) => {
-      try { const got = await getItem(kind, id, { full: !!opts.full }); return { ok: true, id, item: got.item }; }
+      try {
+        const got = await getItem(kind, id, { full: !!opts.full });
+        const item = { ...got.item };
+        if (!opts.full) {
+          const sourceKey = kind === "components" ? "code" : kind === "skills" ? "content" : null;
+          if (sourceKey && typeof item[sourceKey] === "string") delete item[sourceKey];
+          if (kind === "design_systems") { delete item.content; delete item.preview_html; }
+          item.detail_fetch = { tool: kind === "components" ? "aura_get_component" : kind === "design_systems" ? "aura_get_design_system" : "aura_get_skill", id };
+        }
+        return { ok: true, id, item };
+      }
       catch (e) { return { ok: false, id, error: (e && e.code === "NOT_FOUND") ? "not found" : String((e && e.message) || e).slice(0, 160) }; }
     }));
     return out;
@@ -870,7 +931,7 @@ const Errors = {
 };
 
 function textResult(obj) {
-  return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify(obj) }] };
 }
 
 function createSession(send, { tools, handlers }) {
@@ -1195,7 +1256,7 @@ function finalPromptText(goal, a) {
     + 'ASSETS: ' + assets + '\n'
     + 'RULES: Tailwind container mx-auto px-4; hex palette 50-900; radius 8px; breakpoints 1024+/768-1023/<768, 44px touch targets; hover scale 1.05 + shadow; Inter 40-48 H1 / 16 body; motion <500ms + prefers-reduced-motion; vanilla HTML/Tailwind/JS, no proprietary runtime\n'
     + 'ORDER: 1 tokens.css, 2 system preview_html, 3 component markup\n'
-    + 'CALLS: aura_recommend -> aura_get_* finalists -> aura_use_design_system -> aura_scaffold_page';
+    + 'CALLS: aura_search_components/aura_search_all -> inspect finalists -> aura_use_design_system -> aura_scaffold_page';
 }
 
 function buildPrompt(input = {}) {
@@ -1214,7 +1275,7 @@ function buildPrompt(input = {}) {
       { key: 'sections', question: 'Which sections (e.g. hero, pricing, testimonial, footer)?', options: [] },
       { key: 'system', question: 'Which DESIGN system, or auto-pick?', options: system ? [system, 'auto-pick'] : ['auto-pick'] },
       { key: 'assets', question: 'Need images/video?', options: ['no', 'images', 'video'] },
-      { key: 'macrostructure', question: 'Which page macrostructure (e.g. bento-grid, marquee-hero, long-document), or auto-pick from Inspo evidence?', options: ['auto-pick', 'bento-grid', 'marquee-hero', 'long-document', 'photographic', 'stat-led'] },
+      { key: 'macrostructure', question: 'What overall page structure fits your brief, or should Aura suggest options?', options: ['auto-pick', 'single-page', 'editorial', 'product-led'] },
       { key: 'vibe', question: 'Which mood — calm, serious, luxe, playful, technical?', options: ['calm', 'serious', 'luxe', 'playful', 'technical', 'warm'] },
     ];
     return {
@@ -1228,8 +1289,7 @@ function buildPrompt(input = {}) {
       plan_order: PROMPT_ORDER,
       sources: PROMPT_SOURCES,
       credit: PROMPT_CREDIT,
-      inspo_axes: { mode_maps_to: 'theme', macrostructures: INSPO_MACROS.slice(0, 6), note: 'Run inspo.recommend first for evidence, then aura_inspo_recommend to map it onto Aura calls. Mode folds into theme.' },
-      note: 'Ask the user these questions via native question UI, then call aura_prompt again with goal + answers. Never skip confirmation.',
+            note: 'Ask the user these questions via native question UI, then call aura_prompt again with goal + answers. Never skip confirmation.',
     };
   }
 
@@ -1248,8 +1308,6 @@ function buildPrompt(input = {}) {
     final_prompt: finalPromptText(goal, a),
     plan_order: PROMPT_ORDER,
     suggested_calls: [
-      { tool: 'inspo.recommend', arguments: { brief: goal, mode: a.theme, vibe: a.vibe, ...(a.macrostructure !== 'auto-pick' ? { macrostructure: a.macrostructure } : {}) } },
-      { tool: 'aura_inspo_recommend', arguments: { brief: goal, mode: a.theme, vibe: a.vibe, ...(a.macrostructure !== 'auto-pick' ? { macrostructure: a.macrostructure } : {}) } },
       { tool: 'aura_recommend', arguments: { goal } },
       { tool: 'aura_search_all', arguments: { query: goal, limit: 3 } },
       { tool: 'aura_use_design_system', arguments: a.system !== 'auto-pick' ? { slug: a.system } : { slug: 'auto-pick: search first' } },
@@ -1262,206 +1320,12 @@ function buildPrompt(input = {}) {
   };
 };
 
-// Module: inspo-mappers — pure zero-dep translators between Inspo evidence and
-// Aura calls. No fetch: the agent pastes slim Inspo evidence in, gets Aura call
-// plans out. Same seam for tools + tests + docs (mirrors buildPrompt).
-const INSPO_MACROS = ['bento-grid', 'long-document', 'marquee-hero', 'stat-led', 'conversational-faq', 'manifesto', 'photographic', 'specimen', 'catalogue', 'letter', 'index-first', 'narrative-workflow', 'split-studio', 'feature-stack', 'type-specimen', 'portfolio-grid', 'map-diagram', 'ecosystem-index', 'component-playground'];
-const INSPO_VIBES = ['calm', 'loud', 'playful', 'serious', 'luxe', 'raw', 'soft', 'technical', 'warm', 'cold'];
-const INSPO_MODES = ['light', 'dark'];
-const INSPO_COMP_TYPES = ['hero', 'pricing', 'features', 'cta', 'nav', 'footer', 'testimonial', 'logo-cloud', 'faq', 'stat'];
-const INSPO_STYLES = ['minimalism', 'editorial', 'brutalism', 'glassmorphism', 'swiss', 'maximalism', 'playful', 'dark-mode', 'monochrome', 'vintage', 'futurist'];
-const INSPO_MACRO_TO_CATEGORY = {
-  'bento-grid': 'feature', 'long-document': 'section', 'marquee-hero': 'hero',
-  'stat-led': 'feature', 'conversational-faq': 'form', 'manifesto': 'heading',
-  'photographic': 'background', 'specimen': 'card', 'catalogue': 'card',
-  'letter': 'heading', 'index-first': 'header', 'narrative-workflow': 'section',
-  'split-studio': 'hero', 'feature-stack': 'feature', 'type-specimen': 'heading',
-  'portfolio-grid': 'card', 'map-diagram': 'feature', 'ecosystem-index': 'section',
-  'component-playground': 'section',
-};
-const INSPO_COMP_TO_CATEGORY = {
-  hero: 'hero', pricing: 'pricing', features: 'feature', cta: 'section',
-  nav: 'header', footer: 'footer', testimonial: 'testimonial',
-  'logo-cloud': 'logo', faq: 'form', stat: 'feature',
-};
-const INSPO_LICENSE = 'Reference JSX is Inspo-canonical (copy-pasteable, tweak tokens to the brand). Aura markup/assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.';
-const INSPO_SLIM_KEYS = ['slug', 'palette', 'fonts', 'macro', 'macrostructure', 'mode', 'vibe', 'style', 'type', 'id', 'brief', 'brand_hex', 'background', 'text'];
-// Palette priority (locked): brand hex > Inspo evidence > Aura tokens. Aura keeps structure/spacing.
-const INSPO_ORDER = ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'];
-const INSPO_IMAGE_PLAN = { draft: 'image_800w', prod: 'image_original', srcset: [320, 800, 1600], alt_from: 'title', swap_hotlinked: ['pravatar', 'placehold', 'dummyimage', 'example.com'], weight_cap: 's|m only — full:true on the winner alone' };
-
-function inspoBad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
-function inspoHex(v, name) {
-  if (v === undefined) return undefined;
-  if (typeof v !== 'string' || !/^#?[0-9a-f]{3}([0-9a-f]{3})?$|^#?[0-9a-f]{6}$/i.test(v.trim())) inspoBad(name + ' must be a hex color like "#c7402f"');
-  const h = v.trim().replace(/^#/, '');
-  return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toLowerCase();
-}
-function inspoLum(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const f = (c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-  return 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
-}
-function inspoContrastWarn(bg, text) {
-  if (!bg || !text) return null;
-  const l1 = inspoLum(bg), l2 = inspoLum(text);
-  const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
-  return ratio < 4.5 ? 'contrast ' + ratio.toFixed(2) + ':1 (' + bg + ' on ' + text + ') is below 4.5 — ask the user which side moves' : null;
-}
-function inspoSlimCheck(ev, name) {
-  if (!ev || typeof ev !== 'object' || Array.isArray(ev)) inspoBad(name + ' must be an object with slim keys only: ' + INSPO_SLIM_KEYS.join(','));
-  for (const k of Object.keys(ev)) {
-    if (!INSPO_SLIM_KEYS.includes(k)) inspoBad(name + '.' + k + ' is not slim — pass slugs+palette+fonts+macro+mode+vibe only, no autopsy/screenshots');
-  }
-  return ev;
-}
-
-function buildInspoRecommend(input = {}) {
-  const brief = typeof input.brief === 'string' ? input.brief.trim() : '';
-  if (!brief) inspoBad('brief (string) is required');
-  const mode = input.mode === undefined ? undefined : (INSPO_MODES.includes(input.mode) ? input.mode : inspoBad('mode must be light|dark'));
-  const vibe = input.vibe === undefined ? undefined : (INSPO_VIBES.includes(input.vibe) ? input.vibe : inspoBad('vibe must be one of ' + INSPO_VIBES.join('|')));
-  const macro = input.macrostructure === undefined ? undefined : (INSPO_MACROS.includes(input.macrostructure) ? input.macrostructure : inspoBad('macrostructure must be one of ' + INSPO_MACROS.join('|')));
-  const brand = inspoHex(input.brand_hex, 'brand_hex');
-  // Strict macro gate (locked): no macro on file means run Inspo first — never scaffold generic.
-  if (!macro) {
-    return {
-      need_macro: true,
-      brief, mode: mode || null, vibe: vibe || null, brand_hex: brand || null,
-      inspo_call: { tool: 'inspo.recommend', arguments: { brief, ...(mode ? { mode } : {}), ...(vibe ? { vibe } : {}) } },
-      note: 'No macrostructure yet — call inspo.recommend first, then call aura_inspo_recommend again with its macrostructure. Never scaffold without a macro.',
-      palette_priority: ['brand_hex', 'inspo_evidence', 'aura_tokens'],
-      order: INSPO_ORDER,
-      license_note: INSPO_LICENSE,
-    };
-  }
-  const category = INSPO_MACRO_TO_CATEGORY[macro];
-  return {
-    need_macro: false,
-    brief, mode: mode || null, vibe: vibe || null, brand_hex: brand || null,
-    macrostructure: macro, aura_category: category,
-    inspo_call: { tool: 'inspo.recommend', arguments: { brief, macrostructure: macro, ...(mode ? { mode } : {}), ...(vibe ? { vibe } : {}) } },
-    aura_calls: [
-      { tool: 'aura_search_all', arguments: { query: brief, limit: 3, ...(mode ? { theme: mode } : {}) } },
-      { tool: 'aura_recommend', arguments: { goal: brief, ...(mode ? { theme: mode } : {}) } },
-      { tool: 'aura_search_components', arguments: { query: brief, category, ...(mode ? { theme: mode } : {}) } },
-    ],
-    palette_priority: ['brand_hex', 'inspo_evidence', 'aura_tokens'],
-    image_plan: INSPO_IMAGE_PLAN,
-    order: INSPO_ORDER,
-    next: { tool: 'aura_inspo_components', arguments: { evidence: { type: 'hero', macrostructure: macro, ...(mode ? { mode } : {}) }, brief } },
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoComponents(input = {}) {
-  const ev = input.evidence && typeof input.evidence === 'object' && !Array.isArray(input.evidence) ? input.evidence : inspoBad('evidence {type, ...} is required');
-  if (!INSPO_COMP_TYPES.includes(ev.type)) inspoBad('evidence.type must be one of ' + INSPO_COMP_TYPES.join('|'));
-  if (ev.style !== undefined && !INSPO_STYLES.includes(ev.style)) inspoBad('evidence.style must be one of ' + INSPO_STYLES.join('|'));
-  if (ev.macrostructure !== undefined && !INSPO_MACROS.includes(ev.macrostructure)) inspoBad('evidence.macrostructure must be one of ' + INSPO_MACROS.join('|'));
-  if (ev.mode !== undefined && !INSPO_MODES.includes(ev.mode)) inspoBad('evidence.mode must be light|dark');
-  for (const k of Object.keys(ev)) {
-    if (!['type', 'style', 'macrostructure', 'mode', 'macro', 'vibe'].includes(k)) inspoBad('evidence.' + k + ' is not slim — type/style/macrostructure/mode only');
-  }
-  const brief = typeof input.brief === 'string' && input.brief.trim() ? input.brief.trim() : ev.type;
-  const category = INSPO_COMP_TO_CATEGORY[ev.type];
-  return {
-    evidence: { ...ev },
-    aura_category: category,
-    inspo_call: { tool: 'inspo.find_components', arguments: { ...ev } },
-    aura_search: { tool: 'aura_search_components', arguments: { query: brief, category, ...(ev.mode ? { theme: ev.mode } : {}) } },
-    scaffold_hint: { order: INSPO_ORDER, weight_cap: 's|m only', tokens_first: true },
-    image_plan: INSPO_IMAGE_PLAN,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoReference(input = {}) {
-  const ev = input.evidence && typeof input.evidence === 'object' && !Array.isArray(input.evidence) ? input.evidence : inspoBad('evidence {type, id} is required');
-  if (!INSPO_COMP_TYPES.includes(ev.type)) inspoBad('evidence.type must be one of ' + INSPO_COMP_TYPES.join('|'));
-  if (typeof ev.id !== 'string' || !ev.id.trim()) inspoBad('evidence.id (string) is required');
-  const ac = input.aura_component && typeof input.aura_component === 'object' && !Array.isArray(input.aura_component) ? input.aura_component : inspoBad('aura_component {id|slug} is required');
-  const ref = typeof ac.id === 'string' && ac.id ? ac.id : (typeof ac.slug === 'string' && ac.slug ? ac.slug : inspoBad('aura_component needs id or slug'));
-  const scope = 'aura-' + String(ref).toLowerCase().replace(/[^a-z0-9]+/g, '');
-  return {
-    evidence: { type: ev.type, id: ev.id.trim() },
-    aura_component: ref,
-    inspo_call: { tool: 'inspo.get_reference_jsx', arguments: { type: ev.type, id: ev.id.trim() } },
-    aura_call: { tool: 'aura_get_component', arguments: { id: ref } },
-    adapt_plan: {
-      scope, css_scope_how: 'rewrite bare selectors as .' + scope + ' <selector>; leave Tailwind utilities, :root vars, @keyframes untouched',
-      token_swaps: ['--inspo-* -> --aura-* (brand hex wins ties)'],
-      files: [{ path: 'styles/tokens.css', contains: 'merged tokens first' }, { path: 'components/' + ref + '.html', contains: 'adapted markup' }],
-      steps: ['Fetch both sources', 'Swap Inspo tokens to brand/Aura tokens', 'Scope CSS with .' + scope, 'Replace hotlinked demo images (see image_plan)'],
-    },
-    image_plan: INSPO_IMAGE_PLAN,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoSystem(input = {}) {
-  const toks = input.inspo_tokens && typeof input.inspo_tokens === 'object' && !Array.isArray(input.inspo_tokens) ? inspoSlimCheck(input.inspo_tokens, 'inspo_tokens') : inspoBad('inspo_tokens {palette, fonts, ...} is required');
-  const slug = typeof input.aura_system === 'string' && input.aura_system.trim() ? input.aura_system.trim()
-    : (input.aura_system && typeof input.aura_system.slug === 'string' && input.aura_system.slug.trim() ? input.aura_system.slug.trim() : inspoBad('aura_system slug (string) is required'));
-  const palette = Array.isArray(toks.palette) ? toks.palette.map((c) => inspoHex(c, 'inspo_tokens.palette[]')) : [];
-  const brand = inspoHex(toks.brand_hex, 'inspo_tokens.brand_hex');
-  const bg = toks.background ? inspoHex(toks.background, 'inspo_tokens.background') : (brand || palette[0]);
-  const tx = toks.text ? inspoHex(toks.text, 'inspo_tokens.text') : null;
-  const contrast_warning = bg && tx ? inspoContrastWarn(bg, tx) : null;
-  return {
-    aura_system: slug,
-    palette_priority: ['brand_hex', 'inspo_evidence', 'aura_tokens'],
-    optionA_inspo: { palette, fonts: Array.isArray(toks.fonts) ? toks.fonts.slice(0, 4) : [] },
-    optionB_aura: { fetch: { tool: 'aura_get_design_system', arguments: { slug } }, note: 'Fetch Aura tokens, then compare side by side.' },
-    optionC_blend: { colors_from: brand ? 'brand_hex' : 'inspo palette', structure_from: 'aura DESIGN.md', note: 'Brand/Inspo colors on Aura spacing/type skeleton.' },
-    contrast_warning,
-    question: { key: 'system_choice', question: 'Inspo palette and Aura tokens disagree — which wins?', options: ['A-inspo', 'B-aura', 'C-blend'] },
-    files: [{ path: 'styles/tokens.css', contains: 'merged winning tokens — paste first' }, { path: 'DESIGN.md', contains: 'winning system rules' }],
-    order: INSPO_ORDER,
-    tokens_first: true,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoCompare(input = {}) {  const list = Array.isArray(input.evidence) ? input.evidence : inspoBad('evidence must be an array of 2-4 slim site objects');
-  if (list.length < 2 || list.length > 4) inspoBad('evidence must hold 2-4 sites — got ' + list.length);
-  const sites = list.map((s, i) => {
-    const o = inspoSlimCheck(s, 'evidence[' + i + ']');
-    if (typeof o.slug !== 'string' || !o.slug.trim()) inspoBad('evidence[' + i + '].slug (string) is required');
-    if (o.mode !== undefined && !INSPO_MODES.includes(o.mode)) inspoBad('evidence[' + i + '].mode must be light|dark');
-    if (o.macrostructure !== undefined && !INSPO_MACROS.includes(o.macrostructure)) inspoBad('evidence[' + i + '].macrostructure must be one of ' + INSPO_MACROS.join('|'));
-    return o;
-  });
-  const votes = {};
-  for (const s of sites) for (const k of ['macrostructure', 'macro', 'mode']) {
-    if (s[k]) votes[s[k]] = (votes[s[k]] || 0) + 1;
-  }
-  const top = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
-  const house = { macrostructure: (sites.map((s) => s.macrostructure || s.macro).find(Boolean)) || null, mode: sites.map((s) => s.mode).find(Boolean) || null, agreement: top ? top[0] + ' x' + top[1] + '/' + sites.length : 'none' };
-  const macro = house.macrostructure;
-  const category = macro && INSPO_MACRO_TO_CATEGORY[macro] ? INSPO_MACRO_TO_CATEGORY[macro] : null;
-  return {
-    sites: sites.map((s) => s.slug),
-    house_style: house,
-    inspo_call: { tool: 'inspo.compare', arguments: { slugs: sites.map((s) => s.slug) } },
-    closest_aura_systems_query: { tool: 'aura_search_design_systems', arguments: { query: macro || house.agreement, limit: 3 } },
-    ranked_components_query: category ? { tool: 'aura_search_components', arguments: { query: macro, category } } : null,
-    order: INSPO_ORDER,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-// Module: docs-helpers — pure planners linking Aura output to fresh Context7
-// docs. No fetch: the agent calls Context7, Aura shapes the lookup and applies
-// the answer. Same seam for tools + tests + docs.
 const DOCS_TRUSTED = {
   tailwind: { label: 'Tailwind CSS', resolve: 'tailwindcss', id: null, cdn: 'https://cdn.tailwindcss.com', aura: ['installGuide tailwindcss dep', 'styles/tokens.css', 'scaffold order'] },
   gsap: { label: 'GSAP + ScrollTrigger', resolve: 'gsap', id: null, cdn: 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js', aura: ['installGuide gsap dep', 'preview_html motion'] },
   lenis: { label: 'Lenis smooth scroll', resolve: 'lenis', id: '/darkroomengineering/lenis', cdn: 'unpkg lenis@1 (confirm exact file via lookup)', aura: ['aura_motion_smooth wiring'] },
   iconify: { label: 'Iconify icons', resolve: 'iconify', id: null, cdn: 'https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js', aura: ['installGuide iconify-icon dep'] },
 };
-// Markers verified against renames we know happened; version pins below are
-// never declared stale — they go to needs_check for a live lookup instead.
 const DOCS_STALE_MARKERS = [
   { lib: 'lenis', re: /studio-freight/i, fix: 'Package renamed studio-freight -> lenis. Swap the import/CDN path, keep option names; look unchanged.' },
 ];
@@ -1472,20 +1336,11 @@ const DOCS_PIN_HINTS = [
   { lib: 'iconify', re: /iconify-icon\/[\d.]+/i, check: 'Confirm latest iconify-icon pin via lookup.' },
 ];
 const DOCS_DEP_TO_LIB = { tailwindcss: 'tailwind', gsap: 'gsap', 'gsap-ScrollTrigger': 'gsap', 'iconify-icon': 'iconify' };
-
 function docsBad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
-
 function docsStampFor(deps) {
   const libs = [];
-  for (const d of (deps || [])) {
-    const lib = DOCS_DEP_TO_LIB[d && d.name];
-    if (lib && !libs.includes(lib)) libs.push(lib);
-  }
-  return {
-    status: 'unchecked',
-    needs_check: libs.map((l) => l + ': confirm CDN/version via aura_docs_plan + Context7'),
-    note: 'Vendored Aura code is a snapshot — verify pins before shipping.',
-  };
+  for (const d of (deps || [])) { const lib = DOCS_DEP_TO_LIB[d && d.name]; if (lib && !libs.includes(lib)) libs.push(lib); }
+  return { status: 'unchecked', needs_check: libs.map((l) => l + ': confirm CDN/version via aura_docs_plan + Context7'), note: 'Vendored Aura code is a snapshot — verify pins before shipping.' };
 }
 
 function buildDocsPlan(input = {}) {
@@ -3818,39 +3673,72 @@ function normRefs(v, name) {
   return out;
 }
 function toolFn_cat(v) { if (v !== undefined && !TOOL_CATS.includes(v)) toolFn_bad('category must be one of ' + TOOL_CATS.join('|')); return v; }
-function inspoMode(v) { if (v !== undefined && !INSPO_MODES.includes(v)) toolFn_bad('mode must be light|dark'); return v; }
-function inspoVibe(v) { if (v !== undefined && !INSPO_VIBES.includes(v)) toolFn_bad('vibe must be one of ' + INSPO_VIBES.join('|')); return v; }
-function inspoMacro(v) { if (v !== undefined && !INSPO_MACROS.includes(v)) toolFn_bad('macrostructure must be one of ' + INSPO_MACROS.join('|')); return v; }
-function inspoEvidence(v, name) {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) toolFn_bad((name || 'evidence') + ' must be an object (slim keys only)');
-  return v;
+function skillFrontmatter(content) {
+  const text = String(content || "");
+  const match = text.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return { valid: null, missing: [], frontmatter: "unknown" };
+  const frontmatter = match ? match[1] : "";
+  const lines = frontmatter.split(/\r?\n/);
+  const has = (key) => {
+    const index = lines.findIndex((line) => new RegExp("^" + key + "\\s*:").test(line));
+    if (index < 0) return false;
+    let value = lines[index].slice(lines[index].indexOf(":") + 1).trim();
+    if (!value || value.startsWith("#")) return false;
+    if (/^[|>][+-]?$/.test(value)) {
+      return lines.slice(index + 1).some((line) => /^\s+\S/.test(line) && !/^\s+#/.test(line));
+    }
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1).trim();
+    } else {
+      value = value.replace(/\s+#.*$/, "").trim();
+    }
+    return value.length > 0;
+  };
+  const missing = ["name", "description"].filter((key) => !has(key));
+  return { valid: missing.length === 0, missing, frontmatter: "present" };
+}
+function diffFacts(item) {
+  const facets = item.facets || {};
+  const code = typeof item.code === "string" ? item.code : "";
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  const structureTags = tags.filter((t) => /hero|nav|header|footer|pricing|feature|testimonial|form|card/i.test(String(t)));
+  const dependencies = [];
+  if (facets.needsTailwind === true) dependencies.push("tailwindcss");
+  if (facets.needsIcons === true) dependencies.push("iconify-icon");
+  const sourceComplete = typeof item.code === "string" && item.code_info?.truncated === false;
+  const markupStructure = sourceComplete ? [...code.matchAll(/<(header|nav|main|section|footer|form)\b/gi)].map((m) => m[1].toLowerCase()).filter((v, i, a) => a.indexOf(v) === i) : [];
+  const structure = structureTags.length ? structureTags : (markupStructure.length ? markupStructure : "unknown");
+  return {
+    id: item.id ?? null, slug: item.slug ?? null, title: item.title ?? null, category: item.category ?? tags[0] ?? "unknown",
+    theme: facets.theme ?? "unknown", dependencies: typeof facets.needsTailwind === "boolean" || typeof facets.needsIcons === "boolean" ? dependencies : "unknown", fonts: Array.isArray(facets.fonts) && facets.fonts.length ? facets.fonts : "unknown",
+    structure: structure.length ? structure : "unknown",
+    structure_source: structureTags.length ? "catalogue_tags" : (markupStructure.length ? "complete_component_markup" : "unknown"),
+    source_quality: item.code_chars ? { source: "Aura catalogue", code_chars: item.code_chars } : "unknown",
+    compatibility: "unknown", page_url: item.page_url ?? null,
+  };
 }
 const TOOL_DEFS = [
   { name: 'aura_status', description: 'Catalogue health plus counts (components_free/pro, assets (all) + assets_free/pro, skills, design systems) with a counts_note. Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, theme dark|light filter, negative_theme exclusion, min_views floor, sorts. Slim rows by default (excerpt + fetch pointer, no full code; slim:false for full). exact_match:true skips fallbacks (honest empty).', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug. Chunk param pages large code (see code_info). full:true returns full code (ignores chunk).', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'aura_search_components', description: 'Find free components by brief, category and theme. Results are metadata-first; even slim:false caps source at 1,200 chars/item. Continue with offset; fetch source via aura_get_component.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'aura_get_component', description: 'Inspect a free component. Metadata is default; pass chunk for one bounded source chunk or full:true for the first chunk. Numeric id or slug.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_search_skills', description: 'Search free Aura agent skills (192). Metadata only, slim by default; use aura_get_skill for the full SKILL.md content. exact_match:true skips fallbacks.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'aura_get_skill', description: 'Full free agent-skill content (SKILL.md body) plus source_url and page URL. Skill id. Chunk param pages large bodies (see content_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, chunk: { type: 'number' } }, required: ['id'], additionalProperties: false } },
+  { name: 'aura_get_skill', description: 'Inspect a free skill; metadata and frontmatter validation by default. Pass chunk for one body chunk or full:true for the first chunk.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_search_assets', description: 'Search free Aura assets (images and video). Keywords, media_type image or video. Slim rows by default. exact_match:true skips fallbacks.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, mediaType: { type: 'string', enum: ['image', 'video'] }, commercial_ok: { type: 'boolean' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_search_design_systems', description: 'Search free Aura DESIGN.md systems (725). Metadata + snippets, slim by default; use aura_get_design_system for content. exact_match:true skips fallbacks.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'aura_get_design_system', description: 'Full free DESIGN.md content plus preview_html, tokens, and page URL. System id or slug. Chunk param pages large preview_html (see preview_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' }, chunk: { type: 'number' } }, additionalProperties: false } },
+  { name: 'aura_get_design_system', description: 'Inspect a free design system; metadata and token hints by default. Pass chunk for bounded content/preview or full:true for the first bounded chunks.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_search_all', description: 'One call across components, skills, assets, and design systems in parallel. Free only. Slim rows by default (excerpts, no blobs). Each surface runs its own fallback pipeline, so mixed outcomes are normal (skills may fall back while components go honestly empty) — read isFallback/no_match per surface, not once globally.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' }, slim: { type: 'boolean' }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_recommend', description: 'Starter kit for a goal: top 3 free hits per surface with page URLs and rationale. Slim rows + commercial-use note. Empty components auto-retry once via suggested_queries, then editorial picks.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, slim: { type: 'boolean' } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_install_component', description: 'Paste-ready setup for a free component: dependency list, setup steps, file map, fonts. Goes beyond the official Aura MCP, which only reads project source.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' } }, additionalProperties: false } },
   { name: 'aura_install_skill', description: 'Save-and-load plan for a free skill: where to put SKILL.md per client plus upstream source.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_use_design_system', description: 'Apply a free DESIGN.md system: token starter CSS plus copy order (tokens first, then markup).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' } }, additionalProperties: false } },
-  { name: 'aura_bundle', description: 'Bulk-fetch 2-8 component details in one call (ids or slugs). Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { ids: { type: 'array', items: {} }, slugs: { type: 'array', items: { type: 'string' } } }, additionalProperties: false } },
-  { name: 'aura_scaffold_page', description: 'One ordered page build: DESIGN.md tokens.css + system preview + component markup in dependency order, combined deps + files[]. Merges install_* + use_* in a single turn. components accepts string|number|{id}|{slug} refs, e.g. ["732","1364"] or [{id:"732"}] or [{slug:"..."}]; full:true returns full bodies.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, system: { type: 'string' }, components: { type: 'array', items: {} }, full: { type: 'boolean' } }, required: ['goal'], additionalProperties: false } },
+  { name: 'aura_bundle', description: 'Fetch 2–8 component records in one call. Returns metadata by default; full:true includes bounded first source chunks. Per-item errors are isolated.', inputSchema: { type: 'object', properties: { ids: { type: 'array', items: {} }, slugs: { type: 'array', items: { type: 'string' } }, full: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'aura_scaffold_page', description: 'Plan a page from a brief and optional component refs. Returns tokens, dependencies, order and detail pointers; full:true includes bounded first chunks and reports truncated token source.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, system: { type: 'string' }, components: { type: 'array', items: {} }, full: { type: 'boolean' } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_related', description: 'More-like-this: 3 related items for a component/skill/design-system by tag + text overlap. Discovery never dead-ends.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'skills', 'design_systems'] }, id: {} }, required: ['kind', 'id'], additionalProperties: false } },
   { name: 'aura_bulk_fetch', description: 'Bulk-fetch 2-8 details in one call for components, design_systems, or assets. Alias-friendly name for aura_bundle. Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'design_systems', 'assets'] }, ids: { type: 'array', items: {} } }, required: ['kind', 'ids'], additionalProperties: false } },
   { name: 'aura_install_asset', description: 'Legal drop-in plan for an asset: direct download URL, preview URL, license (all-rights-reserved per Aura Terms §4 — check page before commercial use), suggested file path.', inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_categories', description: 'The 13 component categories with live free counts. Pick one, then search within it.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'aura_prompt', description: 'Need-based design prompt in 2 passes: Pass 1 (goal only) returns draft + 6 questions (theme, sections, system, assets, macrostructure, vibe — mode folds into theme); ask the user via native question UI, then Pass 2 (goal + answers) returns copy-paste final_prompt + plan order + suggested calls starting at inspo.recommend. Always confirm with user before scaffolding.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, theme: { type: 'string', enum: ['dark', 'light'] }, surfaces: { type: 'array', items: { type: 'string' } }, system: { type: 'string' }, answers: { type: 'object' } }, required: ['goal'], additionalProperties: false } },
-  { name: 'aura_inspo_recommend', description: 'Map a brief onto Inspo + Aura calls (pure, no fetch). Strict macro gate: without macrostructure returns need_macro:true — run inspo.recommend first, never scaffold generic. With macro returns inspo_call + 3 aura_calls + palette priority (brand > Inspo > Aura).', inputSchema: { type: 'object', properties: { brief: { type: 'string' }, mode: { type: 'string', enum: ['dark', 'light'] }, vibe: { type: 'string' }, macrostructure: { type: 'string' }, brand_hex: { type: 'string' } }, required: ['brief'], additionalProperties: false } },
-  { name: 'aura_inspo_components', description: 'Map an Inspo component filter onto Aura search (pure). evidence.type hero|pricing|features|cta|nav|footer|testimonial|logo-cloud|faq|stat plus style/macrostructure/mode. Returns inspo.find_components call + aura_search + scaffold_hint (tokens first, weight s|m).', inputSchema: { type: 'object', properties: { evidence: { type: 'object' }, brief: { type: 'string' } }, required: ['evidence'], additionalProperties: false } },
-  { name: 'aura_inspo_reference', description: 'Adapt one Inspo reference JSX onto one Aura component (pure). evidence {type, id} + aura_component {id|slug}. Returns inspo.get_reference_jsx + aura_get_component calls plus scoped adapt_plan (token swaps, css scope, files).', inputSchema: { type: 'object', properties: { evidence: { type: 'object' }, aura_component: { type: 'object' } }, required: ['evidence', 'aura_component'], additionalProperties: false } },
-  { name: 'aura_inspo_system', description: 'Resolve Inspo tokens vs Aura DESIGN system (pure). inspo_tokens {palette, fonts, background?, text?, brand_hex?} + aura_system slug. Returns option A (Inspo) vs B (Aura fetch) vs C (blend) plus one system_choice question payload (A-inspo|B-aura|C-blend) and contrast warning. Tokens first.', inputSchema: { type: 'object', properties: { inspo_tokens: { type: 'object' }, aura_system: {} }, required: ['inspo_tokens', 'aura_system'], additionalProperties: false } },
-  { name: 'aura_inspo_compare', description: 'Triangulate a house style from 2-4 slim Inspo sites (pure). evidence[] of {slug, palette?, fonts?, macrostructure?, mode?} — slim keys only, no autopsy. Returns inspo.compare call + closest Aura system/component queries.', inputSchema: { type: 'object', properties: { evidence: { type: 'array', items: { type: 'object' } } }, required: ['evidence'], additionalProperties: false } },
+  { name: 'aura_prompt', description: 'Compatibility wrapper for a two-pass design brief. Ask the user to choose theme, sections, system, assets and mood; the second pass suggests Aura tools only. Answers stay customisable.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, theme: { type: 'string', enum: ['dark', 'light'] }, surfaces: { type: 'array', items: { type: 'string' } }, system: { type: 'string' }, answers: { type: 'object' } }, required: ['goal'], additionalProperties: false } },
+  { name: 'aura_diff', description: 'Compare 2–4 free components by known metadata: theme, dependencies, fonts, structure and source length. Unknown facts stay unknown; no visual/performance claims.', inputSchema: { type: 'object', properties: { components: { type: 'array', minItems: 2, maxItems: 4, items: {} }, goal: { type: 'string' } }, required: ['components'], additionalProperties: false } },
   { name: 'aura_docs_plan', description: 'Plan a fresh-docs lookup (pure, no fetch). library + need -> Context7 resolve/query plan (trusted: tailwind, gsap, lenis, iconify) + apply steps for Aura files + docs stamp slot. The agent calls Context7, Aura shapes the rest.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, need: { type: 'string' } }, required: ['library', 'need'], additionalProperties: false } },
   { name: 'aura_docs_check', description: 'Check pasted code against fresh docs (pure). library + code_excerpt (under 20000 chars, excerpts not full pages) + optional docs_note -> verdict current|needs-update, look-preserving fixes, version-pin needs_check. Fresh API wins, look stays identical.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, code_excerpt: { type: 'string' }, docs_note: { type: 'string' } }, required: ['library', 'code_excerpt'], additionalProperties: false } },
   { name: 'aura_icon', description: 'Fetch one free icon as ready-to-paste SVG (live). name in kebab-case (bolt, arrow-down). source auto|fontawesome|pixel, style auto|solid|regular|brands. Auto-fallback across styles then libraries; every hit carries license + credit (CC BY 4.0, credit always) plus a font/CSS alternative. 24h icon cache.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string', enum: ['auto', 'fontawesome', 'pixel'] }, style: { type: 'string', enum: ['solid', 'regular', 'brands', 'auto'] } }, required: ['name'], additionalProperties: false } },
@@ -3962,17 +3850,27 @@ function createHandlers(catalog, icons, version, awardDeps) {
     aura_get_component: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (id === undefined || (typeof id !== 'string' && typeof id !== 'number')) toolFn_bad('provide id (number) or slug (string)');
       const full = a.full === undefined ? undefined : toolFn_bool(a.full, 'full');
-      if (full === true) return textResult(await catalog.getItem('components', id, { full: true }));
-      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
-      return textResult(await catalog.getItem('components', id, { chunk })); },
-    aura_search_skills: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('skills', {
+      if (full !== undefined) toolFn_bool(full, 'full');
+      const got = await catalog.getItem('components', id, full === true ? { full: true } : { chunk: a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk') });
+      const item = { ...got.item };
+      if (full !== true && a.chunk === undefined) delete item.code;
+      return textResult({ summary: "Component detail", ...got, item, metadata_only: full !== true && a.chunk === undefined, retrieval: full ? "source returned up to the configured code chunk cap; use chunk to continue if code_info.truncated" : "use chunk for source or full:true for the first bounded source chunk" }); },
+    aura_search_skills: async (a) => { a = a || {}; const r = await catalog.searchCatalog('skills', {
       query: toolFn_str(a.query, 'query'), sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'),
       slim: a.slim === undefined ? undefined : toolFn_bool(a.slim, 'slim'),
       exact_match: a.exact_match === undefined ? undefined : toolFn_bool(a.exact_match, 'exact_match'),
-    })); },
+    });
+      r.items = (r.items || []).map((it) => {
+        const validation = skillFrontmatter(it.content_snippet || it.content_excerpt || "");
+        return { ...it, loadable: validation.valid, skill_validation: validation };
+      });
+      return textResult(r); },
     aura_get_skill: async (a) => { a = a || {}; if (typeof a.id !== 'string' || !a.id) toolFn_bad('id (string) is required');
-      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
-      return textResult(await catalog.getItem('skills', a.id, { chunk })); },
+      if (a.full !== undefined) toolFn_bool(a.full, 'full');
+      const got = await catalog.getItem('skills', a.id, a.full === true ? { full: true } : { chunk: a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk') });
+      const item = { ...got.item, skill_validation: skillFrontmatter(got.item.content || "") };
+      if (a.full !== true && a.chunk === undefined) { item.content_excerpt = String(item.content || "").slice(0, 300); delete item.content; }
+      return textResult({ summary: "Skill detail", ...got, item, metadata_only: a.full !== true && a.chunk === undefined, retrieval: a.full ? "content returned up to the configured content chunk cap; use chunk to continue if content_info.truncated" : "use chunk for content or full:true for the first bounded content chunk" }); },
     aura_search_assets: async (a) => { a = a || {}; const co = a.commercial_ok === undefined ? undefined : toolFn_bool(a.commercial_ok, 'commercial_ok');
       const r = await catalog.searchCatalog('assets', { query: toolFn_str(a.query, 'query'), mediaType: a.mediaType === undefined ? undefined : (a.mediaType === 'image' || a.mediaType === 'video' ? a.mediaType : toolFn_bad('mediaType must be image|video')), freeOnly: true, sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'), slim: a.slim === undefined ? undefined : toolFn_bool(a.slim, 'slim'), exact_match: a.exact_match === undefined ? undefined : toolFn_bool(a.exact_match, 'exact_match') });
       // Gap 5: commercial_ok filter (all-rights-reserved per Aura Terms S4).
@@ -3986,8 +3884,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
     })); },
     aura_get_design_system: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (typeof id !== 'string' || !id) toolFn_bad('provide id or slug (string)');
-      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
-      return textResult(await catalog.getItem('design_systems', id, { chunk })); },
+      if (a.full !== undefined) toolFn_bool(a.full, 'full');
+      const got = await catalog.getItem('design_systems', id, a.full === true ? { full: true } : { chunk: a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk') });
+      const item = { ...got.item };
+      if (a.full !== true && a.chunk === undefined) { delete item.content; delete item.preview_html; }
+      return textResult({ summary: "Design system detail", ...got, item, metadata_only: a.full !== true && a.chunk === undefined, retrieval: a.full ? "bodies returned up to configured per-field chunk caps; use chunk to continue where *_info.truncated" : "use chunk for content/preview or full:true for the first bounded chunks" }); },
     aura_search_all: async (a) => { a = a || {}; const query = toolFn_str(a.query, 'query'), limit = toolFn_num(a.limit, 'limit') || 5;
       const slim = a.slim === undefined ? undefined : toolFn_bool(a.slim, 'slim');
       const themeV = a.theme === undefined ? undefined : theme(a.theme);
@@ -4065,16 +3966,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const s = (cats || []).reduce((n, c) => n + (typeof c.free === 'number' ? c.free : 0), 0);
       return textResult({ categories: cats, overlap_note: 'Counts overlap: components carry multiple tags, so per-category free counts sum to ' + s + ' (> 2495 free total). They triage depth, not a partition.' }); },
     aura_prompt: async (a) => { a = a || {}; return textResult(buildPrompt({ goal: typeof a.goal === 'string' ? a.goal : undefined, theme: a.theme, surfaces: a.surfaces, system: a.system, answers: a.answers })); },
-    aura_inspo_recommend: async (a) => { a = a || {}; return textResult(buildInspoRecommend({
-      brief: typeof a.brief === 'string' ? a.brief : undefined, mode: inspoMode(a.mode), vibe: inspoVibe(a.vibe),
-      macrostructure: inspoMacro(a.macrostructure), brand_hex: toolFn_str(a.brand_hex, 'brand_hex'),
-    })); },
-    aura_inspo_components: async (a) => { a = a || {}; return textResult(buildInspoComponents({ evidence: inspoEvidence(a.evidence, 'evidence'), brief: toolFn_str(a.brief, 'brief') })); },
-    aura_inspo_reference: async (a) => { a = a || {}; return textResult(buildInspoReference({ evidence: inspoEvidence(a.evidence, 'evidence'), aura_component: inspoEvidence(a.aura_component, 'aura_component') })); },
-    aura_inspo_system: async (a) => { a = a || {}; const sys = (typeof a.aura_system === 'string' || (a.aura_system && typeof a.aura_system === 'object')) ? a.aura_system : toolFn_bad('aura_system slug (string) is required');
-      return textResult(buildInspoSystem({ inspo_tokens: inspoEvidence(a.inspo_tokens, 'inspo_tokens'), aura_system: sys })); },
-    aura_inspo_compare: async (a) => { a = a || {}; if (!Array.isArray(a.evidence)) toolFn_bad('evidence must be an array of 2-4 slim site objects');
-      return textResult(buildInspoCompare({ evidence: a.evidence })); },
+    aura_diff: async (a) => { a = a || {};
+      const refs = normRefs(a.components, 'components');
+      if (!refs || refs.length < 2 || refs.length > 4) toolFn_bad('components must contain 2-4 id/slug references');
+      const results = await catalog.bundleItems('components', refs, 4);
+      return textResult({ summary: "Known-fact comparison of " + results.filter((r) => r.ok).length + " free components", goal: toolFn_str(a.goal, 'goal') || null, items: results.map((r) => r.ok ? { ok: true, ...diffFacts(r.item) } : r), limitations: { bundle_size: "unknown", runtime_performance: "unknown", visual_quality: "unknown", compatibility: "unknown unless present in source metadata" } }); },
     aura_docs_plan: async (a) => { a = a || {}; return textResult(buildDocsPlan({ library: typeof a.library === 'string' ? a.library : undefined, need: typeof a.need === 'string' ? a.need : undefined })); },
     aura_docs_check: async (a) => { a = a || {}; return textResult(buildDocsCheck({ library: typeof a.library === 'string' ? a.library : undefined, code_excerpt: typeof a.code_excerpt === 'string' ? a.code_excerpt : undefined, docs_note: toolFn_str(a.docs_note, 'docs_note') })); },
     aura_icon: async (a) => { a = a || {}; if (!icons || typeof icons.getIcon !== 'function') { const e = new Error('icons backend not wired'); throw e; }
@@ -4086,7 +3982,10 @@ function createHandlers(catalog, icons, version, awardDeps) {
       return textResult(await version.getVersion()); },
     aura_bundle: async (a) => { a = a || {}; const ids = normRefs(a.ids, 'ids') || normRefs(a.slugs, 'slugs');
       if (!ids || !ids.length) toolFn_bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');
-      return textResult({ kind: 'components', results: await catalog.bundleItems('components', ids) }); },
+      const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
+      const results = await catalog.bundleItems('components', ids, 8, { full });
+      const sourceTruncated = full && results.some((r) => r.ok && r.item?.code_info?.truncated === true);
+      return textResult({ summary: results.length + " component record(s)", kind: 'components', results, truncated: sourceTruncated, next_cursor: null, retrieval: full ? "source included up to per-component chunk caps; when truncated is true, inspect code_info and call aura_get_component with chunk to continue" : "metadata only; call aura_get_component with chunk or full:true for source" }); },
     aura_related: async (a) => { a = a || {}; const k = a.kind;
       if (k !== 'components' && k !== 'skills' && k !== 'design_systems') toolFn_bad('kind must be components|skills|design_systems');
       const id = a.id; if (typeof id !== 'string' && typeof id !== 'number') toolFn_bad('id is required');
@@ -4103,8 +4002,8 @@ function createHandlers(catalog, icons, version, awardDeps) {
     aura_scaffold_page: async (a) => { a = a || {}; if (typeof a.goal !== 'string' || !a.goal.trim()) toolFn_bad('goal (string) is required');
       const sysRef = (typeof a.system === 'string' && a.system) ? a.system : null;
       const compRefs = normRefs(a.components, 'components') || [];
-      const full = a.full === undefined ? undefined : toolFn_bool(a.full, 'full');
-      const fullOpt = full === undefined ? {} : { full };
+      const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
+      const fullOpt = { full };
       const [sys, bundle] = await Promise.all([
         sysRef ? catalog.getItem('design_systems', sysRef, fullOpt).catch(() => null) : catalog.searchCatalog('design_systems', { query: a.goal, limit: 1 }).then((r) => (r.items[0] ? { item: r.items[0] } : null)),
         compRefs.length ? catalog.bundleItems('components', compRefs, 8, fullOpt).then((rs) => ({ items: rs.filter((x) => x.ok).map((x) => x.item), dropped: rs.filter((x) => !x.ok).length })) : catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 3 }).then((r) => ({ items: r.items, dropped: 0 })),
@@ -4116,7 +4015,13 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const sysItem = sys && sys.item ? sys.item : null;
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
-      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, ...(sysItem ? {} : { system_note: 'no design system matched this goal — tokens.css is empty; fetch one via aura_search_design_systems or proceed with component defaults' }), components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+      const compactSystem = sysItem ? { ...sysItem } : null;
+      const compactComponents = freeComps.map((c) => ({ ...c }));
+      if (!full) {
+        if (compactSystem) { delete compactSystem.content; delete compactSystem.preview_html; }
+        for (const c of compactComponents) delete c.code;
+      }
+      return textResult({ summary: "Page build plan for " + freeComps.length + " free component(s)", goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', tokens_source_truncated: !!(full && sysItem?.content_info?.truncated), system: compactSystem, ...(sysItem ? {} : { system_note: 'no design system matched this goal — tokens.css is empty; fetch one via aura_search_design_systems or proceed with component defaults' }), components: compactComponents, guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), metadata_only: !full, retrieval: full ? "source included up to per-item chunk caps; check *_info.truncated and use detail chunk retrieval to continue" : "fetch referenced item with aura_get_component/aura_get_design_system for source", ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
     aura_award_search: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['sites', 'categories', 'elements', 'motion'], 'mode');
       const limit = awardLimit(a.limit, 5, 25); const offset = Math.max(0, a.offset ?? 0); const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
       if (mode === 'categories') {

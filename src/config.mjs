@@ -21,7 +21,7 @@ export function loadConfig(env = process.env) {
     timeoutMs: num(env.AURA_TIMEOUT_MS, 12_000, { min: 1_000, max: 60_000 }),
     retries: num(env.AURA_RETRIES, 2, { min: 0, max: 5 }),
     cacheTtlMs: num(env.AURA_CACHE_TTL_MS, 60_000, { min: 0, max: 3_600_000 }),
-    defaultLimit: num(env.AURA_DEFAULT_LIMIT, 10, { min: 1, max: 50 }),
+    defaultLimit: num(env.AURA_DEFAULT_LIMIT, 5, { min: 1, max: 50 }),
     maxLimit: num(env.AURA_MAX_LIMIT, 25, { min: 1, max: 50 }),
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),

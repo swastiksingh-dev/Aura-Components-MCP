@@ -29,7 +29,7 @@ test("dist renamer never rewrites method calls (.sort stays .sort)", () => {
   assert.ok(dist.includes(".sort("), "Array.sort calls survive bundling");
 });
 
-test("dist server answers elements search without crashing (bundled 35-tool path)", async () => {
+test("dist server answers elements search without crashing (bundled 31-tool path)", async () => {
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
@@ -63,7 +63,7 @@ test("dist server answers elements search without crashing (bundled 35-tool path
       await call("initialize", {});
       const list = await call("tools/list", {});
       const names = (list.result.tools || []).map((t) => t.name);
-      if (names.length !== 35) { clearTimeout(timer); kill(new Error("dist exposes " + names.length + " tools, want 35")); return; }
+      if (names.length !== 31) { clearTimeout(timer); kill(new Error("dist exposes " + names.length + " tools, want 31")); return; }
       // Empty index + elements mode returns honest-empty WITHOUT network
       // (gallery backfill needs no fetch) — must be a result, never a crash.
       const el = await call("tools/call", { name: "aura_award_search", arguments: { mode: "elements", query: "hero", limit: 3 } });

@@ -76,6 +76,30 @@ export function stemTok(t) {
   else if (s.length > 4 && s.endsWith("y")) s = s.slice(0, -1);
   return s;
 }
+// Conservative one-edit fallback for already-fetched candidates only. It adds
+// no upstream calls and requires a 4+ character token to avoid noisy matches.
+export function tokenNear(a, b) {
+  const rawLeft = String(a || "").toLowerCase();
+  const rawRight = String(b || "").toLowerCase();
+  const near = (left, right) => {
+    if (left === right) return true;
+    if (Math.min(left.length, right.length) < 4 || Math.abs(left.length - right.length) > 1) return false;
+    let i = 0, j = 0, edits = 0;
+    while (i < left.length && j < right.length) {
+      if (left[i] === right[j]) { i++; j++; continue; }
+      if (++edits > 1) return false;
+      if (left.length > right.length) i++;
+      else if (right.length > left.length) j++;
+      else { i++; j++; }
+    }
+    return edits + ((i < left.length || j < right.length) ? 1 : 0) <= 1;
+  };
+  if (near(rawLeft, rawRight)) return true;
+  const left = stemTok(rawLeft);
+  const right = stemTok(rawRight);
+  return near(left, right);
+}
+const fuzzyTitleHit = (token, title) => String(title || "").toLowerCase().split(/[^a-z0-9]+/).some((part) => tokenNear(token, part));
 // Rank rows: +2 per matched token in title, +1 in description/tags, theme match first.
 // Returns { rows, scored } where scored explains the top pick for fallback_score.
 export function scoreRows(kind, rows, toks, themeHint) {
@@ -86,7 +110,7 @@ export function scoreRows(kind, rows, toks, themeHint) {
     let s = 0;
     for (const raw of toks) {
       const t = stemTok(raw);
-      if (title.includes(raw) || (t !== raw && title.includes(t))) s += 2;
+      if (title.includes(raw) || (t !== raw && title.includes(t)) || fuzzyTitleHit(t, title)) s += 2;
       else if (desc.includes(raw) || tags.includes(raw) || (t !== raw && (desc.includes(t) || tags.includes(t)))) s += 1;
     }
     const th = r.facets && r.facets.theme;
@@ -110,7 +134,7 @@ export function matchOverlap(kind, toks, item) {
     for (const t of list) {
       const tok = String(t ?? "").toLowerCase();
       const stem = stemTok(tok);
-      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)))) n++;
+      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)) || fuzzyTitleHit(stem, title))) n++;
     }
     return n;
   }
@@ -124,7 +148,7 @@ export function matchOverlap(kind, toks, item) {
   for (const t of list) {
     const tok = String(t ?? "").toLowerCase();
     const stem = stemTok(tok);
-    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)))) n++;
+    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)) || parts.some((part) => fuzzyTitleHit(stem, part)))) n++;
   }
   return n;
 }
@@ -184,17 +208,34 @@ export function chunkText(s, n, chunk = 0) {
 
 // Slim lists: drop heavy blobs (full code/content/preview_html) from list rows,
 // keep excerpts + chunk pointers + full_fetch so agents fetch detail on purpose.
-// getItem/bundleItems stay full — detail is their job. Default on (q.slim ?? true).
+// Explicit slim:false remains bounded by boundSearchBodies below.
 export function slimRows(kind, items) {
   return (items || []).map((it) => {
     const o = { ...it };
-    if (kind === "components" && typeof o.code === "string") delete o.code; // keep code_excerpt + code_info + full_fetch
-    if (kind === "skills" && typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
+    if (kind === "components" && typeof o.code === "string") {
+      delete o.code; // keep code_excerpt + code_info + full_fetch
+      if (typeof o.code_excerpt === "string") o.code_excerpt = o.code_excerpt.slice(0, 300);
+    }
+    if (kind === "skills" && typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 300); delete o.content; }
     if (kind === "design_systems") {
-      if (typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
-      if (typeof o.preview_html === "string") { o.preview_excerpt = String(o.preview_html).slice(0, 800); delete o.preview_html; }
+      if (typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 300); delete o.content; }
+      if (typeof o.preview_html === "string") { o.preview_excerpt = String(o.preview_html).slice(0, 300); delete o.preview_html; }
     }
     return o;
+  });
+}
+function boundSearchBodies(kind, items, maxChars = 1200) {
+  const fields = kind === "components" ? ["code"] : kind === "skills" ? ["content"] : kind === "design_systems" ? ["content", "preview_html"] : [];
+  return (items || []).map((item) => {
+    const out = { ...item };
+    for (const field of fields) {
+      if (typeof out[field] !== "string" || out[field].length <= maxChars) continue;
+      const fullLength = out[field].length;
+      out[field] = out[field].slice(0, maxChars) + "…[truncated]";
+      out[field + "_info"] = { full_length: fullLength, preview_chars: maxChars, truncated: true };
+      out[field + "_fetch"] = { tool: kind === "components" ? "aura_get_component" : kind === "skills" ? "aura_get_skill" : "aura_get_design_system", id: out.id ?? out.slug, chunk: 0 };
+    }
+    return out;
   });
 }
 
@@ -461,7 +502,9 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
         if (isWellFormedRow(kind, r)) formed.push(r);
         else malformed++;
       }
-      const out = { kind, total, limit, offset, items: formed.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      const out = { kind, summary: formed.length + " " + kind.replaceAll("_", " ") + " result(s)", total, limit, offset, items: formed.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false, provenance: { source: "Aura public catalogue" } };
+      out.truncated = typeof total === "number" ? offset + limit < total : null;
+      out.next_offset = out.truncated === true ? offset + limit : null;
       if (malformed) out.malformed_dropped = malformed;
       if (deduped) out.deduped = deduped;
       // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
@@ -547,6 +590,10 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
         }
       }
       if (slim) out.items = slimRows(kind, out.items);
+      else {
+        out.items = boundSearchBodies(kind, out.items);
+        out.item_body_limit = 1200;
+      }
       cacheSet(key, out);
       return out;
     })();
@@ -605,21 +652,25 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
     }
     if (wantFull) {
       if (kind === "components" && typeof full.code === "string") {
-        item.code = full.code;
-        item.code_info = { full_length: full.code.length, chunks: 1, chunk: 0, truncated: false };
+        const ch = chunkText(full.code, config.codeChars, 0);
+        item.code = ch.text;
+        item.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
       }
       if (kind === "skills" && typeof full.content === "string") {
-        item.content = full.content;
-        item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+        const ch = chunkText(full.content, config.contentChars, 0);
+        item.content = ch.text;
+        item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
       }
       if (kind === "design_systems") {
         if (typeof full.content === "string") {
-          item.content = full.content;
-          item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+          const ch = chunkText(full.content, config.contentChars, 0);
+          item.content = ch.text;
+          item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
         }
         if (typeof full.preview_html === "string") {
-          item.preview_html = full.preview_html;
-          item.preview_info = { full_length: full.preview_html.length, chunks: 1, chunk: 0, truncated: false };
+          const ch = chunkText(full.preview_html, config.codeChars, 0);
+          item.preview_html = ch.text;
+          item.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
         }
       }
     }
@@ -699,7 +750,17 @@ export function createCatalog({ fetcher, config, now = () => Date.now(), facetsF
   async function bundleItems(kind, ids, max = 8, opts = {}) {
     const list = [...new Set((ids || []).map(String))].slice(0, Math.max(1, Math.min(max, 8)));
     const out = await Promise.all(list.map(async (id) => {
-      try { const got = await getItem(kind, id, { full: !!opts.full }); return { ok: true, id, item: got.item }; }
+      try {
+        const got = await getItem(kind, id, { full: !!opts.full });
+        const item = { ...got.item };
+        if (!opts.full) {
+          const sourceKey = kind === "components" ? "code" : kind === "skills" ? "content" : null;
+          if (sourceKey && typeof item[sourceKey] === "string") delete item[sourceKey];
+          if (kind === "design_systems") { delete item.content; delete item.preview_html; }
+          item.detail_fetch = { tool: kind === "components" ? "aura_get_component" : kind === "design_systems" ? "aura_get_design_system" : "aura_get_skill", id };
+        }
+        return { ok: true, id, item };
+      }
       catch (e) { return { ok: false, id, error: (e && e.code === "NOT_FOUND") ? "not found" : String((e && e.message) || e).slice(0, 160) }; }
     }));
     return out;

@@ -1,0 +1,936 @@
+[
+  {
+    "name": "aura_status",
+    "description": "Catalogue health plus counts (components_free/pro, assets (all) + assets_free/pro, skills, design systems) with a counts_note. Free only, no login. Start here.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_search_components",
+    "description": "Find free components by brief, category and theme. Results are metadata-first; even slim:false caps source at 1,200 chars/item. Continue with offset; fetch source via aura_get_component.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "hero",
+            "section",
+            "button",
+            "card",
+            "background",
+            "header",
+            "logo",
+            "feature",
+            "pricing",
+            "testimonial",
+            "footer",
+            "form",
+            "heading"
+          ]
+        },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "negative_theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "min_views": {
+          "type": "number"
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "popular",
+            "recent",
+            "trending",
+            "updated"
+          ]
+        },
+        "limit": {
+          "type": "number"
+        },
+        "offset": {
+          "type": "number"
+        },
+        "slim": {
+          "type": "boolean"
+        },
+        "exact_match": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_get_component",
+    "description": "Inspect a free component. Metadata is default; pass chunk for one bounded source chunk or full:true for the first chunk. Numeric id or slug.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {},
+        "slug": {
+          "type": "string"
+        },
+        "chunk": {
+          "type": "number"
+        },
+        "full": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_search_skills",
+    "description": "Search free Aura agent skills (192). Metadata only, slim by default; use aura_get_skill for the full SKILL.md content. exact_match:true skips fallbacks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "popular",
+            "recent",
+            "trending",
+            "updated"
+          ]
+        },
+        "limit": {
+          "type": "number"
+        },
+        "offset": {
+          "type": "number"
+        },
+        "slim": {
+          "type": "boolean"
+        },
+        "exact_match": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_get_skill",
+    "description": "Inspect a free skill; metadata and frontmatter validation by default. Pass chunk for one body chunk or full:true for the first chunk.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "chunk": {
+          "type": "number"
+        },
+        "full": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_search_assets",
+    "description": "Search free Aura assets (images and video). Keywords, media_type image or video. Slim rows by default. exact_match:true skips fallbacks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video"
+          ]
+        },
+        "commercial_ok": {
+          "type": "boolean"
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "popular",
+            "recent",
+            "trending",
+            "updated"
+          ]
+        },
+        "limit": {
+          "type": "number"
+        },
+        "offset": {
+          "type": "number"
+        },
+        "slim": {
+          "type": "boolean"
+        },
+        "exact_match": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_search_design_systems",
+    "description": "Search free Aura DESIGN.md systems (725). Metadata + snippets, slim by default; use aura_get_design_system for content. exact_match:true skips fallbacks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "popular",
+            "recent",
+            "trending",
+            "updated"
+          ]
+        },
+        "limit": {
+          "type": "number"
+        },
+        "offset": {
+          "type": "number"
+        },
+        "slim": {
+          "type": "boolean"
+        },
+        "exact_match": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_get_design_system",
+    "description": "Inspect a free design system; metadata and token hints by default. Pass chunk for bounded content/preview or full:true for the first bounded chunks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "chunk": {
+          "type": "number"
+        },
+        "full": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_search_all",
+    "description": "One call across components, skills, assets, and design systems in parallel. Free only. Slim rows by default (excerpts, no blobs). Each surface runs its own fallback pipeline, so mixed outcomes are normal (skills may fall back while components go honestly empty) — read isFallback/no_match per surface, not once globally.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "slim": {
+          "type": "boolean"
+        },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "negative_theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "min_views": {
+          "type": "number"
+        },
+        "exact_match": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_recommend",
+    "description": "Starter kit for a goal: top 3 free hits per surface with page URLs and rationale. Slim rows + commercial-use note. Empty components auto-retry once via suggested_queries, then editorial picks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "goal": {
+          "type": "string"
+        },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "negative_theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "min_views": {
+          "type": "number"
+        },
+        "slim": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "goal"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_install_component",
+    "description": "Paste-ready setup for a free component: dependency list, setup steps, file map, fonts. Goes beyond the official Aura MCP, which only reads project source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {},
+        "slug": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_install_skill",
+    "description": "Save-and-load plan for a free skill: where to put SKILL.md per client plus upstream source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_use_design_system",
+    "description": "Apply a free DESIGN.md system: token starter CSS plus copy order (tokens first, then markup).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_bundle",
+    "description": "Fetch 2–8 component records in one call. Returns metadata by default; full:true includes bounded first source chunks. Per-item errors are isolated.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {}
+        },
+        "slugs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "full": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_scaffold_page",
+    "description": "Plan a page from a brief and optional component refs. Returns tokens, dependencies, order and detail pointers; full:true includes bounded first chunks and reports truncated token source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "goal": {
+          "type": "string"
+        },
+        "system": {
+          "type": "string"
+        },
+        "components": {
+          "type": "array",
+          "items": {}
+        },
+        "full": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "goal"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_related",
+    "description": "More-like-this: 3 related items for a component/skill/design-system by tag + text overlap. Discovery never dead-ends.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "components",
+            "skills",
+            "design_systems"
+          ]
+        },
+        "id": {}
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_bulk_fetch",
+    "description": "Bulk-fetch 2-8 details in one call for components, design_systems, or assets. Alias-friendly name for aura_bundle. Per-item errors never fail the batch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "components",
+            "design_systems",
+            "assets"
+          ]
+        },
+        "ids": {
+          "type": "array",
+          "items": {}
+        }
+      },
+      "required": [
+        "kind",
+        "ids"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_install_asset",
+    "description": "Legal drop-in plan for an asset: direct download URL, preview URL, license (all-rights-reserved per Aura Terms §4 — check page before commercial use), suggested file path.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_categories",
+    "description": "The 13 component categories with live free counts. Pick one, then search within it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_prompt",
+    "description": "Compatibility wrapper for a two-pass design brief. Ask the user to choose theme, sections, system, assets and mood; the second pass suggests Aura tools only. Answers stay customisable.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "goal": {
+          "type": "string"
+        },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "surfaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "system": {
+          "type": "string"
+        },
+        "answers": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "goal"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_diff",
+    "description": "Compare 2–4 free components by known metadata: theme, dependencies, fonts, structure and source length. Unknown facts stay unknown; no visual/performance claims.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "components": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {}
+        },
+        "goal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "components"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_docs_plan",
+    "description": "Plan a fresh-docs lookup (pure, no fetch). library + need -> Context7 resolve/query plan (trusted: tailwind, gsap, lenis, iconify) + apply steps for Aura files + docs stamp slot. The agent calls Context7, Aura shapes the rest.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "library": {
+          "type": "string"
+        },
+        "need": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "library",
+        "need"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_docs_check",
+    "description": "Check pasted code against fresh docs (pure). library + code_excerpt (under 20000 chars, excerpts not full pages) + optional docs_note -> verdict current|needs-update, look-preserving fixes, version-pin needs_check. Fresh API wins, look stays identical.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "library": {
+          "type": "string"
+        },
+        "code_excerpt": {
+          "type": "string"
+        },
+        "docs_note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "library",
+        "code_excerpt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_icon",
+    "description": "Fetch one free icon as ready-to-paste SVG (live). name in kebab-case (bolt, arrow-down). source auto|fontawesome|pixel, style auto|solid|regular|brands. Auto-fallback across styles then libraries; every hit carries license + credit (CC BY 4.0, credit always) plus a font/CSS alternative. 24h icon cache.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "fontawesome",
+            "pixel"
+          ]
+        },
+        "style": {
+          "type": "string",
+          "enum": [
+            "solid",
+            "regular",
+            "brands",
+            "auto"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_version",
+    "description": "Running vs npm-published version (live, hourly cache). Returns update_available + notice telling the agent to prefer latest (npm i -g aura-components-mcp@latest) when behind. Never fails — offline registries return latest:null. aura_status already carries this verdict on every call.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_award_search",
+    "description": "Search award-winning website references (Awwwards). Modes: sites (ranked refs with preview links), categories (real taxonomy from the index/source), elements (hero/nav/pricing/footer examples), motion (previously recorded motion studies). Local index first, one polite live refresh when empty.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "sites",
+            "categories",
+            "elements",
+            "motion"
+          ]
+        },
+        "query": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "category": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        },
+        "technology": {
+          "type": "string"
+        },
+        "award": {
+          "type": "string",
+          "enum": [
+            "sotd",
+            "developer",
+            "honorable"
+          ]
+        },
+        "studio": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "offset": {
+          "type": "number"
+        },
+        "full": {
+          "type": "boolean"
+        },
+        "library": {
+          "type": "string"
+        },
+        "easing": {
+          "type": "string"
+        },
+        "scrollModel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_award_inspect",
+    "description": "Inspect award refs: site_details (palette/tech/awards/evidence), site_elements (section visuals with media URLs), element (one gallery record), compare_sites (2-3 refs: shared vs gaps, missing marked unknown).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "site_details",
+            "site_elements",
+            "element",
+            "compare_sites"
+          ]
+        },
+        "slug": {
+          "type": "string"
+        },
+        "elementSlug": {
+          "type": "string"
+        },
+        "slugs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_design_blueprint",
+    "description": "Evidence-backed build plan from 2-5 award refs + goal: Markdown brief + versioned JSON, mapped to real free Aura components/systems (free-only enforced, failures marked unavailable). Never copies third-party source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "goal": {
+          "type": "string"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "technology": {
+          "type": "string"
+        },
+        "visualDirection": {
+          "type": "string"
+        },
+        "responsive": {
+          "type": "string"
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeStructure": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "goal",
+        "references"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_visual_audit",
+    "description": "Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), compare (reference vs build mismatches). Needs Chrome for live capture; honest BROWSER_UNAVAILABLE otherwise. Loopback only with allowLocal:true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "capture",
+            "structure",
+            "compare"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "referenceUrl": {
+          "type": "string"
+        },
+        "buildUrl": {
+          "type": "string"
+        },
+        "viewport": {
+          "type": "string",
+          "enum": [
+            "desktop",
+            "mobile"
+          ]
+        },
+        "waitStrategy": {
+          "type": "string",
+          "enum": [
+            "load",
+            "networkidle"
+          ]
+        },
+        "settleMs": {
+          "type": "number"
+        },
+        "allowLocal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_motion_study",
+    "description": "Evidence-backed motion guidance. Modes: inspect (live runtime scan: libs/easing/scroll), record (bounded frame study; .webm only when ffmpeg present), search (stored studies by library/easing/scroll). Never claims unobserved library state.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "inspect",
+            "record",
+            "search"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "library": {
+          "type": "string"
+        },
+        "easing": {
+          "type": "string"
+        },
+        "scrollModel": {
+          "type": "string"
+        },
+        "frames": {
+          "type": "number"
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "viewport": {
+          "type": "string",
+          "enum": [
+            "desktop",
+            "mobile"
+          ]
+        },
+        "allowLocal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "aura_award_index",
+    "description": "Local award corpus: status (counts/freshness/lock), rebuild/resume/refresh (bounded polite crawl), new_winners (baseline then delta), watch_add/list/remove (studio/tag/url watches). Never auto-crawls on startup.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "status",
+            "rebuild",
+            "resume",
+            "refresh",
+            "new_winners",
+            "watch_add",
+            "watch_list",
+            "watch_remove"
+          ]
+        },
+        "award": {
+          "type": "string",
+          "enum": [
+            "sotd",
+            "developer",
+            "honorable"
+          ]
+        },
+        "maxPages": {
+          "type": "number"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "studio",
+            "tag",
+            "url"
+          ]
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  }
+]\n

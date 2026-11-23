@@ -69,11 +69,11 @@ Restart Windsurf, open Cascade, allow the server when asked.
 
 1. Open Cline settings, MCP Servers section.
 2. Add server: command `node`, arg `/absolute/path/to/aura-components-mcp/dist/server.js`, name `aura-components`.
-3. It lists 35 tools starting with `aura_`. Approve them once.
+3. It lists 31 tools starting with `aura_`. Approve them once.
 
 ## Roo Code (VS Code)
 
-Same as Cline: Add MCP server, command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. Roo shows the 35 `aura_` tools in its tool list after reload.
+Same as Cline: Add MCP server, command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. Roo shows the 31 `aura_` tools in its tool list after reload.
 
 ## DeepSeek Harness
 

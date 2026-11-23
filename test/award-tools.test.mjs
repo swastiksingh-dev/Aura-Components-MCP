@@ -52,17 +52,17 @@ async function callWith(handlers, name, args) {
   return out[1];
 }
 
-test("six new defs exist, unique names, valid schemas; total is 35", () => {
+test("six new defs exist, unique names, valid schemas; total is 31", () => {
   const names = TOOL_DEFS.map((t) => t.name);
-  assert.equal(names.length, 35);
-  assert.equal(new Set(names).size, 35);
+  assert.equal(names.length, 31);
+  assert.equal(new Set(names).size, 31);
   for (const n of ["aura_award_search", "aura_award_inspect", "aura_design_blueprint", "aura_visual_audit", "aura_motion_study", "aura_award_index"]) {
     const d = TOOL_DEFS.find((t) => t.name === n);
     assert.ok(d, n + " defined");
     assert.ok(d.inputSchema && d.inputSchema.type === "object");
     assert.ok(d.description.length > 20);
   }
-  const old29 = ["aura_status", "aura_search_components", "aura_get_component", "aura_search_skills", "aura_get_skill", "aura_search_assets", "aura_search_design_systems", "aura_get_design_system", "aura_search_all", "aura_recommend", "aura_install_component", "aura_install_skill", "aura_use_design_system", "aura_bundle", "aura_scaffold_page", "aura_related", "aura_bulk_fetch", "aura_install_asset", "aura_categories", "aura_prompt", "aura_inspo_recommend", "aura_inspo_components", "aura_inspo_reference", "aura_inspo_system", "aura_inspo_compare", "aura_docs_plan", "aura_docs_check", "aura_icon", "aura_version"];
+  const old29 = ["aura_status", "aura_search_components", "aura_get_component", "aura_search_skills", "aura_get_skill", "aura_search_assets", "aura_search_design_systems", "aura_get_design_system", "aura_search_all", "aura_recommend", "aura_install_component", "aura_install_skill", "aura_use_design_system", "aura_bundle", "aura_scaffold_page", "aura_related", "aura_bulk_fetch", "aura_install_asset", "aura_categories", "aura_prompt", "aura_docs_plan", "aura_docs_check", "aura_icon", "aura_version", "aura_diff"];
   for (const n of old29) assert.ok(names.includes(n), "existing tool kept: " + n);
 });
 
@@ -72,12 +72,12 @@ test("every def has exactly one reachable handler (no orphans)", () => {
   assert.deepEqual(Object.keys(h).sort(), TOOL_DEFS.map((t) => t.name).sort());
 });
 
-test("tools/list exposes 35 through real JSON-RPC", async () => {
+test("tools/list exposes 31 through real JSON-RPC", async () => {
   const out = [];
   const { dispatch } = createSession((m) => out.push(m), { tools: TOOL_DEFS, handlers: createHandlers(fakeCatalog, null, null, deps()) });
   await dispatch({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
   await dispatch({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(out[1].result.tools.length, 35);
+  assert.equal(out[1].result.tools.length, 31);
 });
 
 test("award_search sites: ranked, evidence-carrying, suggestions on empty", async () => {
