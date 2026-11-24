@@ -67,15 +67,31 @@ test("dist server answers elements search without crashing (bundled 35-tool path
       // Empty index + elements mode returns honest-empty WITHOUT network
       // (gallery backfill needs no fetch) — must be a result, never a crash.
       const el = await call("tools/call", { name: "aura_award_search", arguments: { mode: "elements", query: "hero", limit: 3 } });
+      const design = await call("tools/call", { name: "aura_plan_design", arguments: { brief: "An editorial article for a long-form story." } });
+      const research = await call("tools/call", { name: "aura_research_search", arguments: { query: "layout benchmark", limit: 2 } });
+      const motion = await call("tools/call", { name: "aura_motion_plan", arguments: { trigger: "Click Save", target: "Save button" } });
+      const localHtml = join(dir, "responsive.html");
+      fs.writeFileSync(localHtml, "<main><h1>Responsive smoke fixture</h1></main>");
+      const responsive = await call("tools/call", { name: "aura_visual_audit", arguments: { mode: "responsive", url: localHtml, viewports: [320], allowLocal: true } });
       clearTimeout(timer);
-      kill(el);
+      kill({ el, design, research, motion, responsive });
     })().catch((e) => { clearTimeout(timer); kill(e); });
   });
   if (got instanceof Error) throw got;
-  assert.ok(!got.error, "elements search crashed in dist: " + JSON.stringify(got).slice(0, 300));
-  const body = JSON.parse(got.result.content[0].text);
+  assert.ok(!got.el.error, "elements search crashed in dist: " + JSON.stringify(got.el).slice(0, 300));
+  const body = JSON.parse(got.el.result.content[0].text);
   assert.equal(body.mode, "elements");
   assert.ok(Array.isArray(body.items));
+  assert.ok(!got.design.error, "design planning failed in dist: " + JSON.stringify(got.design).slice(0, 300));
+  assert.equal(JSON.parse(got.design.result.content[0].text).contract_version, "1");
+  assert.ok(!got.research.error, "research search failed in dist: " + JSON.stringify(got.research).slice(0, 300));
+  assert.ok(JSON.parse(got.research.result.content[0].text).items.length > 0);
+  assert.ok(!got.motion.error, "motion planning failed in dist: " + JSON.stringify(got.motion).slice(0, 300));
+  assert.equal(JSON.parse(got.motion.result.content[0].text).contract, "aura-motion-plan/v1");
+  assert.ok(!got.responsive.error, "responsive audit failed in dist: " + JSON.stringify(got.responsive).slice(0, 300));
+  const responsiveBody = JSON.parse(got.responsive.result.content[0].text);
+  assert.equal(responsiveBody.mode, "responsive");
+  assert.equal(responsiveBody.results[0].measurements.status, "unavailable");
 });
 
 test("dist/cli.cjs boots and answers initialize over stdio", async () => {

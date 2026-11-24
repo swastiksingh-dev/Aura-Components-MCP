@@ -1,0 +1,185 @@
+{
+  "recorded_at": "2026-11-23T11:20:16.740Z",
+  "runtime": "v24.22.3",
+  "measurements": {
+    "tool_list_bytes": 14977,
+    "tool_count": 31,
+    "tools": [
+      {
+        "name": "aura_status",
+        "bytes": 275
+      },
+      {
+        "name": "aura_search_components",
+        "bytes": 823
+      },
+      {
+        "name": "aura_get_component",
+        "bytes": 347
+      },
+      {
+        "name": "aura_search_skills",
+        "bytes": 486
+      },
+      {
+        "name": "aura_get_skill",
+        "bytes": 344
+      },
+      {
+        "name": "aura_search_assets",
+        "bytes": 560
+      },
+      {
+        "name": "aura_search_design_systems",
+        "bytes": 495
+      },
+      {
+        "name": "aura_get_design_system",
+        "bytes": 374
+      },
+      {
+        "name": "aura_search_all",
+        "bytes": 691
+      },
+      {
+        "name": "aura_recommend",
+        "bytes": 520
+      },
+      {
+        "name": "aura_install_component",
+        "bytes": 313
+      },
+      {
+        "name": "aura_install_skill",
+        "bytes": 254
+      },
+      {
+        "name": "aura_use_design_system",
+        "bytes": 267
+      },
+      {
+        "name": "aura_bundle",
+        "bytes": 375
+      },
+      {
+        "name": "aura_scaffold_page",
+        "bytes": 447
+      },
+      {
+        "name": "aura_related",
+        "bytes": 339
+      },
+      {
+        "name": "aura_bulk_fetch",
+        "bytes": 404
+      },
+      {
+        "name": "aura_install_asset",
+        "bytes": 337
+      },
+      {
+        "name": "aura_categories",
+        "bytes": 203
+      },
+      {
+        "name": "aura_prompt",
+        "bytes": 503
+      },
+      {
+        "name": "aura_diff",
+        "bytes": 394
+      },
+      {
+        "name": "aura_docs_plan",
+        "bytes": 427
+      },
+      {
+        "name": "aura_docs_check",
+        "bytes": 500
+      },
+      {
+        "name": "aura_icon",
+        "bytes": 595
+      },
+      {
+        "name": "aura_version",
+        "bytes": 402
+      },
+      {
+        "name": "aura_award_search",
+        "bytes": 955
+      },
+      {
+        "name": "aura_award_inspect",
+        "bytes": 550
+      },
+      {
+        "name": "aura_design_blueprint",
+        "bytes": 647
+      },
+      {
+        "name": "aura_visual_audit",
+        "bytes": 759
+      },
+      {
+        "name": "aura_motion_study",
+        "bytes": 700
+      },
+      {
+        "name": "aura_award_index",
+        "bytes": 659
+      }
+    ]
+  },
+  "representative": {
+    "search_small": {
+      "tool": "aura_search_components",
+      "bytes": 6193,
+      "chars": 6184,
+      "compact_json_bytes": 6193
+    },
+    "search_normal": {
+      "tool": "aura_search_components",
+      "bytes": 17854,
+      "chars": 17820,
+      "compact_json_bytes": 17854
+    },
+    "search_worst": {
+      "tool": "aura_search_components",
+      "bytes": 98205,
+      "chars": 98043,
+      "compact_json_bytes": 98205
+    },
+    "detail": {
+      "tool": "aura_get_component",
+      "bytes": 2987,
+      "chars": 2984,
+      "compact_json_bytes": 2987
+    },
+    "bundle": {
+      "tool": "aura_bundle",
+      "bytes": 23573,
+      "chars": 23543,
+      "compact_json_bytes": 23573
+    },
+    "scaffold": {
+      "tool": "aura_scaffold_page",
+      "bytes": 20431,
+      "chars": 20412,
+      "compact_json_bytes": 20431
+    },
+    "awards": {
+      "tool": "aura_award_search",
+      "bytes": 2174,
+      "chars": 2171,
+      "compact_json_bytes": 2174
+    },
+    "browser_evidence": {
+      "tool": "aura_visual_audit",
+      "bytes": 298,
+      "chars": 298,
+      "compact_json_bytes": 298
+    }
+  },
+  "tokenizer": "unknown; no target tokenizer measured"
+}

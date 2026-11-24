@@ -5,11 +5,15 @@ import {
   cdpResolveViewport, cdpCollapseBands, cdpBandsFromHtml, createCdpConn,
   findChromeExecutable, findFfmpeg, createBrowserAdapter, reduceCdpScan,
   CDP_VIEWPORTS, CDP_SCAN_JS, CDP_MOTION_JS,
+  CDP_RESPONSIVE_JS, CDP_MOTION_EVIDENCE_JS,
 } from "../src/browser-cdp.mjs";
 
 test("viewport presets validate", () => {
   assert.deepEqual(cdpResolveViewport("desktop"), CDP_VIEWPORTS.desktop);
   assert.equal(cdpResolveViewport("mobile").width, 390);
+  assert.equal(cdpResolveViewport(320).width, 320);
+  assert.equal(cdpResolveViewport(320).hasTouch, true);
+  assert.throws(() => cdpResolveViewport(200), (e) => e.code === "BAD_ARGS");
   assert.throws(() => cdpResolveViewport("tablet"), (e) => e.code === "BAD_ARGS");
 });
 
@@ -120,7 +124,30 @@ test("motion reduce: honest counts, no invented private state", () => {
   assert.equal(empty.durationVocab, null);
 });
 
+test("motion reducer carries bounded runtime observations and keeps GSAP inference distinct", () => {
+  const scan = { libs: ["gsap"], render: [], scrollTrigger: { count: 0, sample: [] }, tweens: { durations: [], eases: [] } };
+  const r = reduceCdpScan("https://example.com", scan, 1, "desktop", {
+    observed: Array.from({ length: 30 }, (_, i) => ({ target: ".x" + i })),
+    waapi: [{ target: ".dialog", playState: "running", duration: 200 }],
+    gsapPresent: true,
+    reducedMotion: false,
+    interactionCapture: "unavailable: no named action supplied",
+  });
+  assert.equal(r.motionEvidence.status, "observed");
+  assert.equal(r.motionEvidence.cssSamples.length, 12);
+  assert.equal(r.motionEvidence.waapiSamples.length, 1);
+  assert.equal(r.motionEvidence.gsapPresence.status, "inferred");
+  assert.equal(r.motionEvidence.reducedMotion, false);
+  assert.equal(r.motionEvidence.waapiStatus, "observed");
+  assert.match(r.motionEvidence.interactionCapture, /unavailable/);
+  const unavailable = reduceCdpScan("https://example.com", scan, 1, "mobile", { observed: [], waapi: [], waapiAvailable: false, reducedMotion: true });
+  assert.equal(unavailable.motionEvidence.waapiStatus, "unavailable");
+  assert.equal(unavailable.motionEvidence.reducedMotion, true);
+});
+
 test("page snippets are self-contained source strings", () => {
   assert.ok(typeof CDP_SCAN_JS === "string" && CDP_SCAN_JS.includes("candidates"));
   assert.ok(typeof CDP_MOTION_JS === "string" && CDP_MOTION_JS.includes("scrollTrigger"));
+  assert.ok(CDP_RESPONSIVE_JS.includes("horizontalOverflow"));
+  assert.ok(CDP_MOTION_EVIDENCE_JS.includes("getAnimations"));
 });

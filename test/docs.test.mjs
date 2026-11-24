@@ -95,5 +95,6 @@ test("install + scaffold outputs carry docs_stamp", async () => {
   await call(2, "aura_install_component", { id: 1 });
   assert.equal(JSON.parse(out[1].result.content[0].text).docs_stamp.status, 'unchecked');
   await call(3, "aura_scaffold_page", { goal: 'x', components: ['1'] });
-  assert.equal(JSON.parse(out[2].result.content[0].text).docs_stamp.status, 'unchecked');
+  const scaffold = JSON.parse(out[2].result.content[0].text);
+  assert.equal(scaffold.docs_stamp?.status, 'unchecked', JSON.stringify(scaffold));
 });

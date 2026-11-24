@@ -13,3 +13,7 @@ Thumbs.db
 coverage/
 .nyc_output/
 .agent/
+.aura-componentsversion2.0/
+.opencode/
+.tmp/
+tmp/

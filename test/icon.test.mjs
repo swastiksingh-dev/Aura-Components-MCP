@@ -90,7 +90,7 @@ test("icons: total outage surfaces as upstream error, not a miss", async () => {
   assert.ok(/net down/.test(err.message));
 });
 
-test("tools/list exposes 28 tools incl. aura_icon", async () => {
+test("tools/list exposes registered tools incl. aura_icon", async () => {
   const out = [];
   const { dispatch } = createSession((m) => out.push(m), { tools: TOOL_DEFS, handlers: createHandlers({}, { getIcon: async () => ({}) }) });
   await dispatch({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v1.7.3 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v2.0.0 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -25,12 +25,12 @@ function loadConfig(env = process.env) {
     timeoutMs: num(env.AURA_TIMEOUT_MS, 12_000, { min: 1_000, max: 60_000 }),
     retries: num(env.AURA_RETRIES, 2, { min: 0, max: 5 }),
     cacheTtlMs: num(env.AURA_CACHE_TTL_MS, 60_000, { min: 0, max: 3_600_000 }),
-    defaultLimit: num(env.AURA_DEFAULT_LIMIT, 10, { min: 1, max: 50 }),
+    defaultLimit: num(env.AURA_DEFAULT_LIMIT, 5, { min: 1, max: 50 }),
     maxLimit: num(env.AURA_MAX_LIMIT, 25, { min: 1, max: 50 }),
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     freeOnlyDefault: bool(env.AURA_FREE_ONLY_DEFAULT, true),
-    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.3",
+    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/2.0.0",
   };
 }
 
@@ -198,6 +198,30 @@ function stemTok(t) {
   else if (s.length > 4 && s.endsWith("y")) s = s.slice(0, -1);
   return s;
 }
+// Conservative one-edit fallback for already-fetched candidates only. It adds
+// no upstream calls and requires a 4+ character token to avoid noisy matches.
+function tokenNear(a, b) {
+  const rawLeft = String(a || "").toLowerCase();
+  const rawRight = String(b || "").toLowerCase();
+  const near = (left, right) => {
+    if (left === right) return true;
+    if (Math.min(left.length, right.length) < 4 || Math.abs(left.length - right.length) > 1) return false;
+    let i = 0, j = 0, edits = 0;
+    while (i < left.length && j < right.length) {
+      if (left[i] === right[j]) { i++; j++; continue; }
+      if (++edits > 1) return false;
+      if (left.length > right.length) i++;
+      else if (right.length > left.length) j++;
+      else { i++; j++; }
+    }
+    return edits + ((i < left.length || j < right.length) ? 1 : 0) <= 1;
+  };
+  if (near(rawLeft, rawRight)) return true;
+  const left = stemTok(rawLeft);
+  const right = stemTok(rawRight);
+  return near(left, right);
+}
+const fuzzyTitleHit = (token, title) => String(title || "").toLowerCase().split(/[^a-z0-9]+/).some((part) => tokenNear(token, part));
 // Rank rows: +2 per matched token in title, +1 in description/tags, theme match first.
 // Returns { rows, scored } where scored explains the top pick for fallback_score.
 function scoreRows(kind, rows, toks, themeHint) {
@@ -208,7 +232,7 @@ function scoreRows(kind, rows, toks, themeHint) {
     let s = 0;
     for (const raw of toks) {
       const t = stemTok(raw);
-      if (title.includes(raw) || (t !== raw && title.includes(t))) s += 2;
+      if (title.includes(raw) || (t !== raw && title.includes(t)) || fuzzyTitleHit(t, title)) s += 2;
       else if (desc.includes(raw) || tags.includes(raw) || (t !== raw && (desc.includes(t) || tags.includes(t)))) s += 1;
     }
     const th = r.facets && r.facets.theme;
@@ -232,7 +256,7 @@ function matchOverlap(kind, toks, item) {
     for (const t of list) {
       const tok = String(t ?? "").toLowerCase();
       const stem = stemTok(tok);
-      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)))) n++;
+      if (tok && (title.includes(tok) || (stem !== tok && title.includes(stem)) || fuzzyTitleHit(stem, title))) n++;
     }
     return n;
   }
@@ -246,7 +270,7 @@ function matchOverlap(kind, toks, item) {
   for (const t of list) {
     const tok = String(t ?? "").toLowerCase();
     const stem = stemTok(tok);
-    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)))) n++;
+    if (tok && (hay.includes(tok) || (stem !== tok && hay.includes(stem)) || parts.some((part) => fuzzyTitleHit(stem, part)))) n++;
   }
   return n;
 }
@@ -306,17 +330,34 @@ function chunkText(s, n, chunk = 0) {
 
 // Slim lists: drop heavy blobs (full code/content/preview_html) from list rows,
 // keep excerpts + chunk pointers + full_fetch so agents fetch detail on purpose.
-// getItem/bundleItems stay full — detail is their job. Default on (q.slim ?? true).
+// Explicit slim:false remains bounded by boundSearchBodies below.
 function slimRows(kind, items) {
   return (items || []).map((it) => {
     const o = { ...it };
-    if (kind === "components" && typeof o.code === "string") delete o.code; // keep code_excerpt + code_info + full_fetch
-    if (kind === "skills" && typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
+    if (kind === "components" && typeof o.code === "string") {
+      delete o.code; // keep code_excerpt + code_info + full_fetch
+      if (typeof o.code_excerpt === "string") o.code_excerpt = o.code_excerpt.slice(0, 300);
+    }
+    if (kind === "skills" && typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 300); delete o.content; }
     if (kind === "design_systems") {
-      if (typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 800); delete o.content; }
-      if (typeof o.preview_html === "string") { o.preview_excerpt = String(o.preview_html).slice(0, 800); delete o.preview_html; }
+      if (typeof o.content === "string") { o.content_excerpt = String(o.content).slice(0, 300); delete o.content; }
+      if (typeof o.preview_html === "string") { o.preview_excerpt = String(o.preview_html).slice(0, 300); delete o.preview_html; }
     }
     return o;
+  });
+}
+function boundSearchBodies(kind, items, maxChars = 1200) {
+  const fields = kind === "components" ? ["code"] : kind === "skills" ? ["content"] : kind === "design_systems" ? ["content", "preview_html"] : [];
+  return (items || []).map((item) => {
+    const out = { ...item };
+    for (const field of fields) {
+      if (typeof out[field] !== "string" || out[field].length <= maxChars) continue;
+      const fullLength = out[field].length;
+      out[field] = out[field].slice(0, maxChars) + "…[truncated]";
+      out[field + "_info"] = { full_length: fullLength, preview_chars: maxChars, truncated: true };
+      out[field + "_fetch"] = { tool: kind === "components" ? "aura_get_component" : kind === "skills" ? "aura_get_skill" : "aura_get_design_system", id: out.id ?? out.slug, chunk: 0 };
+    }
+    return out;
   });
 }
 
@@ -354,7 +395,15 @@ function isWellFormedRow(kind, row) {
 }
 
 function pageUrl(kind, row) {
-  if (kind === "components") return SITE + "/component/" + row.slug;
+  if (kind === "components") {
+    // Upstream drift can return a component without a slug. Never publish
+    // /component/undefined: fall back to the catalogue search that the title
+    // can actually resolve, and keep the row usable.
+    const slug = typeof row.slug === "string" ? row.slug.trim() : "";
+    return slug
+      ? SITE + "/component/" + encodeURIComponent(slug)
+      : SITE + "/components?q=" + encodeURIComponent(row.title ?? "");
+  }
   if (kind === "skills") return SITE + "/skills/" + row.id;
   // ISS9: asset pages are query-routed (no /assets/ID route exists). Keep the q= form
   // but ALSO expose a stable key so agents can cite: id + slug + title together.
@@ -575,7 +624,9 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         if (isWellFormedRow(kind, r)) formed.push(r);
         else malformed++;
       }
-      const out = { kind, total, limit, offset, items: formed.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false };
+      const out = { kind, summary: formed.length + " " + kind.replaceAll("_", " ") + " result(s)", total, limit, offset, items: formed.map((r) => shapeRow(kind, r, config, facetsFn)), cached: false, provenance: { source: "Aura public catalogue" } };
+      out.truncated = typeof total === "number" ? offset + limit < total : null;
+      out.next_offset = out.truncated === true ? offset + limit : null;
       if (malformed) out.malformed_dropped = malformed;
       if (deduped) out.deduped = deduped;
       // Gap 1: min_views quality floor (views-gated surfaces only) + negative_theme
@@ -661,6 +712,10 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         }
       }
       if (slim) out.items = slimRows(kind, out.items);
+      else {
+        out.items = boundSearchBodies(kind, out.items);
+        out.item_body_limit = 1200;
+      }
       cacheSet(key, out);
       return out;
     })();
@@ -719,21 +774,25 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
     }
     if (wantFull) {
       if (kind === "components" && typeof full.code === "string") {
-        item.code = full.code;
-        item.code_info = { full_length: full.code.length, chunks: 1, chunk: 0, truncated: false };
+        const ch = chunkText(full.code, config.codeChars, 0);
+        item.code = ch.text;
+        item.code_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
       }
       if (kind === "skills" && typeof full.content === "string") {
-        item.content = full.content;
-        item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+        const ch = chunkText(full.content, config.contentChars, 0);
+        item.content = ch.text;
+        item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
       }
       if (kind === "design_systems") {
         if (typeof full.content === "string") {
-          item.content = full.content;
-          item.content_info = { full_length: full.content.length, chunks: 1, chunk: 0, truncated: false };
+          const ch = chunkText(full.content, config.contentChars, 0);
+          item.content = ch.text;
+          item.content_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
         }
         if (typeof full.preview_html === "string") {
-          item.preview_html = full.preview_html;
-          item.preview_info = { full_length: full.preview_html.length, chunks: 1, chunk: 0, truncated: false };
+          const ch = chunkText(full.preview_html, config.codeChars, 0);
+          item.preview_html = ch.text;
+          item.preview_info = { full_length: ch.full_length, chunks: ch.chunks, chunk: ch.chunk, truncated: ch.truncated };
         }
       }
     }
@@ -751,7 +810,11 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
       ["components_free", "components?select=id&private=eq.false&premium=eq.false&limit=1"],
       ["components_pro", "components?select=id&private=eq.false&premium=eq.true&limit=1"],
       ["skills", "skills?select=id&private=eq.false&limit=1"],
+      // `assets` stays the upstream total (all entitlements); the explicit
+      // free/pro split is what the free-only access policy actually serves.
       ["assets", "assets?select=id&private=eq.false&limit=1"],
+      ["assets_free", "assets?select=id&private=eq.false&premium=eq.false&limit=1"],
+      ["assets_pro", "assets?select=id&private=eq.false&premium=eq.true&limit=1"],
       ["design_systems", "design_systems?select=id&private=eq.false&limit=1"],
     ];
     await Promise.all(jobs.map(async ([k, path]) => {
@@ -768,7 +831,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
         freshness[table] = v ? String(v) : null;
       } catch { freshness[table] = null; }
     }));
-    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, freshness, cached: false };
+    const out = { site: SITE, catalogue: "aura.build public catalogue (PostgREST, anon)", counts, counts_note: "components_free/components_pro and assets_free/assets_pro are split by premium; assets is all assets (free+pro). skills and design_systems have no premium flag.", freshness, cached: false };
     cacheSet(key, out);
     return out;
   }
@@ -809,7 +872,17 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
   async function bundleItems(kind, ids, max = 8, opts = {}) {
     const list = [...new Set((ids || []).map(String))].slice(0, Math.max(1, Math.min(max, 8)));
     const out = await Promise.all(list.map(async (id) => {
-      try { const got = await getItem(kind, id, { full: !!opts.full }); return { ok: true, id, item: got.item }; }
+      try {
+        const got = await getItem(kind, id, { full: !!opts.full });
+        const item = { ...got.item };
+        if (!opts.full) {
+          const sourceKey = kind === "components" ? "code" : kind === "skills" ? "content" : null;
+          if (sourceKey && typeof item[sourceKey] === "string") delete item[sourceKey];
+          if (kind === "design_systems") { delete item.content; delete item.preview_html; }
+          item.detail_fetch = { tool: kind === "components" ? "aura_get_component" : kind === "design_systems" ? "aura_get_design_system" : "aura_get_skill", id };
+        }
+        return { ok: true, id, item };
+      }
       catch (e) { return { ok: false, id, error: (e && e.code === "NOT_FOUND") ? "not found" : String((e && e.message) || e).slice(0, 160) }; }
     }));
     return out;
@@ -841,7 +914,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.3" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "2.0.0" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
@@ -858,7 +931,7 @@ const Errors = {
 };
 
 function textResult(obj) {
-  return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify(obj) }] };
 }
 
 function createSession(send, { tools, handlers }) {
@@ -1183,7 +1256,7 @@ function finalPromptText(goal, a) {
     + 'ASSETS: ' + assets + '\n'
     + 'RULES: Tailwind container mx-auto px-4; hex palette 50-900; radius 8px; breakpoints 1024+/768-1023/<768, 44px touch targets; hover scale 1.05 + shadow; Inter 40-48 H1 / 16 body; motion <500ms + prefers-reduced-motion; vanilla HTML/Tailwind/JS, no proprietary runtime\n'
     + 'ORDER: 1 tokens.css, 2 system preview_html, 3 component markup\n'
-    + 'CALLS: aura_recommend -> aura_get_* finalists -> aura_use_design_system -> aura_scaffold_page';
+    + 'CALLS: aura_search_components/aura_search_all -> inspect finalists -> aura_use_design_system -> aura_scaffold_page';
 }
 
 function buildPrompt(input = {}) {
@@ -1202,7 +1275,7 @@ function buildPrompt(input = {}) {
       { key: 'sections', question: 'Which sections (e.g. hero, pricing, testimonial, footer)?', options: [] },
       { key: 'system', question: 'Which DESIGN system, or auto-pick?', options: system ? [system, 'auto-pick'] : ['auto-pick'] },
       { key: 'assets', question: 'Need images/video?', options: ['no', 'images', 'video'] },
-      { key: 'macrostructure', question: 'Which page macrostructure (e.g. bento-grid, marquee-hero, long-document), or auto-pick from Inspo evidence?', options: ['auto-pick', 'bento-grid', 'marquee-hero', 'long-document', 'photographic', 'stat-led'] },
+      { key: 'macrostructure', question: 'What overall page structure fits your brief, or should Aura suggest options?', options: ['auto-pick', 'single-page', 'editorial', 'product-led'] },
       { key: 'vibe', question: 'Which mood — calm, serious, luxe, playful, technical?', options: ['calm', 'serious', 'luxe', 'playful', 'technical', 'warm'] },
     ];
     return {
@@ -1216,8 +1289,7 @@ function buildPrompt(input = {}) {
       plan_order: PROMPT_ORDER,
       sources: PROMPT_SOURCES,
       credit: PROMPT_CREDIT,
-      inspo_axes: { mode_maps_to: 'theme', macrostructures: INSPO_MACROS.slice(0, 6), note: 'Run inspo.recommend first for evidence, then aura_inspo_recommend to map it onto Aura calls. Mode folds into theme.' },
-      note: 'Ask the user these questions via native question UI, then call aura_prompt again with goal + answers. Never skip confirmation.',
+            note: 'Ask the user these questions via native question UI, then call aura_prompt again with goal + answers. Never skip confirmation.',
     };
   }
 
@@ -1236,8 +1308,6 @@ function buildPrompt(input = {}) {
     final_prompt: finalPromptText(goal, a),
     plan_order: PROMPT_ORDER,
     suggested_calls: [
-      { tool: 'inspo.recommend', arguments: { brief: goal, mode: a.theme, vibe: a.vibe, ...(a.macrostructure !== 'auto-pick' ? { macrostructure: a.macrostructure } : {}) } },
-      { tool: 'aura_inspo_recommend', arguments: { brief: goal, mode: a.theme, vibe: a.vibe, ...(a.macrostructure !== 'auto-pick' ? { macrostructure: a.macrostructure } : {}) } },
       { tool: 'aura_recommend', arguments: { goal } },
       { tool: 'aura_search_all', arguments: { query: goal, limit: 3 } },
       { tool: 'aura_use_design_system', arguments: a.system !== 'auto-pick' ? { slug: a.system } : { slug: 'auto-pick: search first' } },
@@ -1250,206 +1320,12 @@ function buildPrompt(input = {}) {
   };
 };
 
-// Module: inspo-mappers — pure zero-dep translators between Inspo evidence and
-// Aura calls. No fetch: the agent pastes slim Inspo evidence in, gets Aura call
-// plans out. Same seam for tools + tests + docs (mirrors buildPrompt).
-const INSPO_MACROS = ['bento-grid', 'long-document', 'marquee-hero', 'stat-led', 'conversational-faq', 'manifesto', 'photographic', 'specimen', 'catalogue', 'letter', 'index-first', 'narrative-workflow', 'split-studio', 'feature-stack', 'type-specimen', 'portfolio-grid', 'map-diagram', 'ecosystem-index', 'component-playground'];
-const INSPO_VIBES = ['calm', 'loud', 'playful', 'serious', 'luxe', 'raw', 'soft', 'technical', 'warm', 'cold'];
-const INSPO_MODES = ['light', 'dark'];
-const INSPO_COMP_TYPES = ['hero', 'pricing', 'features', 'cta', 'nav', 'footer', 'testimonial', 'logo-cloud', 'faq', 'stat'];
-const INSPO_STYLES = ['minimalism', 'editorial', 'brutalism', 'glassmorphism', 'swiss', 'maximalism', 'playful', 'dark-mode', 'monochrome', 'vintage', 'futurist'];
-const INSPO_MACRO_TO_CATEGORY = {
-  'bento-grid': 'feature', 'long-document': 'section', 'marquee-hero': 'hero',
-  'stat-led': 'feature', 'conversational-faq': 'form', 'manifesto': 'heading',
-  'photographic': 'background', 'specimen': 'card', 'catalogue': 'card',
-  'letter': 'heading', 'index-first': 'header', 'narrative-workflow': 'section',
-  'split-studio': 'hero', 'feature-stack': 'feature', 'type-specimen': 'heading',
-  'portfolio-grid': 'card', 'map-diagram': 'feature', 'ecosystem-index': 'section',
-  'component-playground': 'section',
-};
-const INSPO_COMP_TO_CATEGORY = {
-  hero: 'hero', pricing: 'pricing', features: 'feature', cta: 'section',
-  nav: 'header', footer: 'footer', testimonial: 'testimonial',
-  'logo-cloud': 'logo', faq: 'form', stat: 'feature',
-};
-const INSPO_LICENSE = 'Reference JSX is Inspo-canonical (copy-pasteable, tweak tokens to the brand). Aura markup/assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.';
-const INSPO_SLIM_KEYS = ['slug', 'palette', 'fonts', 'macro', 'macrostructure', 'mode', 'vibe', 'style', 'type', 'id', 'brief', 'brand_hex', 'background', 'text'];
-// Palette priority (locked): brand hex > Inspo evidence > Aura tokens. Aura keeps structure/spacing.
-const INSPO_ORDER = ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'];
-const INSPO_IMAGE_PLAN = { draft: 'image_800w', prod: 'image_original', srcset: [320, 800, 1600], alt_from: 'title', swap_hotlinked: ['pravatar', 'placehold', 'dummyimage', 'example.com'], weight_cap: 's|m only — full:true on the winner alone' };
-
-function inspoBad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
-function inspoHex(v, name) {
-  if (v === undefined) return undefined;
-  if (typeof v !== 'string' || !/^#?[0-9a-f]{3}([0-9a-f]{3})?$|^#?[0-9a-f]{6}$/i.test(v.trim())) inspoBad(name + ' must be a hex color like "#c7402f"');
-  const h = v.trim().replace(/^#/, '');
-  return '#' + (h.length === 3 ? h.split('').map((c) => c + c).join('') : h).toLowerCase();
-}
-function inspoLum(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const f = (c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-  return 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
-}
-function inspoContrastWarn(bg, text) {
-  if (!bg || !text) return null;
-  const l1 = inspoLum(bg), l2 = inspoLum(text);
-  const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
-  return ratio < 4.5 ? 'contrast ' + ratio.toFixed(2) + ':1 (' + bg + ' on ' + text + ') is below 4.5 — ask the user which side moves' : null;
-}
-function inspoSlimCheck(ev, name) {
-  if (!ev || typeof ev !== 'object' || Array.isArray(ev)) inspoBad(name + ' must be an object with slim keys only: ' + INSPO_SLIM_KEYS.join(','));
-  for (const k of Object.keys(ev)) {
-    if (!INSPO_SLIM_KEYS.includes(k)) inspoBad(name + '.' + k + ' is not slim — pass slugs+palette+fonts+macro+mode+vibe only, no autopsy/screenshots');
-  }
-  return ev;
-}
-
-function buildInspoRecommend(input = {}) {
-  const brief = typeof input.brief === 'string' ? input.brief.trim() : '';
-  if (!brief) inspoBad('brief (string) is required');
-  const mode = input.mode === undefined ? undefined : (INSPO_MODES.includes(input.mode) ? input.mode : inspoBad('mode must be light|dark'));
-  const vibe = input.vibe === undefined ? undefined : (INSPO_VIBES.includes(input.vibe) ? input.vibe : inspoBad('vibe must be one of ' + INSPO_VIBES.join('|')));
-  const macro = input.macrostructure === undefined ? undefined : (INSPO_MACROS.includes(input.macrostructure) ? input.macrostructure : inspoBad('macrostructure must be one of ' + INSPO_MACROS.join('|')));
-  const brand = inspoHex(input.brand_hex, 'brand_hex');
-  // Strict macro gate (locked): no macro on file means run Inspo first — never scaffold generic.
-  if (!macro) {
-    return {
-      need_macro: true,
-      brief, mode: mode || null, vibe: vibe || null, brand_hex: brand || null,
-      inspo_call: { tool: 'inspo.recommend', arguments: { brief, ...(mode ? { mode } : {}), ...(vibe ? { vibe } : {}) } },
-      note: 'No macrostructure yet — call inspo.recommend first, then call aura_inspo_recommend again with its macrostructure. Never scaffold without a macro.',
-      palette_priority: ['brand_hex', 'inspo_evidence', 'aura_tokens'],
-      order: INSPO_ORDER,
-      license_note: INSPO_LICENSE,
-    };
-  }
-  const category = INSPO_MACRO_TO_CATEGORY[macro];
-  return {
-    need_macro: false,
-    brief, mode: mode || null, vibe: vibe || null, brand_hex: brand || null,
-    macrostructure: macro, aura_category: category,
-    inspo_call: { tool: 'inspo.recommend', arguments: { brief, macrostructure: macro, ...(mode ? { mode } : {}), ...(vibe ? { vibe } : {}) } },
-    aura_calls: [
-      { tool: 'aura_search_all', arguments: { query: brief, limit: 3, ...(mode ? { theme: mode } : {}) } },
-      { tool: 'aura_recommend', arguments: { goal: brief, ...(mode ? { theme: mode } : {}) } },
-      { tool: 'aura_search_components', arguments: { query: brief, category, ...(mode ? { theme: mode } : {}) } },
-    ],
-    palette_priority: ['brand_hex', 'inspo_evidence', 'aura_tokens'],
-    image_plan: INSPO_IMAGE_PLAN,
-    order: INSPO_ORDER,
-    next: { tool: 'aura_inspo_components', arguments: { evidence: { type: 'hero', macrostructure: macro, ...(mode ? { mode } : {}) }, brief } },
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoComponents(input = {}) {
-  const ev = input.evidence && typeof input.evidence === 'object' && !Array.isArray(input.evidence) ? input.evidence : inspoBad('evidence {type, ...} is required');
-  if (!INSPO_COMP_TYPES.includes(ev.type)) inspoBad('evidence.type must be one of ' + INSPO_COMP_TYPES.join('|'));
-  if (ev.style !== undefined && !INSPO_STYLES.includes(ev.style)) inspoBad('evidence.style must be one of ' + INSPO_STYLES.join('|'));
-  if (ev.macrostructure !== undefined && !INSPO_MACROS.includes(ev.macrostructure)) inspoBad('evidence.macrostructure must be one of ' + INSPO_MACROS.join('|'));
-  if (ev.mode !== undefined && !INSPO_MODES.includes(ev.mode)) inspoBad('evidence.mode must be light|dark');
-  for (const k of Object.keys(ev)) {
-    if (!['type', 'style', 'macrostructure', 'mode', 'macro', 'vibe'].includes(k)) inspoBad('evidence.' + k + ' is not slim — type/style/macrostructure/mode only');
-  }
-  const brief = typeof input.brief === 'string' && input.brief.trim() ? input.brief.trim() : ev.type;
-  const category = INSPO_COMP_TO_CATEGORY[ev.type];
-  return {
-    evidence: { ...ev },
-    aura_category: category,
-    inspo_call: { tool: 'inspo.find_components', arguments: { ...ev } },
-    aura_search: { tool: 'aura_search_components', arguments: { query: brief, category, ...(ev.mode ? { theme: ev.mode } : {}) } },
-    scaffold_hint: { order: INSPO_ORDER, weight_cap: 's|m only', tokens_first: true },
-    image_plan: INSPO_IMAGE_PLAN,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoReference(input = {}) {
-  const ev = input.evidence && typeof input.evidence === 'object' && !Array.isArray(input.evidence) ? input.evidence : inspoBad('evidence {type, id} is required');
-  if (!INSPO_COMP_TYPES.includes(ev.type)) inspoBad('evidence.type must be one of ' + INSPO_COMP_TYPES.join('|'));
-  if (typeof ev.id !== 'string' || !ev.id.trim()) inspoBad('evidence.id (string) is required');
-  const ac = input.aura_component && typeof input.aura_component === 'object' && !Array.isArray(input.aura_component) ? input.aura_component : inspoBad('aura_component {id|slug} is required');
-  const ref = typeof ac.id === 'string' && ac.id ? ac.id : (typeof ac.slug === 'string' && ac.slug ? ac.slug : inspoBad('aura_component needs id or slug'));
-  const scope = 'aura-' + String(ref).toLowerCase().replace(/[^a-z0-9]+/g, '');
-  return {
-    evidence: { type: ev.type, id: ev.id.trim() },
-    aura_component: ref,
-    inspo_call: { tool: 'inspo.get_reference_jsx', arguments: { type: ev.type, id: ev.id.trim() } },
-    aura_call: { tool: 'aura_get_component', arguments: { id: ref } },
-    adapt_plan: {
-      scope, css_scope_how: 'rewrite bare selectors as .' + scope + ' <selector>; leave Tailwind utilities, :root vars, @keyframes untouched',
-      token_swaps: ['--inspo-* -> --aura-* (brand hex wins ties)'],
-      files: [{ path: 'styles/tokens.css', contains: 'merged tokens first' }, { path: 'components/' + ref + '.html', contains: 'adapted markup' }],
-      steps: ['Fetch both sources', 'Swap Inspo tokens to brand/Aura tokens', 'Scope CSS with .' + scope, 'Replace hotlinked demo images (see image_plan)'],
-    },
-    image_plan: INSPO_IMAGE_PLAN,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoSystem(input = {}) {
-  const toks = input.inspo_tokens && typeof input.inspo_tokens === 'object' && !Array.isArray(input.inspo_tokens) ? inspoSlimCheck(input.inspo_tokens, 'inspo_tokens') : inspoBad('inspo_tokens {palette, fonts, ...} is required');
-  const slug = typeof input.aura_system === 'string' && input.aura_system.trim() ? input.aura_system.trim()
-    : (input.aura_system && typeof input.aura_system.slug === 'string' && input.aura_system.slug.trim() ? input.aura_system.slug.trim() : inspoBad('aura_system slug (string) is required'));
-  const palette = Array.isArray(toks.palette) ? toks.palette.map((c) => inspoHex(c, 'inspo_tokens.palette[]')) : [];
-  const brand = inspoHex(toks.brand_hex, 'inspo_tokens.brand_hex');
-  const bg = toks.background ? inspoHex(toks.background, 'inspo_tokens.background') : (brand || palette[0]);
-  const tx = toks.text ? inspoHex(toks.text, 'inspo_tokens.text') : null;
-  const contrast_warning = bg && tx ? inspoContrastWarn(bg, tx) : null;
-  return {
-    aura_system: slug,
-    palette_priority: ['brand_hex', 'inspo_evidence', 'aura_tokens'],
-    optionA_inspo: { palette, fonts: Array.isArray(toks.fonts) ? toks.fonts.slice(0, 4) : [] },
-    optionB_aura: { fetch: { tool: 'aura_get_design_system', arguments: { slug } }, note: 'Fetch Aura tokens, then compare side by side.' },
-    optionC_blend: { colors_from: brand ? 'brand_hex' : 'inspo palette', structure_from: 'aura DESIGN.md', note: 'Brand/Inspo colors on Aura spacing/type skeleton.' },
-    contrast_warning,
-    question: { key: 'system_choice', question: 'Inspo palette and Aura tokens disagree — which wins?', options: ['A-inspo', 'B-aura', 'C-blend'] },
-    files: [{ path: 'styles/tokens.css', contains: 'merged winning tokens — paste first' }, { path: 'DESIGN.md', contains: 'winning system rules' }],
-    order: INSPO_ORDER,
-    tokens_first: true,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-function buildInspoCompare(input = {}) {  const list = Array.isArray(input.evidence) ? input.evidence : inspoBad('evidence must be an array of 2-4 slim site objects');
-  if (list.length < 2 || list.length > 4) inspoBad('evidence must hold 2-4 sites — got ' + list.length);
-  const sites = list.map((s, i) => {
-    const o = inspoSlimCheck(s, 'evidence[' + i + ']');
-    if (typeof o.slug !== 'string' || !o.slug.trim()) inspoBad('evidence[' + i + '].slug (string) is required');
-    if (o.mode !== undefined && !INSPO_MODES.includes(o.mode)) inspoBad('evidence[' + i + '].mode must be light|dark');
-    if (o.macrostructure !== undefined && !INSPO_MACROS.includes(o.macrostructure)) inspoBad('evidence[' + i + '].macrostructure must be one of ' + INSPO_MACROS.join('|'));
-    return o;
-  });
-  const votes = {};
-  for (const s of sites) for (const k of ['macrostructure', 'macro', 'mode']) {
-    if (s[k]) votes[s[k]] = (votes[s[k]] || 0) + 1;
-  }
-  const top = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
-  const house = { macrostructure: (sites.map((s) => s.macrostructure || s.macro).find(Boolean)) || null, mode: sites.map((s) => s.mode).find(Boolean) || null, agreement: top ? top[0] + ' x' + top[1] + '/' + sites.length : 'none' };
-  const macro = house.macrostructure;
-  const category = macro && INSPO_MACRO_TO_CATEGORY[macro] ? INSPO_MACRO_TO_CATEGORY[macro] : null;
-  return {
-    sites: sites.map((s) => s.slug),
-    house_style: house,
-    inspo_call: { tool: 'inspo.compare', arguments: { slugs: sites.map((s) => s.slug) } },
-    closest_aura_systems_query: { tool: 'aura_search_design_systems', arguments: { query: macro || house.agreement, limit: 3 } },
-    ranked_components_query: category ? { tool: 'aura_search_components', arguments: { query: macro, category } } : null,
-    order: INSPO_ORDER,
-    license_note: INSPO_LICENSE,
-  };
-}
-
-// Module: docs-helpers — pure planners linking Aura output to fresh Context7
-// docs. No fetch: the agent calls Context7, Aura shapes the lookup and applies
-// the answer. Same seam for tools + tests + docs.
 const DOCS_TRUSTED = {
   tailwind: { label: 'Tailwind CSS', resolve: 'tailwindcss', id: null, cdn: 'https://cdn.tailwindcss.com', aura: ['installGuide tailwindcss dep', 'styles/tokens.css', 'scaffold order'] },
   gsap: { label: 'GSAP + ScrollTrigger', resolve: 'gsap', id: null, cdn: 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js', aura: ['installGuide gsap dep', 'preview_html motion'] },
   lenis: { label: 'Lenis smooth scroll', resolve: 'lenis', id: '/darkroomengineering/lenis', cdn: 'unpkg lenis@1 (confirm exact file via lookup)', aura: ['aura_motion_smooth wiring'] },
   iconify: { label: 'Iconify icons', resolve: 'iconify', id: null, cdn: 'https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js', aura: ['installGuide iconify-icon dep'] },
 };
-// Markers verified against renames we know happened; version pins below are
-// never declared stale — they go to needs_check for a live lookup instead.
 const DOCS_STALE_MARKERS = [
   { lib: 'lenis', re: /studio-freight/i, fix: 'Package renamed studio-freight -> lenis. Swap the import/CDN path, keep option names; look unchanged.' },
 ];
@@ -1460,20 +1336,11 @@ const DOCS_PIN_HINTS = [
   { lib: 'iconify', re: /iconify-icon\/[\d.]+/i, check: 'Confirm latest iconify-icon pin via lookup.' },
 ];
 const DOCS_DEP_TO_LIB = { tailwindcss: 'tailwind', gsap: 'gsap', 'gsap-ScrollTrigger': 'gsap', 'iconify-icon': 'iconify' };
-
 function docsBad(msg) { const e = new Error(msg); e.code = 'BAD_ARGS'; throw e; }
-
 function docsStampFor(deps) {
   const libs = [];
-  for (const d of (deps || [])) {
-    const lib = DOCS_DEP_TO_LIB[d && d.name];
-    if (lib && !libs.includes(lib)) libs.push(lib);
-  }
-  return {
-    status: 'unchecked',
-    needs_check: libs.map((l) => l + ': confirm CDN/version via aura_docs_plan + Context7'),
-    note: 'Vendored Aura code is a snapshot — verify pins before shipping.',
-  };
+  for (const d of (deps || [])) { const lib = DOCS_DEP_TO_LIB[d && d.name]; if (lib && !libs.includes(lib)) libs.push(lib); }
+  return { status: 'unchecked', needs_check: libs.map((l) => l + ': confirm CDN/version via aura_docs_plan + Context7'), note: 'Vendored Aura code is a snapshot — verify pins before shipping.' };
 }
 
 function buildDocsPlan(input = {}) {
@@ -1690,7 +1557,7 @@ function createVersion({ fetcher, running, now = () => Date.now() }) {
 const AWARD_SCHEMA_VERSION = 1;
 const AWARD_BASE_URL = "https://www.awwwards.com";
 const AWARD_ASSETS_URL = "https://assets.awwwards.com";
-const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.3";
+const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/2.0.0";
 const AWARD_ALLOWED_HOSTS = ["www.awwwards.com", "awwwards.com", "assets.awwwards.com"];
 const AWARD_TIMEOUT_MS = 10000;
 const AWARD_MAX_BYTES = 2 * 1024 * 1024;
@@ -2862,18 +2729,35 @@ function createAwardIndex({ dir, now = () => Date.now() } = {}) {
     writeAtomic("sites.json", { version: AWARD_INDEX_VERSION, updatedAt: new Date(now()).toISOString(), items });
     return { added, updated, total: items.length };
   }
+  // Exclusive-create lock (O_EXCL): two processes racing for the same index
+  // cannot both believe they own it. A stale/corrupt lock is removed and the
+  // create retried once; if another process wins the retry, this caller gets
+  // INDEX_BUSY. Stale takeover remains best-effort (see docs/architecture).
   function acquireLock() {
     const lockFile = path.join(root, "lock.json");
-    try {
-      if (fs.existsSync(lockFile)) {
-        const prev = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+    const payload = JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let fd = null;
+      try {
+        fd = fs.openSync(lockFile, "wx");
+        fs.writeFileSync(fd, payload, "utf8");
+        return;
+      } catch (e) {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } fd = null; try { fs.rmSync(lockFile, { force: true }); } catch { /* never mask */ } }
+        if (!e || e.code !== "EEXIST") throw e;
+        let prev = null;
+        try { prev = JSON.parse(fs.readFileSync(lockFile, "utf8")); } catch { prev = null; }
         if (prev && (now() - (prev.startedAt || 0)) < AWARD_LOCK_STALE_MS) {
-          const e = awardErr("INDEX_BUSY", "another index run is in progress (lock held since " + new Date(prev.startedAt).toISOString() + ")");
-          throw e;
+          throw awardErr("INDEX_BUSY", "another index run is in progress (lock held since " + new Date(prev.startedAt).toISOString() + ")");
         }
+        // Stale or corrupt: remove and retry the exclusive create. Another
+        // process may win the retry first — then EEXIST is re-evaluated above.
+        try { fs.rmSync(lockFile, { force: true }); } catch { /* retry decides */ }
+      } finally {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } }
       }
-    } catch (e) { if (e && e.code === "INDEX_BUSY") throw e; /* corrupt lock treated as stale */ }
-    fs.writeFileSync(lockFile, JSON.stringify({ startedAt: now(), pid: (globalThis.process && globalThis.process.pid) || 0 }), "utf8");
+    }
+    throw awardErr("INDEX_BUSY", "another index run is in progress (lock contested)");
   }
   function releaseLock() { try { fs.rmSync(path.join(root, "lock.json"), { force: true }); } catch { /* never mask */ } }
   // Lock must wrap the whole cycle: acquire first, release in finally; an
@@ -3249,11 +3133,16 @@ function cdpSetupFailed(op, err) {
 }
 function cdpResolveViewport(name) {
   if (name === undefined || name === null) return CDP_VIEWPORTS.desktop;
+  if (Number.isInteger(name) && name >= 320 && name <= 1920) {
+    return { width: name, height: 900, ...(name <= 600 ? { deviceScaleFactor: 2, isMobile: true, hasTouch: true } : {}) };
+  }
   if (!CDP_VIEWPORTS[name]) throw cdpBad("viewport must be desktop|mobile");
   return CDP_VIEWPORTS[name];
 }
 // Self-contained page snippets (no closures; run via Runtime.evaluate).
 const CDP_SCAN_JS = `(() => { const doc = document; const out = { title: doc.title, totalHeight: Math.round(doc.documentElement.scrollHeight), candidates: [] }; const bodyW = (doc.body.getBoundingClientRect().width || 1); const push = (tag, label, bg, top, height, textStart) => out.candidates.push({ tag, label, bg, top: Math.round(top), height: Math.round(height), textStart }); push("body", "body", getComputedStyle(doc.body).backgroundColor, 0, out.totalHeight, ""); const seen = new Set(); const visit = (el, depth) => { if (depth > 6 || out.candidates.length >= 300 || seen.has(el)) return; seen.add(el); try { const r = el.getBoundingClientRect(); if (el !== doc.body && r.width >= 0.6 * bodyW && r.height >= 120) { const bg = getComputedStyle(el).backgroundColor || ""; const m = /rgba?\\(([^)]+)\\)/.exec(bg); let a = 0; if (m) { const parts = m[1].replace(/\\//g, " ").trim().split(/[\\s,]+/).filter(Boolean); const raw = parts.length >= 4 ? parts[3] : "1"; a = raw.endsWith("%") ? parseFloat(raw) / 100 : parseFloat(raw); if (Number.isNaN(a)) a = 0; } else if (/^(oklch|oklab|lab|lch|hwb|color)\\(/.test(bg.trim())) a = 1; if (a > 0) push(el.tagName.toLowerCase(), (el.id ? "#" + el.id : "") + (el.classList.length ? "." + el.classList[0] : ""), bg, r.top + window.scrollY, r.height, (el.textContent || "").trim().slice(0, 60)); } } catch {} for (const ch of el.children) visit(ch, depth + 1); }; visit(doc.body, 0); return out; })()`;
+const CDP_RESPONSIVE_JS = `(() => { const width=innerWidth, root=document.documentElement, body=document.body, scrollWidth=Math.max(root.scrollWidth,body?body.scrollWidth:0); const offenders=[]; for(const el of document.querySelectorAll("body *")){ if(offenders.length>=20) break; try{const r=el.getBoundingClientRect(),s=getComputedStyle(el); if(r.width>0&&r.height>0&&s.display!=="none"&&s.visibility!=="hidden"&&(r.right>width+1||r.left< -1)){offenders.push({selector:(el.tagName.toLowerCase()+(el.id?"#"+el.id:"")+(el.classList&&el.classList.length?"."+String(el.classList[0]).slice(0,40):"")).slice(0,100),left:Math.round(r.left),right:Math.round(r.right),width:Math.round(r.width),overflowX:s.overflowX});}}catch{}} const focusable=document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])').length; return {viewportWidth:width,scrollWidth,documentHeight:root.scrollHeight,horizontalOverflow:scrollWidth>width+1,offenders,focusableCount:focusable,reducedMotion:matchMedia("(prefers-reduced-motion: reduce)").matches}; })()`;
+const CDP_MOTION_EVIDENCE_JS = `(() => { const observed=[], seen=new Set(), selector=e=>(e.tagName.toLowerCase()+(e.id?"#"+e.id:"")+(e.classList&&e.classList.length?"."+String(e.classList[0]).slice(0,40):"")).slice(0,100); try{for(const el of document.querySelectorAll("body *")){if(observed.length>=12)break;const s=getComputedStyle(el);const active=s.animationName&&s.animationName!=="none";const transition=s.transitionDuration&&s.transitionDuration.split(",").some(x=>parseFloat(x)>0);if(active||transition){const key=selector(el);if(seen.has(key))continue;seen.add(key);observed.push({target:key,source:active?"computed-css-animation":"computed-css-transition-declaration",animationName:active?s.animationName:null,properties:s.transitionProperty||null,duration:s.animationDuration||s.transitionDuration||null,delay:s.animationDelay||s.transitionDelay||null,easing:s.animationTimingFunction||s.transitionTimingFunction||null,playState:s.animationPlayState||null});}}}catch{} const waapiAvailable=typeof document.getAnimations==="function",waapi=[]; try{for(const a of (waapiAvailable?document.getAnimations():[]).slice(0,12)){const e=a.effect&&a.effect.target,t=a.effect&&a.effect.getComputedTiming&&a.effect.getComputedTiming();if(!e)continue;waapi.push({target:selector(e),playState:a.playState,currentTime:typeof a.currentTime==="number"?Math.round(a.currentTime):null,duration:t&&typeof t.duration==="number"?t.duration:null,delay:t&&typeof t.delay==="number"?t.delay:null,easing:t&&t.easing||null,iterations:t&&t.iterations||null});}}catch{} const gsapPresent=!!(window.gsap||window.TweenMax); return {observed,waapi,waapiAvailable,gsapPresent,reducedMotion:typeof matchMedia==="function"?matchMedia("(prefers-reduced-motion: reduce)").matches:null,interactionCapture:"unavailable: inspect mode does not invoke named actions or capture before/transition/after states"}; })()`;
 const CDP_MOTION_JS = `(() => { const g = window; const libs = []; const add = (s) => { if (!libs.includes(s)) libs.push(s); }; try { if (g.gsap || g.TweenMax) add("gsap"); if (g.ScrollTrigger && g.ScrollTrigger.getAll) add("scrolltrigger"); if (g.Lenis || (document.documentElement.classList && document.documentElement.classList.contains("lenis"))) add("lenis"); if (document.querySelector("[data-scroll-container]")) add("locomotive"); if (document.querySelector("[data-aos]")) add("aos"); if (g.Swiper || document.querySelector(".swiper")) add("swiper"); } catch {} const render = []; try { const cs = [...document.querySelectorAll("canvas")]; if (g.THREE) render.push("three"); if (g.PIXI) render.push("pixi"); if (cs.length && !render.length) render.push("webgl"); } catch {} let st = { count: 0, scrub: 0, pin: 0, sample: [] }; try { if (g.ScrollTrigger && g.ScrollTrigger.getAll) { const all = g.ScrollTrigger.getAll(); st.count = all.length; for (const s of all.slice(0, 20)) { const v = (s.vars || {}); if (v.scrub) st.scrub++; if (v.pin) st.pin++; st.sample.push({ start: v.start != null ? String(v.start) : null, end: v.end != null ? String(v.end) : null, scrub: !!v.scrub, pin: !!v.pin, duration: null, ease: null }); } } } catch {} const tweens = { durations: [], eases: [] }; try { const kids = (g.gsap && g.gsap.globalTimeline && g.gsap.globalTimeline.getChildren(true, true, true)) || []; for (const k of kids.slice(0, 100)) { try { const d = typeof k.duration === "function" ? k.duration() : k.vars && k.vars.duration; if (typeof d === "number") tweens.durations.push(d); if (k.vars && k.vars.ease) tweens.eases.push(String(k.vars.ease)); } catch {} } } catch {} let css = []; try { const anims = (document.getAnimations && document.getAnimations()) || []; for (const a of anims.slice(0, 200)) { try { const t = a.effect && a.effect.getComputedTiming && a.effect.getComputedTiming(); if (t && t.easing && String(t.easing).includes("bezier")) css.push(String(t.easing)); if (t && typeof t.duration === "number") tweens.durations.push(t.duration / 1000); } catch {} } } catch {} return { libs, render, scrollTrigger: st, tweens, cssBeziers: css }; })()`;
 
 // Pure band reducer (mirrors upstream sweep; tested with fixture DOM).
@@ -3633,11 +3522,51 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
           await settled;
           await cdpNavGuard(send, allowLocal);
           const res = await send("Runtime.evaluate", { expression: CDP_SCAN_JS, returnByValue: true }, 10000);
-          return (res && res.result && res.result.value) || { title: target, totalHeight: 0, candidates: [] };
+          const metrics = await send("Runtime.evaluate", { expression: CDP_RESPONSIVE_JS, returnByValue: true }, 8000);
+          return { scan: (res && res.result && res.result.value) || { title: target, totalHeight: 0, candidates: [] }, responsive: (metrics && metrics.result && metrics.result.value) || null };
         },
       });
-      const collapsed = cdpCollapseBands(bands.candidates || [], bands.totalHeight || 0);
-      return { url: target, title: bands.title || target, totalHeight: bands.totalHeight || 0, bands: collapsed, viewport, viewportPx: cdpResolveViewport(viewport), source: "live-dom" };
+      const scan = bands.scan || { candidates: [], totalHeight: 0 };
+      const collapsed = cdpCollapseBands(scan.candidates || [], scan.totalHeight || 0);
+      return { url: target, title: scan.title || target, totalHeight: scan.totalHeight || 0, bands: collapsed, viewport, viewportPx: cdpResolveViewport(viewport), responsive: bands.responsive || null, source: "live-dom" };
+    },
+    async responsiveAudit(url, { viewports = [320, 360, 390, 768, 1024, 1280, 1440], allowLocal = false } = {}) {
+      const target = awardValidateHttpUrl(url, { allowLocal });
+      if (!Array.isArray(viewports) || !viewports.length || viewports.length > 7
+        || viewports.some((w) => !Number.isInteger(w) || w < 320 || w > 1920)) {
+        throw cdpBad("viewports must contain 1-7 integer widths from 320 to 1920");
+      }
+      const widths = [...new Set(viewports)];
+      const exe = executable();
+      if (!exe) throw cdpUnavailable("");
+      const results = await withPage({
+        // withPage kills the Chrome child timeoutMs+15s after startup;
+        // launch has its own 15s bound. Document this as a process-kill
+        // ceiling, not as a strict response deadline.
+        viewport: widths[0], timeoutMs: 45000, op: "structure",
+        async fn({ send, conn }) {
+          const settled = waitForSettled(conn, send, "load");
+          await send("Page.navigate", { url: target }, CDP_NAV_TIMEOUT_MS);
+          await settled;
+          await cdpNavGuard(send, allowLocal);
+          const samples = [];
+          for (const width of widths) {
+            const mobile = width <= 600;
+            await send("Emulation.setDeviceMetricsOverride", {
+              width, height: 900, deviceScaleFactor: mobile ? 2 : 1, mobile,
+            }, 2500);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            const res = await send("Runtime.evaluate", { expression: CDP_RESPONSIVE_JS, returnByValue: true }, 2500);
+            samples.push({ width, responsive: (res && res.result && res.result.value) || null });
+          }
+          return samples;
+        },
+      });
+      return {
+        url: target, widths,
+        results: results.map((sample) => ({ width: sample.width, source: "live-dom", responsive: sample.responsive })),
+        source: "live-dom",
+      };
     },
     async motionInspect(url, { viewport = "desktop", allowLocal = false } = {}) {
       const target = awardValidateHttpUrl(url, { allowLocal });
@@ -3652,10 +3581,14 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
           await cdpNavGuard(send, allowLocal);
           await new Promise((r) => setTimeout(r, 1500));
           const res = await send("Runtime.evaluate", { expression: CDP_MOTION_JS, returnByValue: true }, 10000);
-          return (res && res.result && res.result.value) || { libs: [], render: [], scrollTrigger: { count: 0 }, tweens: { durations: [], eases: [] }, cssBeziers: [] };
+          const evidence = await send("Runtime.evaluate", { expression: CDP_MOTION_EVIDENCE_JS, returnByValue: true }, 8000);
+          return {
+            scan: (res && res.result && res.result.value) || { libs: [], render: [], scrollTrigger: { count: 0 }, tweens: { durations: [], eases: [] }, cssBeziers: [] },
+            evidence: (evidence && evidence.result && evidence.result.value) || null,
+          };
         },
       });
-      return reduceCdpScan(target, scan, now(), viewport);
+      return reduceCdpScan(target, scan.scan || scan, now(), viewport, scan.evidence || null);
     },
     // Bounded motion record: one session, N screenshots across a scroll tour.
     // Returns frame files + inspect evidence; webm only when ffmpeg exists.
@@ -3731,7 +3664,7 @@ function createBrowserAdapter({ chromePath = null, fetchImpl = null, socketImpl 
     },
   };
 }
-function reduceCdpScan(url, scan, t, viewport) {
+function reduceCdpScan(url, scan, t, viewport, evidence = null) {
   const libs = Array.isArray(scan.libs) ? scan.libs : [];
   const render = Array.isArray(scan.render) ? scan.render : [];
   const st = scan.scrollTrigger || { count: 0, scrub: 0, pin: 0, sample: [] };
@@ -3752,7 +3685,366 @@ function reduceCdpScan(url, scan, t, viewport) {
     scroll: { triggerCount: st.count || 0, scrubCount: st.scrub || 0, pinCount: st.pin || 0, scrubRatio: st.count ? (st.scrub || 0) / st.count : 0, sample: (st.sample || []).slice(0, 20) },
     easingVocab: [...agg.values()].sort((a, b) => b.uses - a.uses).slice(0, 15),
     durationVocab: ms.length ? { p25: q(0.25), median: q(0.5), p75: q(0.75) } : null,
-    capturedAt: t, toolVersion: "aura/1.7.3", source: "live-browser",
+    motionEvidence: evidence ? {
+      status: "observed",
+      basis: "Computed CSS and Web Animations API state sampled once after page load; this is not a full timeline or trigger reconstruction.",
+      cssSamples: (Array.isArray(evidence.observed) ? evidence.observed : []).slice(0, 12),
+      waapiSamples: (Array.isArray(evidence.waapi) ? evidence.waapi : []).slice(0, 12),
+      waapiStatus: evidence.waapiAvailable === false ? "unavailable" : "observed",
+      reducedMotion: typeof evidence.reducedMotion === "boolean" ? evidence.reducedMotion : null,
+      gsapPresence: evidence.gsapPresent ? { status: "inferred", basis: "A GSAP global was present; its complete timeline and target semantics were not reconstructed." } : { status: "unavailable", basis: "No GSAP global was detected in this page context." },
+      interactionCapture: evidence.interactionCapture || "unavailable",
+    } : { status: "unavailable", basis: "No motion evidence object was returned by the browser evaluation." },
+    capturedAt: t, toolVersion: "aura/2.0.0", source: "live-browser",
+  };
+}
+
+// ---- design-research.mjs ----
+// Module: design-research — compact, deterministic design contracts and
+// source-linked evidence cards. No network access or external corpus ingestion.
+const drFields = [
+  "audience", "product_purpose", "content_hierarchy", "visual_direction",
+  "layout_composition", "typography", "colour_tokens", "components",
+  "interaction", "motion_intent", "responsive_strategy", "accessibility",
+  "anti_patterns",
+];
+
+const drProfiles = [
+  {
+    type: "developer portfolio", match: /\b(developer|engineer|personal site)\b/i,
+    purpose: "Make the owner's work and engineering strengths easy to evaluate.",
+    hierarchy: ["identity and role", "selected work with outcomes", "capabilities", "contact"],
+    layout: "Use a restrained editorial grid: a concise identity block first, then a small number of project case studies with consistent metadata and generous separation.",
+    visual: "Let project artifacts and their outcomes provide the visual character; keep interface chrome quiet and use one deliberate accent only if the owner supplies a brand direction.",
+    components: ["identity header", "case-study cards", "project detail links", "contact action"],
+    avoid: ["generic skill-meter grids", "invented client logos or project metrics"],
+  },
+  {
+    type: "SaaS", match: /\b(saas|software|platform|product)\b/i,
+    purpose: "Explain the product's intended job and help a suitable visitor take the next step.",
+    hierarchy: ["problem and product purpose", "proof or product view", "key capabilities", "next step"],
+    layout: "Build a clear top-to-bottom argument; give the product view enough space to explain one real workflow instead of stacking interchangeable feature cards.",
+    visual: "Use a consistent product-led system and a single focal product view; defer brand-specific palette and type choices until supplied.",
+    components: ["navigation", "product explanation", "workflow or product view", "evidence block", "primary action"],
+    avoid: ["unsupported performance or customer claims", "feature grids without a user outcome"],
+  },
+  {
+    type: "editorial", match: /\b(editorial|article|essay|publication|story|journal)\b/i,
+    purpose: "Support focused reading and make the article's structure and source context legible.",
+    hierarchy: ["title and byline", "summary or standfirst", "article sections", "sources and related reading"],
+    layout: "Keep a readable central text measure, strong heading landmarks, and a separate narrow rail only when it aids navigation rather than competing with the article.",
+    visual: "Treat typography, line length, and whitespace as the primary identity; use imagery only where it adds context.",
+    components: ["article header", "table of contents when long", "body typography", "citation links"],
+    avoid: ["interruptive overlays", "dense sidebars competing with the reading column"],
+  },
+  {
+    type: "dashboard", match: /\b(dashboard|admin|analytics|reporting)\b/i,
+    purpose: "Help a user understand current state and identify a useful next action.",
+    hierarchy: ["scope and time context", "most decision-relevant measure", "supporting breakdown", "available actions"],
+    layout: "Group data by the decisions it supports; show labels, units, and time context close to each value and preserve a stable navigation/content frame.",
+    visual: "Prioritize scan order and legible data distinctions; use color as a redundant signal, not the only encoding.",
+    components: ["navigation", "filter controls", "metric summaries", "data table or chart", "empty and loading states"],
+    avoid: ["decorative charts without a question", "color-only status encoding", "fabricated metrics"],
+  },
+  {
+    type: "ecommerce storefront", match: /\b(e-?commerce|storefront|shop|products|checkout)\b/i,
+    purpose: "Help shoppers understand product fit and proceed through a transparent purchase path.",
+    hierarchy: ["product or category context", "product details and price", "selection options", "purchase action", "delivery/returns details"],
+    layout: "Keep product imagery and purchase information adjacent; expose selection, availability, and total-cost context before commitment.",
+    visual: "Let real product photography and supplied brand assets lead; keep purchase controls visually distinct and consistent.",
+    components: ["product listing", "product detail", "variant selection", "cart or purchase action", "delivery/returns details"],
+    avoid: ["invented prices, reviews, stock, or policies", "hidden costs revealed only after commitment"],
+  },
+  {
+    type: "creative studio", match: /\b(creative studio|design studio|agency|studio)\b/i,
+    purpose: "Show the studio's work and point visitors toward a relevant conversation.",
+    hierarchy: ["studio identity", "selected work", "services or approach when supplied", "contact"],
+    layout: "Use a portfolio-led composition with varied project scale; keep captions and project context attached to the work.",
+    visual: "Allow verified work samples to establish the character; do not assume a particular art direction, client roster, or medium.",
+    components: ["studio identity", "project gallery", "project context", "contact action"],
+    avoid: ["invented client names or awards", "uniform tiles that flatten different projects"],
+  },
+  {
+    type: "accessible content-heavy page", match: /\b(accessible|content-heavy|guide|documentation)\b/i,
+    purpose: "Make dense information navigable, understandable, and operable across input methods and viewport sizes.",
+    hierarchy: ["page purpose and scope", "section navigation", "chunked content with descriptive headings", "related actions or references"],
+    layout: "Use a readable main column with a clearly separated contents navigation; collapse the navigation into an in-page control on small screens without hiding the content.",
+    visual: "Use typography, spacing, and heading structure to expose the information hierarchy; keep decoration subordinate to reading and navigation.",
+    components: ["skip link", "landmark structure", "table of contents", "descriptive section headings", "back-to-top link when useful"],
+    avoid: ["keyboard traps", "motion or colour as the only way to convey meaning", "collapsing required content behind unclear controls"],
+  },
+];
+
+const drClean = (value, max = 8) => (Array.isArray(value)
+  ? value.filter((v) => typeof v === "string" && v.trim()).slice(0, max).map((v) => v.trim().slice(0, 240))
+  : undefined);
+const drText = (value) => typeof value === "string" ? value.trim().slice(0, 600) : undefined;
+
+function planDesign(input) {
+  const brief = drText(input.brief);
+  const profile = drProfiles.find((p) => p.match.test(brief))
+    || drProfiles.find((p) => p.match.test(String(input.project_type || "")));
+  const known = {
+    brief,
+    project_type: drText(input.project_type),
+    audience: drText(input.audience),
+    goals: drClean(input.goals, 5),
+    brand_notes: drText(input.brand_notes),
+    content_outline: drClean(input.content_outline, 8),
+    references: drClean(input.references, 5),
+    constraints: drClean(input.constraints, 8),
+    preferred_stack: drText(input.preferred_stack),
+  };
+  for (const key of Object.keys(known)) if (known[key] === undefined || known[key] === "") delete known[key];
+  if (!known.goals?.length) delete known.goals;
+  if (!known.content_outline?.length) delete known.content_outline;
+  const questions = [];
+  if (!known.audience) questions.push({ field: "audience", question: "Who is the primary audience, and what do they already know?" });
+  if (!known.brand_notes) questions.push({ field: "visual_identity", question: "Are there existing brand colours, typefaces, logos, or identity rules to preserve?" });
+  if (!known.content_outline) questions.push({ field: "content_hierarchy", question: "Which content, proof, or actions are required for the first release?" });
+  if (!known.constraints) questions.push({ field: "constraints", question: "Are there technical, legal, or operational constraints beyond those stated in the brief?" });
+
+  const rec = {
+    product_purpose: known.goals?.join("; ") || profile?.purpose || "Clarify the stated request's primary user task before choosing a page structure.",
+    content_hierarchy: known.content_outline || profile?.hierarchy || null,
+    visual_direction: known.brand_notes || profile?.visual || null,
+    layout_composition: profile?.layout || null,
+    typography: known.brand_notes ? "Use supplied type guidance; otherwise select and validate a readable type system during implementation." : null,
+    colour_tokens: known.brand_notes ? "Derive tokens from supplied brand notes; preserve unknown values until confirmed." : null,
+    components: profile?.components || [],
+    interaction: ["Provide visible feedback for actions and explicit loading, empty, success, and error states where applicable."],
+    motion_intent: "No signature motion is specified. Add motion only when it clarifies a state change or spatial relationship; provide a reduced-motion alternative.",
+    responsive_strategy: "Recompose by content priority at narrow widths; keep all actions and information reachable without horizontal page scrolling.",
+    accessibility: ["Semantic landmarks and heading order", "Keyboard-operable controls with visible focus", "Text alternatives for meaningful imagery", "Do not rely on colour alone", "Respect prefers-reduced-motion"],
+    anti_patterns: profile?.avoid || ["generic template sections without a content purpose", "invented brand, audience, product, or performance claims"],
+  };
+  const basisFor = (field) => {
+    if (field === "product_purpose" && known.goals) return "derived from user-stated goals; confirm prioritization";
+    if (field === "content_hierarchy" && known.content_outline) return "ordered from the user-stated content outline; confirm priority";
+    if (field === "visual_direction" && known.brand_notes) return "based on user-stated brand notes; confirm implementation";
+    if ((field === "typography" || field === "colour_tokens") && known.brand_notes) return "implementation recommendation based on user-stated brand notes";
+    return profile ? "page-type heuristic; confirm against user goals and actual content" : "general implementation heuristic; confirm before treating as a requirement";
+  };
+  const statusFor = (field, value) => {
+    if ((field === "product_purpose" && known.goals)
+      || (field === "content_hierarchy" && known.content_outline)
+      || (field === "visual_direction" && known.brand_notes)) return "user_stated";
+    return value === null || value === undefined || (Array.isArray(value) && !value.length) ? "unknown" : "recommended";
+  };
+  const contract = {
+    contract_version: "1",
+    user_stated: known,
+    recommendations: Object.fromEntries(drFields.map((field) => [field, {
+      status: statusFor(field, rec[field]),
+      value: rec[field] ?? null,
+      basis: basisFor(field),
+    }])),
+    open_questions: questions,
+    retrieval_hints: {
+      component_queries: (profile?.components || []).slice(0, 4),
+      system_query: profile?.type || known.project_type || null,
+      note: "Use hints to search first-party catalogue metadata; select a few candidates and inspect only chosen details.",
+    },
+  };
+  return contract;
+}
+
+const drSources = [
+  {
+    id: "arxiv-2403.03163",
+    title: "Design2Code: Benchmarking Multimodal Code Generation for Automated Front-End Engineering",
+    authors: ["Chenglei Si", "Yanzhe Zhang", "Ryan Li", "Zhengyuan Yang", "Ruibo Liu", "Diyi Yang"],
+    publication: "NAACL 2025; arXiv preprint",
+    year: 2024, date: "2024-03-05", url: "https://arxiv.org/abs/2403.03163", doi: null,
+    source_type: "preprint_and_conference_paper", metadata_provider: "arXiv",
+    license_access: "abstract and paper openly accessible on arXiv; reuse license not asserted here; link to source, do not reproduce paper",
+    freshness: "arXiv version 3 updated 2025-02-09 (metadata checked 2026-11-23)",
+  },
+  {
+    id: "wcag22-reflow",
+    title: "Understanding Success Criterion 1.4.10: Reflow",
+    authors: ["World Wide Web Consortium (W3C)"],
+    publication: "WCAG 2.2 Understanding document",
+    year: 2023, date: "2023-10-05", url: "https://www.w3.org/WAI/WCAG22/Understanding/reflow.html", doi: null,
+    source_type: "standard_guidance", metadata_provider: "W3C",
+    license_access: "public access; reuse license not asserted here; link to source; no source text reproduced",
+    freshness: "W3C page updated 2026-10-04; checked 2026-11-23",
+  },
+  {
+    id: "wcag22-animation",
+    title: "Understanding Success Criterion 2.3.3: Animation from Interactions",
+    authors: ["World Wide Web Consortium (W3C)"],
+    publication: "WCAG 2.2 Understanding document",
+    year: 2023, date: "2023-10-05", url: "https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html", doi: null,
+    source_type: "standard_guidance", metadata_provider: "W3C",
+    license_access: "public access; reuse license not asserted here; link to source; no source text reproduced",
+    freshness: "W3C page updated 2025-09-16; checked 2026-11-23",
+  },
+  {
+    id: "doi-10.1016-j.ijhcs.2024.103257",
+    title: "User perception of animation fluency: The effect of time duration in different phases of animated transitions during application usage",
+    authors: ["Yan Ge", "Hongyu Chen", "Yuchen Wang", "Weina Qu", "Yubo Zhang", "Yanfang Liu"],
+    publication: "International Journal of Human-Computer Studies, volume 186, article 103257",
+    year: 2024, date: "2024-06", url: "https://doi.org/10.1016/j.ijhcs.2024.103257", doi: "10.1016/j.ijhcs.2024.103257",
+    source_type: "journal_article", metadata_provider: "OpenAlex and Crossref",
+    license_access: "closed access per OpenAlex metadata; metadata only; link to publisher; no abstract or full text copied",
+    freshness: "OpenAlex and Crossref metadata checked 2026-11-23",
+  },
+];
+
+const drClaims = [
+  {
+    id: "design2code-layout-errors",
+    source_id: "arxiv-2403.03163",
+    evidence_type: "empirical_benchmark_abstract",
+    method: "Benchmark evaluation of screenshot-conditioned multimodal code generation, with automatic metrics and human evaluation as described in the abstract.",
+    population_sample: "484 manually curated real-world webpages; benchmark tasks and evaluated models are specific to the paper.",
+    date: "2024-03-05",
+    section: "Abstract",
+    finding: "The authors report that evaluated models often omit visual elements and produce incorrect layouts in this benchmark.",
+    limitations: ["Abstract-level summary only; benchmark performance is not a measure of general design quality.", "Task, dataset, models, and evaluation setup bound the result."],
+    confidence_basis: "Medium: claim is explicit in the arXiv abstract; full paper has not been reviewed for this corpus card.",
+    practical_implications: ["Compare implementation against the actual brief and reference at the element and layout level; do not assume generated code preserves all visual content."],
+  },
+  {
+    id: "wcag-reflow-guidance",
+    source_id: "wcag22-reflow",
+    evidence_type: "standard_guidance",
+    method: "Normative WCAG success criterion with explanatory Understanding guidance.",
+    population_sample: null, date: "2023-10-05", section: "Success Criterion 1.4.10",
+    finding: "Content should reflow at the criterion's specified equivalent narrow viewport conditions without requiring scrolling in two dimensions for ordinary content.",
+    limitations: ["Apply the complete criterion and its exceptions from the linked WCAG source; this short card is not a conformance assessment."],
+    confidence_basis: "High for what the W3C guidance states; not an empirical usability claim.",
+    practical_implications: ["Test narrow layouts for readable reflow and reachable content; assess wide data tables and other exceptions against the full criterion."],
+  },
+  {
+    id: "wcag-animation-guidance",
+    source_id: "wcag22-animation",
+    evidence_type: "standard_guidance",
+    method: "WCAG success criterion with explanatory Understanding guidance.",
+    population_sample: null, date: "2023-10-05", section: "Success Criterion 2.3.3",
+    finding: "Non-essential animation triggered by interaction can be disabled, subject to the criterion's scope and exceptions.",
+    limitations: ["This is Level AAA guidance; consult the linked criterion and exceptions. It is not a universal claim that all animation must be removed."],
+    confidence_basis: "High for the standard's stated requirement and level; not an empirical claim.",
+    practical_implications: ["Offer an appropriate reduced-motion experience for non-essential interaction-triggered movement and verify it with the platform preference."],
+  },
+];
+
+function researchSources() { return drSources.map((source) => ({ ...source, authors: [...source.authors] })); }
+function researchClaims() { return drClaims.map((claim) => ({ ...claim, limitations: [...claim.limitations], practical_implications: [...claim.practical_implications] })); }
+
+function searchResearch(query, limit = 3, corpus = { sources: drSources, claims: drClaims }) {
+  const terms = String(query || "").toLowerCase().match(/[a-z0-9]{3,}/g) || [];
+  if (!terms.length) return { query: String(query || ""), total: 0, items: [], note: "Provide a topic or question to search the curated evidence cards." };
+  const sources = new Map((corpus.sources || []).map((source) => [source.id, source]));
+  const ranked = (corpus.claims || []).map((claim) => {
+    const source = sources.get(claim.source_id);
+    if (!source) return null;
+    const haystack = [claim.finding, claim.evidence_type, claim.method, claim.section, ...claim.practical_implications, source.title, source.publication].join(" ").toLowerCase();
+    const score = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
+    return { claim, source, score };
+  }).filter((row) => row && row.score > 0).sort((a, b) => b.score - a.score || a.claim.id.localeCompare(b.claim.id));
+  return {
+    query: String(query || "").slice(0, 300), total: ranked.length,
+    items: ranked.slice(0, limit).map(({ claim, source }) => ({
+      id: claim.id, evidence_type: claim.evidence_type, finding: claim.finding,
+      implication: claim.practical_implications[0], limitations: claim.limitations,
+      source: { id: source.id, title: source.title, url: source.url, doi: source.doi, year: source.year },
+      detail_ref: { tool: "aura_research_read", id: claim.id },
+    })),
+    corpus: { source_count: sources.size, claim_count: (corpus.claims || []).length, updated: "2026-11-23" },
+    ...(corpus.claims?.length ? {} : { empty_corpus: true, note: "No reviewed evidence cards are available; use the Design Contract and do not infer research findings." }),
+  };
+}
+
+function readResearch(id) {
+  const claim = drClaims.find((entry) => entry.id === id);
+  if (!claim) return null;
+  const source = drSources.find((entry) => entry.id === claim.source_id);
+  if (!source) return null;
+  return { ...claim, source: { ...source, authors: [...source.authors] }, interpretation: { kind: "research_implication", text: claim.practical_implications[0] } };
+}
+
+// ---- motion-plan.mjs ----
+// Module: motion-plan — compact, deterministic motion guidance. This is a
+// planning contract, not an observation of a running page.
+const clean = (value, max = 240) => typeof value === "string" && value.trim()
+  ? value.trim().slice(0, max)
+  : undefined;
+
+function planMotion(input = {}) {
+  const purpose = clean(input.purpose);
+  const observation = input.observation && typeof input.observation === "object" ? input.observation : {};
+  const observedTrigger = clean(observation.trigger, 120);
+  const observedTarget = clean(observation.target, 160);
+  const trigger = clean(input.trigger, 120);
+  const target = clean(input.target, 160);
+  const properties = Array.isArray(input.properties)
+    ? input.properties.filter((x) => typeof x === "string" && x.trim()).slice(0, 5).map((x) => x.trim().slice(0, 40))
+    : [];
+  const observedChanges = Array.isArray(observation.changes)
+    ? observation.changes.filter((x) => typeof x === "string" && x.trim()).slice(0, 5).map((x) => x.trim().slice(0, 160))
+    : [];
+  const observedSource = clean(observation.source, 300);
+  const observedViewport = clean(observation.viewport, 80);
+  const observedLimitations = Array.isArray(observation.limitations)
+    ? observation.limitations.filter((x) => typeof x === "string" && x.trim()).slice(0, 5).map((x) => x.trim().slice(0, 200))
+    : [];
+  const hasObservation = !!(observedTrigger || observedTarget || observedChanges.length);
+  const stated = {};
+  if (purpose) stated.purpose = purpose;
+  if (trigger) stated.trigger = trigger;
+  if (target) stated.target = target;
+  if (properties.length) stated.properties = properties;
+  for (const key of ["interaction", "stack", "constraints"]) {
+    const value = clean(input[key], key === "constraints" ? 360 : 120);
+    if (value) stated[key] = value;
+  }
+
+  const purposeValue = purpose || "Make the state change or relationship clear without delaying input.";
+  const triggerValue = trigger || observedTrigger || "The named user action or state change.";
+  const targetValue = target || observedTarget || "The smallest element or region that communicates the change.";
+  const propertyValues = properties.length ? properties : observedChanges.length ? observedChanges : ["transform", "opacity"];
+  const observationRecord = hasObservation ? {
+    status: "observed",
+    source: observedSource || null,
+    viewport: observedViewport || null,
+    trigger: observedTrigger || null,
+    target: observedTarget || null,
+    changes: observedChanges,
+    limitations: observedLimitations,
+    verification: "Caller-supplied observation summary; Aura did not independently verify it.",
+  } : null;
+  return {
+    contract: "aura-motion-plan/v1",
+    evidence: hasObservation
+      ? { status: "observed", basis: "An observation summary was supplied by the caller; Aura did not independently verify the capture." }
+      : { status: "unavailable", basis: "Planning guidance is derived from the brief; no live page observation was supplied." },
+    observation: observationRecord,
+    user_stated: stated,
+    plan: {
+      purpose: { value: purposeValue, status: purpose ? "user_stated" : "recommended" },
+      trigger: { value: triggerValue, status: trigger ? "user_stated" : observedTrigger ? "observed" : "recommended" },
+      target: { value: targetValue, status: target ? "user_stated" : observedTarget ? "observed" : "recommended" },
+      properties: { values: propertyValues, status: properties.length ? "user_stated" : observedChanges.length ? "observed" : "recommended", basis: properties.length ? "Provided by the user." : observedChanges.length ? "Reported by the caller's observation summary." : "Prefer transform/opacity where they express the change; confirm paint/layout cost in the browser." },
+      state: { start: "Current visible state.", end: "The resulting state remains readable and operable.", status: "recommended" },
+      timing: { duration_ms: { min: 160, max: 240 }, easing: "ease-out", status: "recommended", basis: "A restrained starting point, not a universal timing rule; verify on the actual interaction and device." },
+      sequencing: "Animate only the affected region; avoid delaying the next input.",
+      interruption: "Cancel or retarget on repeated input; the final state must remain deterministic.",
+      reduced_motion: "When prefers-reduced-motion: reduce, remove nonessential travel/continuous motion while preserving state change and feedback.",
+      responsive_fallback: "On touch/narrow layouts, provide equivalent immediate state feedback; do not rely on hover or scroll-only discovery.",
+      accessibility: ["Keyboard focus receives equivalent feedback to hover.", "Do not move, obscure, or trap focus."],
+      performance_risks: ["Layout/paint cost is unknown until measured.", "Do not add will-change globally; profile on a representative device."],
+    },
+    open_questions: [
+      ...(!purpose ? ["What user benefit should this motion communicate?"] : []),
+      ...(!trigger && !observedTrigger ? ["What exact action or state change starts it?"] : []),
+      ...(!target && !observedTarget ? ["Which element or region should move or change?"] : []),
+    ],
+    limitations: [
+      ...(hasObservation ? ["Caller-supplied observation was not independently verified by Aura."] : ["No browser observation was supplied."]),
+      "Duration/easing and performance are recommendations, not measured facts.",
+    ],
   };
 }
 
@@ -3789,39 +4081,76 @@ function normRefs(v, name) {
   return out;
 }
 function toolFn_cat(v) { if (v !== undefined && !TOOL_CATS.includes(v)) toolFn_bad('category must be one of ' + TOOL_CATS.join('|')); return v; }
-function inspoMode(v) { if (v !== undefined && !INSPO_MODES.includes(v)) toolFn_bad('mode must be light|dark'); return v; }
-function inspoVibe(v) { if (v !== undefined && !INSPO_VIBES.includes(v)) toolFn_bad('vibe must be one of ' + INSPO_VIBES.join('|')); return v; }
-function inspoMacro(v) { if (v !== undefined && !INSPO_MACROS.includes(v)) toolFn_bad('macrostructure must be one of ' + INSPO_MACROS.join('|')); return v; }
-function inspoEvidence(v, name) {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) toolFn_bad((name || 'evidence') + ' must be an object (slim keys only)');
-  return v;
+function skillFrontmatter(content) {
+  const text = String(content || "");
+  const match = text.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return { valid: null, missing: [], frontmatter: "unknown" };
+  const frontmatter = match ? match[1] : "";
+  const lines = frontmatter.split(/\r?\n/);
+  const has = (key) => {
+    const index = lines.findIndex((line) => new RegExp("^" + key + "\\s*:").test(line));
+    if (index < 0) return false;
+    let value = lines[index].slice(lines[index].indexOf(":") + 1).trim();
+    if (!value || value.startsWith("#")) return false;
+    if (/^[|>][+-]?$/.test(value)) {
+      return lines.slice(index + 1).some((line) => /^\s+\S/.test(line) && !/^\s+#/.test(line));
+    }
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1).trim();
+    } else {
+      value = value.replace(/\s+#.*$/, "").trim();
+    }
+    return value.length > 0;
+  };
+  const missing = ["name", "description"].filter((key) => !has(key));
+  return { valid: missing.length === 0, missing, frontmatter: "present" };
+}
+function diffFacts(item) {
+  const facets = item.facets || {};
+  const code = typeof item.code === "string" ? item.code : "";
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  const structureTags = tags.filter((t) => /hero|nav|header|footer|pricing|feature|testimonial|form|card/i.test(String(t)));
+  const dependencies = [];
+  if (facets.needsTailwind === true) dependencies.push("tailwindcss");
+  if (facets.needsIcons === true) dependencies.push("iconify-icon");
+  const sourceComplete = typeof item.code === "string" && item.code_info?.truncated === false;
+  const markupStructure = sourceComplete ? [...code.matchAll(/<(header|nav|main|section|footer|form)\b/gi)].map((m) => m[1].toLowerCase()).filter((v, i, a) => a.indexOf(v) === i) : [];
+  const structure = structureTags.length ? structureTags : (markupStructure.length ? markupStructure : "unknown");
+  return {
+    id: item.id ?? null, slug: item.slug ?? null, title: item.title ?? null, category: item.category ?? tags[0] ?? "unknown",
+    theme: facets.theme ?? "unknown", dependencies: typeof facets.needsTailwind === "boolean" || typeof facets.needsIcons === "boolean" ? dependencies : "unknown", fonts: Array.isArray(facets.fonts) && facets.fonts.length ? facets.fonts : "unknown",
+    structure: structure.length ? structure : "unknown",
+    structure_source: structureTags.length ? "catalogue_tags" : (markupStructure.length ? "complete_component_markup" : "unknown"),
+    source_quality: item.code_chars ? { source: "Aura catalogue", code_chars: item.code_chars } : "unknown",
+    compatibility: "unknown", page_url: item.page_url ?? null,
+  };
 }
 const TOOL_DEFS = [
-  { name: 'aura_status', description: 'Catalogue health plus free counts (components, skills, assets, design systems). Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'aura_search_components', description: 'Search free Aura UI components (2,495). Text over title and description, optional category tag, theme dark|light filter, negative_theme exclusion, min_views floor, sorts. Slim rows by default (excerpt + fetch pointer, no full code; slim:false for full). exact_match:true skips fallbacks (honest empty).', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'aura_get_component', description: 'Full free component detail with HTML/Tailwind source, preview image, page URL. Numeric id or slug. Chunk param pages large code (see code_info). full:true returns full code (ignores chunk).', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'aura_plan_design', description: 'Turn a brief into a compact Design Contract. Separates supplied facts, recommendations, and open questions; no catalogue rows or code. Then search a few indicated first-party candidates.', inputSchema: { type: 'object', properties: { brief: { type: 'string', minLength: 1, maxLength: 600 }, project_type: { type: 'string', maxLength: 120 }, audience: { type: 'string', maxLength: 300 }, goals: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 5 }, brand_notes: { type: 'string', maxLength: 600 }, content_outline: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 8 }, references: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 5 }, constraints: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 8 }, preferred_stack: { type: 'string', maxLength: 120 } }, required: ['brief'], additionalProperties: false } },
+  { name: 'aura_motion_plan', description: 'Create a compact motion contract for purpose, trigger, target, properties, timing, interruption, reduced-motion, responsive fallback and accessibility. Supplied observation summaries are attributed and not independently verified.', inputSchema: { type: 'object', properties: { purpose: { type: 'string', maxLength: 240 }, trigger: { type: 'string', maxLength: 120 }, target: { type: 'string', maxLength: 160 }, properties: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 40 } }, interaction: { type: 'string', maxLength: 120 }, stack: { type: 'string', maxLength: 120 }, constraints: { type: 'string', maxLength: 360 }, observation: { type: 'object', properties: { source: { type: 'string', maxLength: 300 }, viewport: { type: 'string', maxLength: 80 }, trigger: { type: 'string', maxLength: 120 }, target: { type: 'string', maxLength: 160 }, changes: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 160 } }, limitations: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 200 } } }, additionalProperties: false } }, additionalProperties: false } },
+  { name: 'aura_research_search', description: 'Search curated, compact research evidence cards. Returns at most five findings with source links, limitations, and a detail reference; never returns papers or PDFs.', inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 300 }, limit: { type: 'number', minimum: 1, maximum: 5 } }, required: ['query'], additionalProperties: false } },
+  { name: 'aura_research_read', description: 'Read one selected research evidence card and its source metadata. Returns a compact claim, provenance, limitations, and implication; not source full text.', inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 100 } }, required: ['id'], additionalProperties: false } },
+  { name: 'aura_status', description: 'Catalogue health plus counts (components_free/pro, assets (all) + assets_free/pro, skills, design systems) with a counts_note. Free only, no login. Start here.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'aura_search_components', description: 'Find free components by brief, category and theme. Results are metadata-first; even slim:false caps source at 1,200 chars/item. Continue with offset; fetch source via aura_get_component.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: TOOL_CATS }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'aura_get_component', description: 'Inspect a free component. Metadata is default; pass chunk for one bounded source chunk or full:true for the first chunk. Numeric id or slug.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_search_skills', description: 'Search free Aura agent skills (192). Metadata only, slim by default; use aura_get_skill for the full SKILL.md content. exact_match:true skips fallbacks.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'aura_get_skill', description: 'Full free agent-skill content (SKILL.md body) plus source_url and page URL. Skill id. Chunk param pages large bodies (see content_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, chunk: { type: 'number' } }, required: ['id'], additionalProperties: false } },
+  { name: 'aura_get_skill', description: 'Inspect a free skill; metadata and frontmatter validation by default. Pass chunk for one body chunk or full:true for the first chunk.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_search_assets', description: 'Search free Aura assets (images and video). Keywords, media_type image or video. Slim rows by default. exact_match:true skips fallbacks.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, mediaType: { type: 'string', enum: ['image', 'video'] }, commercial_ok: { type: 'boolean' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_search_design_systems', description: 'Search free Aura DESIGN.md systems (725). Metadata + snippets, slim by default; use aura_get_design_system for content. exact_match:true skips fallbacks.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, sort: { type: 'string', enum: TOOL_SORTS }, limit: { type: 'number' }, offset: { type: 'number' }, slim: { type: 'boolean' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'aura_get_design_system', description: 'Full free DESIGN.md content plus preview_html, tokens, and page URL. System id or slug. Chunk param pages large preview_html (see preview_info).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' }, chunk: { type: 'number' } }, additionalProperties: false } },
+  { name: 'aura_get_design_system', description: 'Inspect a free design system; metadata and token hints by default. Pass chunk for bounded content/preview or full:true for the first bounded chunks.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' }, chunk: { type: 'number' }, full: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_search_all', description: 'One call across components, skills, assets, and design systems in parallel. Free only. Slim rows by default (excerpts, no blobs). Each surface runs its own fallback pipeline, so mixed outcomes are normal (skills may fall back while components go honestly empty) — read isFallback/no_match per surface, not once globally.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' }, slim: { type: 'boolean' }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, exact_match: { type: 'boolean' } }, additionalProperties: false } },
   { name: 'aura_recommend', description: 'Starter kit for a goal: top 3 free hits per surface with page URLs and rationale. Slim rows + commercial-use note. Empty components auto-retry once via suggested_queries, then editorial picks.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, theme: { type: 'string', enum: ['dark', 'light'] }, negative_theme: { type: 'string', enum: ['dark', 'light'] }, min_views: { type: 'number' }, slim: { type: 'boolean' } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_install_component', description: 'Paste-ready setup for a free component: dependency list, setup steps, file map, fonts. Goes beyond the official Aura MCP, which only reads project source.', inputSchema: { type: 'object', properties: { id: {}, slug: { type: 'string' } }, additionalProperties: false } },
   { name: 'aura_install_skill', description: 'Save-and-load plan for a free skill: where to put SKILL.md per client plus upstream source.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_use_design_system', description: 'Apply a free DESIGN.md system: token starter CSS plus copy order (tokens first, then markup).', inputSchema: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' } }, additionalProperties: false } },
-  { name: 'aura_bundle', description: 'Bulk-fetch 2-8 component details in one call (ids or slugs). Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { ids: { type: 'array', items: {} }, slugs: { type: 'array', items: { type: 'string' } } }, additionalProperties: false } },
-  { name: 'aura_scaffold_page', description: 'One ordered page build: DESIGN.md tokens.css + system preview + component markup in dependency order, combined deps + files[]. Merges install_* + use_* in a single turn. components accepts string|number|{id}|{slug} refs, e.g. ["732","1364"] or [{id:"732"}] or [{slug:"..."}]; full:true returns full bodies.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, system: { type: 'string' }, components: { type: 'array', items: {} }, full: { type: 'boolean' } }, required: ['goal'], additionalProperties: false } },
+  { name: 'aura_bundle', description: 'Fetch 2–8 component records in one call. Returns metadata by default; full:true includes bounded first source chunks. Per-item errors are isolated.', inputSchema: { type: 'object', properties: { ids: { type: 'array', items: {} }, slugs: { type: 'array', items: { type: 'string' } }, full: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'aura_scaffold_page', description: 'Plan a page from a brief and optional component refs. Returns tokens, dependencies, order and detail pointers; full:true includes bounded first chunks and reports truncated token source.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, system: { type: 'string' }, components: { type: 'array', items: {} }, full: { type: 'boolean' } }, required: ['goal'], additionalProperties: false } },
   { name: 'aura_related', description: 'More-like-this: 3 related items for a component/skill/design-system by tag + text overlap. Discovery never dead-ends.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'skills', 'design_systems'] }, id: {} }, required: ['kind', 'id'], additionalProperties: false } },
   { name: 'aura_bulk_fetch', description: 'Bulk-fetch 2-8 details in one call for components, design_systems, or assets. Alias-friendly name for aura_bundle. Per-item errors never fail the batch.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['components', 'design_systems', 'assets'] }, ids: { type: 'array', items: {} } }, required: ['kind', 'ids'], additionalProperties: false } },
   { name: 'aura_install_asset', description: 'Legal drop-in plan for an asset: direct download URL, preview URL, license (all-rights-reserved per Aura Terms §4 — check page before commercial use), suggested file path.', inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'], additionalProperties: false } },
   { name: 'aura_categories', description: 'The 13 component categories with live free counts. Pick one, then search within it.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'aura_prompt', description: 'Need-based design prompt in 2 passes: Pass 1 (goal only) returns draft + 6 questions (theme, sections, system, assets, macrostructure, vibe — mode folds into theme); ask the user via native question UI, then Pass 2 (goal + answers) returns copy-paste final_prompt + plan order + suggested calls starting at inspo.recommend. Always confirm with user before scaffolding.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, theme: { type: 'string', enum: ['dark', 'light'] }, surfaces: { type: 'array', items: { type: 'string' } }, system: { type: 'string' }, answers: { type: 'object' } }, required: ['goal'], additionalProperties: false } },
-  { name: 'aura_inspo_recommend', description: 'Map a brief onto Inspo + Aura calls (pure, no fetch). Strict macro gate: without macrostructure returns need_macro:true — run inspo.recommend first, never scaffold generic. With macro returns inspo_call + 3 aura_calls + palette priority (brand > Inspo > Aura).', inputSchema: { type: 'object', properties: { brief: { type: 'string' }, mode: { type: 'string', enum: ['dark', 'light'] }, vibe: { type: 'string' }, macrostructure: { type: 'string' }, brand_hex: { type: 'string' } }, required: ['brief'], additionalProperties: false } },
-  { name: 'aura_inspo_components', description: 'Map an Inspo component filter onto Aura search (pure). evidence.type hero|pricing|features|cta|nav|footer|testimonial|logo-cloud|faq|stat plus style/macrostructure/mode. Returns inspo.find_components call + aura_search + scaffold_hint (tokens first, weight s|m).', inputSchema: { type: 'object', properties: { evidence: { type: 'object' }, brief: { type: 'string' } }, required: ['evidence'], additionalProperties: false } },
-  { name: 'aura_inspo_reference', description: 'Adapt one Inspo reference JSX onto one Aura component (pure). evidence {type, id} + aura_component {id|slug}. Returns inspo.get_reference_jsx + aura_get_component calls plus scoped adapt_plan (token swaps, css scope, files).', inputSchema: { type: 'object', properties: { evidence: { type: 'object' }, aura_component: { type: 'object' } }, required: ['evidence', 'aura_component'], additionalProperties: false } },
-  { name: 'aura_inspo_system', description: 'Resolve Inspo tokens vs Aura DESIGN system (pure). inspo_tokens {palette, fonts, background?, text?, brand_hex?} + aura_system slug. Returns option A (Inspo) vs B (Aura fetch) vs C (blend) plus one system_choice question payload (A-inspo|B-aura|C-blend) and contrast warning. Tokens first.', inputSchema: { type: 'object', properties: { inspo_tokens: { type: 'object' }, aura_system: {} }, required: ['inspo_tokens', 'aura_system'], additionalProperties: false } },
-  { name: 'aura_inspo_compare', description: 'Triangulate a house style from 2-4 slim Inspo sites (pure). evidence[] of {slug, palette?, fonts?, macrostructure?, mode?} — slim keys only, no autopsy. Returns inspo.compare call + closest Aura system/component queries.', inputSchema: { type: 'object', properties: { evidence: { type: 'array', items: { type: 'object' } } }, required: ['evidence'], additionalProperties: false } },
+  { name: 'aura_prompt', description: 'Compatibility wrapper for a two-pass design brief. Ask the user to choose theme, sections, system, assets and mood; the second pass suggests Aura tools only. Answers stay customisable.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, theme: { type: 'string', enum: ['dark', 'light'] }, surfaces: { type: 'array', items: { type: 'string' } }, system: { type: 'string' }, answers: { type: 'object' } }, required: ['goal'], additionalProperties: false } },
+  { name: 'aura_diff', description: 'Compare 2–4 free components by known metadata: theme, dependencies, fonts, structure and source length. Unknown facts stay unknown; no visual/performance claims.', inputSchema: { type: 'object', properties: { components: { type: 'array', minItems: 2, maxItems: 4, items: {} }, goal: { type: 'string' } }, required: ['components'], additionalProperties: false } },
   { name: 'aura_docs_plan', description: 'Plan a fresh-docs lookup (pure, no fetch). library + need -> Context7 resolve/query plan (trusted: tailwind, gsap, lenis, iconify) + apply steps for Aura files + docs stamp slot. The agent calls Context7, Aura shapes the rest.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, need: { type: 'string' } }, required: ['library', 'need'], additionalProperties: false } },
   { name: 'aura_docs_check', description: 'Check pasted code against fresh docs (pure). library + code_excerpt (under 20000 chars, excerpts not full pages) + optional docs_note -> verdict current|needs-update, look-preserving fixes, version-pin needs_check. Fresh API wins, look stays identical.', inputSchema: { type: 'object', properties: { library: { type: 'string' }, code_excerpt: { type: 'string' }, docs_note: { type: 'string' } }, required: ['library', 'code_excerpt'], additionalProperties: false } },
   { name: 'aura_icon', description: 'Fetch one free icon as ready-to-paste SVG (live). name in kebab-case (bolt, arrow-down). source auto|fontawesome|pixel, style auto|solid|regular|brands. Auto-fallback across styles then libraries; every hit carries license + credit (CC BY 4.0, credit always) plus a font/CSS alternative. 24h icon cache.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string', enum: ['auto', 'fontawesome', 'pixel'] }, style: { type: 'string', enum: ['solid', 'regular', 'brands', 'auto'] } }, required: ['name'], additionalProperties: false } },
@@ -3829,7 +4158,7 @@ const TOOL_DEFS = [
   { name: 'aura_award_search', description: 'Search award-winning website references (Awwwards). Modes: sites (ranked refs with preview links), categories (real taxonomy from the index/source), elements (hero/nav/pricing/footer examples), motion (previously recorded motion studies). Local index first, one polite live refresh when empty.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['sites', 'categories', 'elements', 'motion'] }, query: { type: 'string' }, slug: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, category: { type: 'string' }, color: { type: 'string' }, technology: { type: 'string' }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, studio: { type: 'string' }, limit: { type: 'number' }, offset: { type: 'number' }, full: { type: 'boolean' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_award_inspect', description: 'Inspect award refs: site_details (palette/tech/awards/evidence), site_elements (section visuals with media URLs), element (one gallery record), compare_sites (2-3 refs: shared vs gaps, missing marked unknown).', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['site_details', 'site_elements', 'element', 'compare_sites'] }, slug: { type: 'string' }, elementSlug: { type: 'string' }, slugs: { type: 'array', items: { type: 'string' } } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_design_blueprint', description: 'Evidence-backed build plan from 2-5 award refs + goal: Markdown brief + versioned JSON, mapped to real free Aura components/systems (free-only enforced, failures marked unavailable). Never copies third-party source.', inputSchema: { type: 'object', properties: { goal: { type: 'string' }, references: { type: 'array', items: { type: 'string' } }, technology: { type: 'string' }, visualDirection: { type: 'string' }, responsive: { type: 'string' }, constraints: { type: 'array', items: { type: 'string' } }, includeStructure: { type: 'boolean' } }, required: ['goal', 'references'], additionalProperties: false } },
-  { name: 'aura_visual_audit', description: 'Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), compare (reference vs build mismatches). Needs Chrome for live capture; honest BROWSER_UNAVAILABLE otherwise. Loopback only with allowLocal:true.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['capture', 'structure', 'compare'] }, url: { type: 'string' }, referenceUrl: { type: 'string' }, buildUrl: { type: 'string' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, waitStrategy: { type: 'string', enum: ['load', 'networkidle'] }, settleMs: { type: 'number' }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
+  { name: 'aura_visual_audit', description: 'Capture/analyze a reference or your build. Modes: capture (real browser screenshot), structure (section band map: live-dom or static-html), responsive (measured viewport-width matrix), compare (reference vs build mismatches). Browser unavailable is explicit; loopback only with allowLocal:true.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['capture', 'structure', 'responsive', 'compare'] }, url: { type: 'string' }, referenceUrl: { type: 'string' }, buildUrl: { type: 'string' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, viewports: { type: 'array', minItems: 1, maxItems: 7, items: { type: 'integer', minimum: 320, maximum: 1920 } }, waitStrategy: { type: 'string', enum: ['load', 'networkidle'] }, settleMs: { type: 'number' }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_motion_study', description: 'Evidence-backed motion guidance. Modes: inspect (live runtime scan: libs/easing/scroll), record (bounded frame study; .webm only when ffmpeg present), search (stored studies by library/easing/scroll). Never claims unobserved library state.', inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['inspect', 'record', 'search'] }, url: { type: 'string' }, library: { type: 'string' }, easing: { type: 'string' }, scrollModel: { type: 'string' }, frames: { type: 'number' }, durationMs: { type: 'number' }, viewport: { type: 'string', enum: ['desktop', 'mobile'] }, allowLocal: { type: 'boolean' } }, required: ['mode'], additionalProperties: false } },
   { name: 'aura_award_index', description: 'Local award corpus: status (counts/freshness/lock), rebuild/resume/refresh (bounded polite crawl), new_winners (baseline then delta), watch_add/list/remove (studio/tag/url watches). Never auto-crawls on startup.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'rebuild', 'resume', 'refresh', 'new_winners', 'watch_add', 'watch_list', 'watch_remove'] }, award: { type: 'string', enum: ['sotd', 'developer', 'honorable'] }, maxPages: { type: 'number' }, kind: { type: 'string', enum: ['studio', 'tag', 'url'] }, pattern: { type: 'string' } }, required: ['action'], additionalProperties: false } },
 ];
@@ -3933,17 +4262,27 @@ function createHandlers(catalog, icons, version, awardDeps) {
     aura_get_component: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (id === undefined || (typeof id !== 'string' && typeof id !== 'number')) toolFn_bad('provide id (number) or slug (string)');
       const full = a.full === undefined ? undefined : toolFn_bool(a.full, 'full');
-      if (full === true) return textResult(await catalog.getItem('components', id, { full: true }));
-      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
-      return textResult(await catalog.getItem('components', id, { chunk })); },
-    aura_search_skills: async (a) => { a = a || {}; return textResult(await catalog.searchCatalog('skills', {
+      if (full !== undefined) toolFn_bool(full, 'full');
+      const got = await catalog.getItem('components', id, full === true ? { full: true } : { chunk: a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk') });
+      const item = { ...got.item };
+      if (full !== true && a.chunk === undefined) delete item.code;
+      return textResult({ summary: "Component detail", ...got, item, metadata_only: full !== true && a.chunk === undefined, retrieval: full ? "source returned up to the configured code chunk cap; use chunk to continue if code_info.truncated" : "use chunk for source or full:true for the first bounded source chunk" }); },
+    aura_search_skills: async (a) => { a = a || {}; const r = await catalog.searchCatalog('skills', {
       query: toolFn_str(a.query, 'query'), sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'),
       slim: a.slim === undefined ? undefined : toolFn_bool(a.slim, 'slim'),
       exact_match: a.exact_match === undefined ? undefined : toolFn_bool(a.exact_match, 'exact_match'),
-    })); },
+    });
+      r.items = (r.items || []).map((it) => {
+        const validation = skillFrontmatter(it.content_snippet || it.content_excerpt || "");
+        return { ...it, loadable: validation.valid, skill_validation: validation };
+      });
+      return textResult(r); },
     aura_get_skill: async (a) => { a = a || {}; if (typeof a.id !== 'string' || !a.id) toolFn_bad('id (string) is required');
-      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
-      return textResult(await catalog.getItem('skills', a.id, { chunk })); },
+      if (a.full !== undefined) toolFn_bool(a.full, 'full');
+      const got = await catalog.getItem('skills', a.id, a.full === true ? { full: true } : { chunk: a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk') });
+      const item = { ...got.item, skill_validation: skillFrontmatter(got.item.content || "") };
+      if (a.full !== true && a.chunk === undefined) { item.content_excerpt = String(item.content || "").slice(0, 300); delete item.content; }
+      return textResult({ summary: "Skill detail", ...got, item, metadata_only: a.full !== true && a.chunk === undefined, retrieval: a.full ? "content returned up to the configured content chunk cap; use chunk to continue if content_info.truncated" : "use chunk for content or full:true for the first bounded content chunk" }); },
     aura_search_assets: async (a) => { a = a || {}; const co = a.commercial_ok === undefined ? undefined : toolFn_bool(a.commercial_ok, 'commercial_ok');
       const r = await catalog.searchCatalog('assets', { query: toolFn_str(a.query, 'query'), mediaType: a.mediaType === undefined ? undefined : (a.mediaType === 'image' || a.mediaType === 'video' ? a.mediaType : toolFn_bad('mediaType must be image|video')), freeOnly: true, sort: toolFn_sort(a.sort), limit: toolFn_num(a.limit, 'limit'), offset: toolFn_num(a.offset, 'offset'), slim: a.slim === undefined ? undefined : toolFn_bool(a.slim, 'slim'), exact_match: a.exact_match === undefined ? undefined : toolFn_bool(a.exact_match, 'exact_match') });
       // Gap 5: commercial_ok filter (all-rights-reserved per Aura Terms S4).
@@ -3957,8 +4296,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
     })); },
     aura_get_design_system: async (a) => { a = a || {}; const id = a.id !== undefined ? a.id : a.slug;
       if (typeof id !== 'string' || !id) toolFn_bad('provide id or slug (string)');
-      const chunk = a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk');
-      return textResult(await catalog.getItem('design_systems', id, { chunk })); },
+      if (a.full !== undefined) toolFn_bool(a.full, 'full');
+      const got = await catalog.getItem('design_systems', id, a.full === true ? { full: true } : { chunk: a.chunk === undefined ? 0 : toolFn_num(a.chunk, 'chunk') });
+      const item = { ...got.item };
+      if (a.full !== true && a.chunk === undefined) { delete item.content; delete item.preview_html; }
+      return textResult({ summary: "Design system detail", ...got, item, metadata_only: a.full !== true && a.chunk === undefined, retrieval: a.full ? "bodies returned up to configured per-field chunk caps; use chunk to continue where *_info.truncated" : "use chunk for content/preview or full:true for the first bounded chunks" }); },
     aura_search_all: async (a) => { a = a || {}; const query = toolFn_str(a.query, 'query'), limit = toolFn_num(a.limit, 'limit') || 5;
       const slim = a.slim === undefined ? undefined : toolFn_bool(a.slim, 'slim');
       const themeV = a.theme === undefined ? undefined : theme(a.theme);
@@ -4036,16 +4378,51 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const s = (cats || []).reduce((n, c) => n + (typeof c.free === 'number' ? c.free : 0), 0);
       return textResult({ categories: cats, overlap_note: 'Counts overlap: components carry multiple tags, so per-category free counts sum to ' + s + ' (> 2495 free total). They triage depth, not a partition.' }); },
     aura_prompt: async (a) => { a = a || {}; return textResult(buildPrompt({ goal: typeof a.goal === 'string' ? a.goal : undefined, theme: a.theme, surfaces: a.surfaces, system: a.system, answers: a.answers })); },
-    aura_inspo_recommend: async (a) => { a = a || {}; return textResult(buildInspoRecommend({
-      brief: typeof a.brief === 'string' ? a.brief : undefined, mode: inspoMode(a.mode), vibe: inspoVibe(a.vibe),
-      macrostructure: inspoMacro(a.macrostructure), brand_hex: toolFn_str(a.brand_hex, 'brand_hex'),
-    })); },
-    aura_inspo_components: async (a) => { a = a || {}; return textResult(buildInspoComponents({ evidence: inspoEvidence(a.evidence, 'evidence'), brief: toolFn_str(a.brief, 'brief') })); },
-    aura_inspo_reference: async (a) => { a = a || {}; return textResult(buildInspoReference({ evidence: inspoEvidence(a.evidence, 'evidence'), aura_component: inspoEvidence(a.aura_component, 'aura_component') })); },
-    aura_inspo_system: async (a) => { a = a || {}; const sys = (typeof a.aura_system === 'string' || (a.aura_system && typeof a.aura_system === 'object')) ? a.aura_system : toolFn_bad('aura_system slug (string) is required');
-      return textResult(buildInspoSystem({ inspo_tokens: inspoEvidence(a.inspo_tokens, 'inspo_tokens'), aura_system: sys })); },
-    aura_inspo_compare: async (a) => { a = a || {}; if (!Array.isArray(a.evidence)) toolFn_bad('evidence must be an array of 2-4 slim site objects');
-      return textResult(buildInspoCompare({ evidence: a.evidence })); },
+    aura_plan_design: async (a) => { a = a || {};
+      const brief = toolFn_str(a.brief, 'brief');
+      if (!brief || !brief.trim() || brief.length > 600) toolFn_bad('brief must contain 1-600 characters');
+      for (const key of ['project_type', 'audience', 'brand_notes', 'preferred_stack']) {
+        if (a[key] !== undefined && (typeof a[key] !== 'string' || a[key].length > (key === 'brand_notes' ? 600 : key === 'audience' ? 300 : key === 'project_type' || key === 'preferred_stack' ? 120 : 600))) toolFn_bad(key + ' must be a bounded string');
+      }
+      for (const [key, cap] of [['goals', 5], ['content_outline', 8], ['references', 5], ['constraints', 8]]) {
+        if (a[key] !== undefined && (!Array.isArray(a[key]) || a[key].length > cap || a[key].some((v) => typeof v !== 'string' || v.length > 240))) toolFn_bad(key + ' must be an array of at most ' + cap + ' strings (240 characters each)');
+      }
+      return textResult(planDesign(a)); },
+    aura_motion_plan: async (a) => { a = a || {};
+      for (const [key, cap] of [['purpose', 240], ['trigger', 120], ['target', 160], ['interaction', 120], ['stack', 120], ['constraints', 360]]) {
+        if (a[key] !== undefined && (typeof a[key] !== 'string' || a[key].length > cap)) toolFn_bad(key + ' must be a string of at most ' + cap + ' characters');
+      }
+      if (a.properties !== undefined && (!Array.isArray(a.properties) || a.properties.length > 5 || a.properties.some((x) => typeof x !== 'string' || x.length > 40))) toolFn_bad('properties must contain at most 5 strings (40 characters each)');
+      if (a.observation !== undefined) {
+        if (!a.observation || typeof a.observation !== 'object' || Array.isArray(a.observation)) toolFn_bad('observation must be an object');
+        const observationKeys = new Set(['source', 'viewport', 'trigger', 'target', 'changes', 'limitations']);
+        if (Object.keys(a.observation).some((key) => !observationKeys.has(key))) toolFn_bad('observation contains an unsupported field');
+        for (const [key, cap] of [['source', 300], ['viewport', 80], ['trigger', 120], ['target', 160]]) {
+          if (a.observation[key] !== undefined && (typeof a.observation[key] !== 'string' || a.observation[key].length > cap)) toolFn_bad('observation.' + key + ' must be a bounded string');
+        }
+        for (const [key, cap] of [['changes', 160], ['limitations', 200]]) {
+          const values = a.observation[key];
+          if (values !== undefined && (!Array.isArray(values) || values.length > 5 || values.some((x) => typeof x !== 'string' || x.length > cap))) toolFn_bad('observation.' + key + ' must contain at most 5 bounded strings');
+        }
+      }
+      return textResult(planMotion(a)); },
+    aura_research_search: async (a) => { a = a || {};
+      const query = toolFn_str(a.query, 'query');
+      if (!query || !query.trim() || query.length > 300) toolFn_bad('query must contain 1-300 characters');
+      const limit = a.limit === undefined ? 3 : toolFn_num(a.limit, 'limit');
+      if (!Number.isInteger(limit) || limit < 1 || limit > 5) toolFn_bad('limit must be an integer from 1 to 5');
+      return textResult(searchResearch(query, limit)); },
+    aura_research_read: async (a) => { a = a || {};
+      const id = toolFn_str(a.id, 'id');
+      if (!id || id.length > 100) toolFn_bad('id must contain 1-100 characters');
+      const card = readResearch(id);
+      if (!card) { const e = new Error('research claim not found: ' + id); e.code = 'NOT_FOUND'; throw e; }
+      return textResult(card); },
+    aura_diff: async (a) => { a = a || {};
+      const refs = normRefs(a.components, 'components');
+      if (!refs || refs.length < 2 || refs.length > 4) toolFn_bad('components must contain 2-4 id/slug references');
+      const results = await catalog.bundleItems('components', refs, 4);
+      return textResult({ summary: "Known-fact comparison of " + results.filter((r) => r.ok).length + " free components", goal: toolFn_str(a.goal, 'goal') || null, items: results.map((r) => r.ok ? { ok: true, ...diffFacts(r.item) } : r), limitations: { bundle_size: "unknown", runtime_performance: "unknown", visual_quality: "unknown", compatibility: "unknown unless present in source metadata" } }); },
     aura_docs_plan: async (a) => { a = a || {}; return textResult(buildDocsPlan({ library: typeof a.library === 'string' ? a.library : undefined, need: typeof a.need === 'string' ? a.need : undefined })); },
     aura_docs_check: async (a) => { a = a || {}; return textResult(buildDocsCheck({ library: typeof a.library === 'string' ? a.library : undefined, code_excerpt: typeof a.code_excerpt === 'string' ? a.code_excerpt : undefined, docs_note: toolFn_str(a.docs_note, 'docs_note') })); },
     aura_icon: async (a) => { a = a || {}; if (!icons || typeof icons.getIcon !== 'function') { const e = new Error('icons backend not wired'); throw e; }
@@ -4057,7 +4434,10 @@ function createHandlers(catalog, icons, version, awardDeps) {
       return textResult(await version.getVersion()); },
     aura_bundle: async (a) => { a = a || {}; const ids = normRefs(a.ids, 'ids') || normRefs(a.slugs, 'slugs');
       if (!ids || !ids.length) toolFn_bad('provide ids (array of 1-8 numbers/strings) or slugs (array of strings)');
-      return textResult({ kind: 'components', results: await catalog.bundleItems('components', ids) }); },
+      const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
+      const results = await catalog.bundleItems('components', ids, 8, { full });
+      const sourceTruncated = full && results.some((r) => r.ok && r.item?.code_info?.truncated === true);
+      return textResult({ summary: results.length + " component record(s)", kind: 'components', results, truncated: sourceTruncated, next_cursor: null, retrieval: full ? "source included up to per-component chunk caps; when truncated is true, inspect code_info and call aura_get_component with chunk to continue" : "metadata only; call aura_get_component with chunk or full:true for source" }); },
     aura_related: async (a) => { a = a || {}; const k = a.kind;
       if (k !== 'components' && k !== 'skills' && k !== 'design_systems') toolFn_bad('kind must be components|skills|design_systems');
       const id = a.id; if (typeof id !== 'string' && typeof id !== 'number') toolFn_bad('id is required');
@@ -4074,8 +4454,8 @@ function createHandlers(catalog, icons, version, awardDeps) {
     aura_scaffold_page: async (a) => { a = a || {}; if (typeof a.goal !== 'string' || !a.goal.trim()) toolFn_bad('goal (string) is required');
       const sysRef = (typeof a.system === 'string' && a.system) ? a.system : null;
       const compRefs = normRefs(a.components, 'components') || [];
-      const full = a.full === undefined ? undefined : toolFn_bool(a.full, 'full');
-      const fullOpt = full === undefined ? {} : { full };
+      const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
+      const fullOpt = { full };
       const [sys, bundle] = await Promise.all([
         sysRef ? catalog.getItem('design_systems', sysRef, fullOpt).catch(() => null) : catalog.searchCatalog('design_systems', { query: a.goal, limit: 1 }).then((r) => (r.items[0] ? { item: r.items[0] } : null)),
         compRefs.length ? catalog.bundleItems('components', compRefs, 8, fullOpt).then((rs) => ({ items: rs.filter((x) => x.ok).map((x) => x.item), dropped: rs.filter((x) => !x.ok).length })) : catalog.searchCatalog('components', { query: a.goal, freeOnly: true, limit: 3 }).then((r) => ({ items: r.items, dropped: 0 })),
@@ -4087,7 +4467,13 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const sysItem = sys && sys.item ? sys.item : null;
       const toks = sysItem ? tokenHints(sysItem.content || '') : { tokens: {}, css: '' };
       const { guides, combined_deps: deps, files } = combineScaffold(sysItem, freeComps);
-      return textResult({ goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', system: sysItem, ...(sysItem ? {} : { system_note: 'no design system matched this goal — tokens.css is empty; fetch one via aura_search_design_systems or proceed with component defaults' }), components: freeComps || [], guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
+      const compactSystem = sysItem ? { ...sysItem } : null;
+      const compactComponents = freeComps.map((c) => ({ ...c }));
+      if (!full) {
+        if (compactSystem) { delete compactSystem.content; delete compactSystem.preview_html; }
+        for (const c of compactComponents) delete c.code;
+      }
+      return textResult({ summary: "Page build plan for " + freeComps.length + " free component(s)", goal: a.goal, order: ['1 tokens.css', '2 system preview_html', '3 component markup in listed order'], tokens_css: toks.css || '', tokens_source_truncated: !!(full && sysItem?.content_info?.truncated), system: compactSystem, ...(sysItem ? {} : { system_note: 'no design system matched this goal — tokens.css is empty; fetch one via aura_search_design_systems or proceed with component defaults' }), components: compactComponents, guides, combined_deps: deps, files, docs_stamp: docsStampFor(deps), metadata_only: !full, retrieval: full ? "source included up to per-item chunk caps; check *_info.truncated and use detail chunk retrieval to continue" : "fetch referenced item with aura_get_component/aura_get_design_system for source", ...(bundle.dropped ? { dropped_refs: bundle.dropped, dropped_note: 'Some requested refs resolved to missing or Pro (paid) components and were omitted — see per-id errors via aura_bundle.' } : {}), ...(proFiltered ? { pro_filtered_out: proFiltered, pro_note: 'Pro (paid) components were refused — free-only scaffold ships free rows.' } : {}), license_note: 'Markup and any pulled assets are all-rights-reserved per Aura Terms §4 — fine to prototype, check each page_url before commercial ship.' }); },
     aura_award_search: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['sites', 'categories', 'elements', 'motion'], 'mode');
       const limit = awardLimit(a.limit, 5, 25); const offset = Math.max(0, a.offset ?? 0); const full = a.full === undefined ? false : toolFn_bool(a.full, 'full');
       if (mode === 'categories') {
@@ -4233,7 +4619,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
       const SECTIONS = AWARD_SECTIONS;
       try {
         if (!catalog || typeof catalog.searchCatalog !== 'function') throw new Error('catalogue not wired');
-        const themeWord = /\b(dark|light)\b/i.test(goal + ' ' + (visualDirection || '')) ? goal.match(/\b(dark|light)\b/i)[1].toLowerCase() : undefined;
+        // Test the combined text, then extract from the same combined text.
+        // (Testing goal+visualDirection but matching goal alone null-dereferenced
+        // whenever the theme word appeared only in visualDirection.)
+        const themeMatch = (goal + ' ' + (visualDirection || '')).match(/\b(dark|light)\b/i);
+        const themeWord = themeMatch ? themeMatch[1].toLowerCase() : undefined;
         const seen = new Set();
         const queries = [];
         for (const sec of SECTIONS) {
@@ -4344,7 +4734,7 @@ function createHandlers(catalog, icons, version, awardDeps) {
         if (nextCalls.length >= 6) break;
       }
       return textResult({ goal, references: normed, markdown: built.markdown, spec: built.spec, auraEvidence: auraMatches.length ? { matched: auraMatches.length, sectionsCovered: [...new Set(auraMatches.map((m) => m.section))] } : { matched: 0, unavailable: auraUnavailable || 'catalogue lookup failed or matched nothing' }, next_calls: nextCalls, license_note: 'Reference design belongs to its creators (see sourceUrl per ref); Aura matches are all-rights-reserved per Aura Terms §4 — adapt patterns, never copy source.' }); },
-    aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'compare'], 'mode');
+    aura_visual_audit: async (a) => { a = a || {}; const mode = awardMode(a.mode, ['capture', 'structure', 'responsive', 'compare'], 'mode');
       const viewport = a.viewport === undefined ? 'desktop' : awardMode(a.viewport, ['desktop', 'mobile'], 'viewport');
       const waitStrategy = a.waitStrategy === undefined ? 'load' : awardMode(a.waitStrategy, ['load', 'networkidle'], 'waitStrategy');
       const settleMs = a.settleMs === undefined ? 1500 : toolFn_num(a.settleMs, 'settleMs');
@@ -4384,11 +4774,11 @@ function createHandlers(catalog, icons, version, awardDeps) {
         }
         return got.html;
       };
-      const structureOf = async (rawTarget, label) => {
+      const structureOf = async (rawTarget, label, requestedViewport = viewport) => {
         if (isLocalInput(rawTarget)) return readLocalSource(rawTarget, label || 'url');
         const target = rawTarget;
         if (awardBrowser) {
-          try { return await awardBrowser.structure(target, { viewport, allowLocal }); }
+          try { return await awardBrowser.structure(target, { viewport: requestedViewport, allowLocal }); }
           catch (e) {
             // Any live-dom failure degrades to labeled static estimates —
             // the audit stays usable, and the downgrade is disclosed.
@@ -4421,6 +4811,96 @@ function createHandlers(catalog, icons, version, awardDeps) {
         const raw = a.url || toolFn_bad('url (string) is required');
         const target = isLocalInput(raw) ? raw : awardValidateHttpUrl(raw, { allowLocal });
         return textResult({ mode, ...(await structureOf(target, 'url')) });
+      }
+      if (mode === 'responsive') {
+        const raw = a.url || toolFn_bad('url (string) is required');
+        const target = isLocalInput(raw) ? raw : awardValidateHttpUrl(raw, { allowLocal });
+        const requested = a.viewports === undefined ? [320, 360, 390, 768, 1024, 1280, 1440] : a.viewports;
+        if (!Array.isArray(requested) || requested.length < 1 || requested.length > 7
+          || requested.some((w) => !Number.isInteger(w) || w < 320 || w > 1920)) {
+          toolFn_bad('viewports must contain 1-7 integer widths from 320 to 1920');
+        }
+        const widths = [...new Set(requested)];
+        const results = [];
+        const findings = [];
+        let pages;
+        if (isLocalInput(target)) {
+          const estimate = await readLocalSource(target, 'url');
+          pages = widths.map((width) => ({ width, source: estimate.source, responsive: null }));
+        } else if (awardBrowser && typeof awardBrowser.responsiveAudit === 'function') {
+          try {
+            pages = (await awardBrowser.responsiveAudit(target, { viewports: widths, allowLocal })).results;
+          } catch (e) {
+            if (!e || !['BROWSER_UNAVAILABLE', 'CAPTURE_TIMEOUT', 'UPSTREAM_ERROR'].includes(e.code)) throw e;
+            const estimate = isLocalInput(target)
+              ? await readLocalSource(target, 'url')
+              : cdpBandsFromHtml(await fetchStatic(target), target);
+            pages = widths.map((width) => ({ width, source: estimate.source, responsive: null }));
+          }
+        } else if (!awardBrowser) {
+          const estimate = isLocalInput(target)
+            ? await readLocalSource(target, 'url')
+            : cdpBandsFromHtml(await fetchStatic(target), target);
+          pages = widths.map((width) => ({ width, source: estimate.source, responsive: null }));
+        } else {
+          pages = [];
+          for (const width of widths) pages.push(await structureOf(target, 'url', width));
+        }
+        let findingCount = 0;
+        const truncatedViewports = [];
+        for (let index = 0; index < widths.length; index++) {
+          const width = widths[index];
+          const page = pages[index] || { source: 'unavailable' };
+          const m = page.responsive;
+          const measured = page.source === 'live-dom' && m && Number.isFinite(m.viewportWidth) && Number.isFinite(m.scrollWidth);
+          results.push({
+            width,
+            source: page.source,
+            ...(measured ? {
+              measurements: {
+                viewportWidth: m.viewportWidth,
+                scrollWidth: m.scrollWidth,
+                documentHeight: m.documentHeight,
+                focusableCount: m.focusableCount,
+                prefersReducedMotion: m.reducedMotion,
+              },
+            } : { measurements: { status: 'unavailable', reason: 'Static HTML does not expose layout geometry or computed styles.' } }),
+          });
+          if (measured && m.horizontalOverflow) {
+            findingCount += 1 + (Array.isArray(m.offenders) ? m.offenders.length : 0);
+            findings.push({
+              severity: 'high', kind: 'horizontal-overflow', viewport: width,
+              element: 'document', evidence: 'document scroll width ' + m.scrollWidth + 'px exceeds viewport width ' + m.viewportWidth + 'px.',
+              impact: 'Page content may require horizontal scrolling or be clipped.',
+              suggestedCorrection: 'Find the wide child and constrain its intrinsic/minimum width or allow intentional local scrolling.',
+              confidence: 'measured',
+            });
+            for (const item of (Array.isArray(m.offenders) ? m.offenders : []).slice(0, 2)) {
+              findings.push({
+                severity: 'info', kind: 'offscreen-element-candidate', viewport: width, element: item.selector,
+                evidence: 'bounding box spans ' + item.left + 'px to ' + item.right + 'px at ' + m.viewportWidth + 'px viewport width.',
+                impact: 'This element extends outside the viewport bounds; it may be intentional or inside a local scroller and is not asserted as the document-overflow cause.',
+                suggestedCorrection: 'Inspect its overflow/scrolling ancestors and confirm whether the offscreen position is intentional.',
+                confidence: 'measured-bounds-not-causality',
+              });
+            }
+            if ((m.offenders || []).length > 2) truncatedViewports.push(width);
+          }
+        }
+        return textResult({
+          mode, url: target, widths, results, findings, findingCount,
+          findingsTruncated: findingCount > findings.length,
+          omittedFindingCount: Math.max(0, findingCount - findings.length),
+          truncatedViewports,
+          limitations: [
+            'DOM geometry detects horizontal overflow and off-screen bounds only; it does not judge visual hierarchy or screenshot similarity.',
+            'Off-screen elements are candidates, not proven causes; some may be deliberate or inside local scrollers.',
+            'Focusability count is a structural proxy, not keyboard-order or focus-visibility verification.',
+            'Reduced-motion preference is reported, but this audit does not prove every animation responds to it.',
+            'Static HTML fallback cannot measure layout; no defects are inferred from markup alone.',
+            'Screenshots are not captured by default; use mode:capture at a selected viewport for a saved artifact.',
+          ],
+        });
       }
       const rawRef = a.referenceUrl || toolFn_bad('referenceUrl (string) is required');
       const rawBuild = a.buildUrl || toolFn_bad('buildUrl (string) is required');
