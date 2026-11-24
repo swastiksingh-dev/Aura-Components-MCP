@@ -1,0 +1,201 @@
+{
+  "recorded_at": "2026-11-23T10:37:29.372Z",
+  "runtime": "v24.22.3",
+  "results": {
+    "tool_list_bytes": 17351,
+    "tool_count": 35,
+    "tools": [
+      {
+        "name": "aura_status",
+        "bytes": 275
+      },
+      {
+        "name": "aura_search_components",
+        "bytes": 939
+      },
+      {
+        "name": "aura_get_component",
+        "bytes": 396
+      },
+      {
+        "name": "aura_search_skills",
+        "bytes": 486
+      },
+      {
+        "name": "aura_get_skill",
+        "bytes": 321
+      },
+      {
+        "name": "aura_search_assets",
+        "bytes": 560
+      },
+      {
+        "name": "aura_search_design_systems",
+        "bytes": 495
+      },
+      {
+        "name": "aura_get_design_system",
+        "bytes": 344
+      },
+      {
+        "name": "aura_search_all",
+        "bytes": 691
+      },
+      {
+        "name": "aura_recommend",
+        "bytes": 520
+      },
+      {
+        "name": "aura_install_component",
+        "bytes": 313
+      },
+      {
+        "name": "aura_install_skill",
+        "bytes": 254
+      },
+      {
+        "name": "aura_use_design_system",
+        "bytes": 267
+      },
+      {
+        "name": "aura_bundle",
+        "bytes": 298
+      },
+      {
+        "name": "aura_scaffold_page",
+        "bytes": 575
+      },
+      {
+        "name": "aura_related",
+        "bytes": 339
+      },
+      {
+        "name": "aura_bulk_fetch",
+        "bytes": 404
+      },
+      {
+        "name": "aura_install_asset",
+        "bytes": 337
+      },
+      {
+        "name": "aura_categories",
+        "bytes": 203
+      },
+      {
+        "name": "aura_prompt",
+        "bytes": 689
+      },
+      {
+        "name": "aura_inspo_recommend",
+        "bytes": 572
+      },
+      {
+        "name": "aura_inspo_components",
+        "bytes": 466
+      },
+      {
+        "name": "aura_inspo_reference",
+        "bytes": 453
+      },
+      {
+        "name": "aura_inspo_system",
+        "bytes": 502
+      },
+      {
+        "name": "aura_inspo_compare",
+        "bytes": 422
+      },
+      {
+        "name": "aura_docs_plan",
+        "bytes": 427
+      },
+      {
+        "name": "aura_docs_check",
+        "bytes": 500
+      },
+      {
+        "name": "aura_icon",
+        "bytes": 595
+      },
+      {
+        "name": "aura_version",
+        "bytes": 402
+      },
+      {
+        "name": "aura_award_search",
+        "bytes": 955
+      },
+      {
+        "name": "aura_award_inspect",
+        "bytes": 550
+      },
+      {
+        "name": "aura_design_blueprint",
+        "bytes": 647
+      },
+      {
+        "name": "aura_visual_audit",
+        "bytes": 759
+      },
+      {
+        "name": "aura_motion_study",
+        "bytes": 700
+      },
+      {
+        "name": "aura_award_index",
+        "bytes": 659
+      }
+    ]
+  },
+  "representative": {
+    "search_small": {
+      "tool": "aura_search_components",
+      "bytes": 10405,
+      "chars": 10394,
+      "serialized_bytes": 8882
+    },
+    "search_normal": {
+      "tool": "aura_search_components",
+      "bytes": 32066,
+      "chars": 32030,
+      "serialized_bytes": 27085
+    },
+    "search_worst": {
+      "tool": "aura_search_components",
+      "bytes": 297116,
+      "chars": 296958,
+      "serialized_bytes": 284568
+    },
+    "detail": {
+      "tool": "aura_get_component",
+      "bytes": 15951,
+      "chars": 15942,
+      "serialized_bytes": 15539
+    },
+    "bundle": {
+      "tool": "aura_bundle",
+      "bytes": 95308,
+      "chars": 95260,
+      "serialized_bytes": 89927
+    },
+    "scaffold": {
+      "tool": "aura_scaffold_page",
+      "bytes": 65532,
+      "chars": 65495,
+      "serialized_bytes": 61286
+    },
+    "awards": {
+      "tool": "aura_award_search",
+      "bytes": 2987,
+      "chars": 2986,
+      "serialized_bytes": 2189
+    },
+    "browser_evidence": {
+      "tool": "aura_visual_audit",
+      "bytes": 415,
+      "chars": 415,
+      "serialized_bytes": 298
+    }
+  },
+  "tokenizer": "unknown; no target tokenizer measured"
+}

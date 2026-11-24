@@ -1,4 +1,4 @@
-// Full verification: all 35 tools live + error paths, against dist/server.js.
+// Full verification: current tools live + error paths, against dist/server.js.
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,15 +42,18 @@ check('status counts', st && st.counts.components_free >= 2495 && st.counts.skil
 check('status freshness 4 surfaces', st && st.freshness && ['components', 'skills', 'assets', 'design_systems'].every((k) => Object.prototype.hasOwnProperty.call(st.freshness, k)), JSON.stringify(st && st.freshness).slice(0, 200));
 const sc = J(await tool('aura_search_components', { query: 'pricing', limit: 3 }));
 check('search components free-only', sc && sc.items.length > 0 && sc.items.every((i) => i.premium === false), JSON.stringify(sc).slice(0, 200));
+const diffRefs = (sc.items || []).slice(0, 2).map((item) => item.id);
+const df = diffRefs.length === 2 ? J(await tool('aura_diff', { components: diffRefs })) : null;
+check('aura_diff compares free results with unknowns explicit', df && df.items.length === 2 && df.limitations.bundle_size === 'unknown', JSON.stringify(df).slice(0, 200));
 const compId = sc.items[0].id;
 const gc = J(await tool('aura_get_component', { id: compId }));
-check('get component code', gc && gc.item && typeof gc.item.code === 'string' && gc.item.code.length > 500, JSON.stringify(gc).slice(0, 200));
+check('get component metadata-first', gc && gc.metadata_only === true && !('code' in gc.item) && gc.item.code_info && gc.retrieval, JSON.stringify(gc).slice(0, 200));
 const gi = J(await tool('aura_install_component', { id: compId }));
 check('install component guide', gi && gi.install && gi.install.steps.length >= 2 && gi.install.files.length >= 1, JSON.stringify(gi).slice(0, 300));
 const sk = J(await tool('aura_search_skills', { query: 'gsap', limit: 3 }));
 check('search skills gsap', sk && sk.items.length > 0 && /gsap/i.test(sk.items[0].title), JSON.stringify(sk).slice(0, 200));
 const gs = J(await tool('aura_get_skill', { id: sk.items[0].id }));
-check('get skill content', gs && gs.item && typeof gs.item.content === 'string' && gs.item.content.length > 500, JSON.stringify(gs).slice(0, 200));
+check('get skill metadata + validation', gs && gs.metadata_only === true && gs.item.skill_validation && typeof gs.item.skill_validation.valid === 'boolean' && !('content' in gs.item), JSON.stringify(gs).slice(0, 200));
 const si = J(await tool('aura_install_skill', { id: sk.items[0].id }));
 check('install skill plan', si && si.install && si.install.files[0].path.includes('SKILL.md'), JSON.stringify(si).slice(0, 200));
 const sa = J(await tool('aura_search_assets', { query: 'wine', limit: 2 }));
@@ -58,7 +61,7 @@ check('search assets', sa && sa.items.length > 0 && sa.items[0].image_800w, JSON
 const sd = J(await tool('aura_search_design_systems', { query: 'infrastructure', limit: 2 }));
 check('search design systems', sd && sd.items.length > 0, JSON.stringify(sd).slice(0, 200));
 const gd = J(await tool('aura_get_design_system', { slug: sd.items[0].slug }));
-check('get design system', gd && gd.item && typeof gd.item.content === 'string', JSON.stringify(gd).slice(0, 200));
+check('get design system metadata-first', gd && gd.metadata_only === true && !('content' in gd.item) && gd.retrieval, JSON.stringify(gd).slice(0, 200));
 const ud = J(await tool('aura_use_design_system', { slug: sd.items[0].slug }));
 check('use design system tokens', ud && ud.tokens && ud.install && ud.install.files[0].path === 'DESIGN.md', JSON.stringify(ud).slice(0, 300));
 const all = J(await tool('aura_search_all', { query: 'hero', limit: 2 }));
@@ -68,7 +71,7 @@ check('recommend starter kit', rec && rec.starter_kit && rec.starter_kit.compone
 const slim = J(await tool('aura_search_components', { query: 'hero', limit: 2 }));
 check('slim lists omit code, keep excerpt+fetch', slim && slim.items.length > 0 && !('code' in slim.items[0]) && slim.items[0].code_excerpt && slim.items[0].full_fetch, JSON.stringify(slim.items[0]).slice(0, 200));
 const full = J(await tool('aura_search_components', { query: 'hero', limit: 1, slim: false }));
-check('slim:false restores full code', full && typeof full.items[0].code === 'string', JSON.stringify(full).slice(0, 200));
+check('slim:false is explicitly bounded', full && typeof full.items[0].code === 'string' && full.items[0].code.length <= 1212 && full.item_body_limit === 1200 && full.items[0].code_fetch, JSON.stringify(full).slice(0, 200));
 const non = J(await tool('aura_search_components', { query: 'xqztqvpzzzqqq', limit: 2 }));
 check('honest empty nonsense', non && non.total === 0 && non.no_match === true && Array.isArray(non.suggested_queries) && non.suggested_queries.length > 0 && non.isFallback !== true, JSON.stringify(non).slice(0, 200));
 const exm = J(await tool('aura_search_components', { query: 'xqztqvpzzzqqq', limit: 2, exact_match: true }));
@@ -104,8 +107,7 @@ const li = await call('tools/list', {});
   const schemasOk = li.result.tools.every((t) => t.inputSchema && typeof t.inputSchema === 'object');
   check('tools/list integrity (unique names, schemas, key tools)', names.length > 0 && uniq.size === names.length && schemasOk && names.includes('aura_status') && names.includes('aura_icon') && names.includes('aura_version'), names.length + ':' + names.slice(0, 3).join(','));
 }
-const ig = J(await tool('aura_inspo_recommend', { brief: 'dark SaaS pricing' }));
-check('inspo macro gate', ig && ig.need_macro === true && ig.inspo_call.tool === 'inspo.recommend', JSON.stringify(ig).slice(0, 200));
+check('removed Inspo mapper tools; aura_diff available', li.result.tools.some((t) => t.name === 'aura_diff') && !li.result.tools.some((t) => t.name.startsWith('aura_inspo_')), li.result.tools.map((t) => t.name).filter((n) => n.includes('inspo') || n === 'aura_diff').join(','));
 const dp = J(await tool('aura_docs_plan', { library: 'lenis', need: 'GSAP ticker integration' }));
 check('docs plan trusted', dp && dp.trusted === true && dp.context7.id === '/darkroomengineering/lenis', JSON.stringify(dp).slice(0, 200));
 const ic = J(await tool('aura_icon', { name: 'bolt' }));
@@ -130,8 +132,10 @@ if (bun8 && Array.isArray(bun8.items) && bun8.items.length >= 2) {
 const li2 = await call('tools/list', {});
 {
   const names = li2 && li2.result && Array.isArray(li2.result.tools) ? li2.result.tools.map((t) => t.name) : [];
-  check('tools/list exposes 35 unique tools', names.length === 35 && new Set(names).size === 35, names.length + ':' + names.slice(29).join(','));
+  check('tools/list exposes 35 unique tools', names.length === 35 && new Set(names).size === 35, names.length + ':' + names.slice(-4).join(','));
 }
+const motionPlan = J(await tool('aura_motion_plan', { trigger: 'Click Save', target: 'Save button' }));
+check('motion plan separates supplied action from unavailable observation', motionPlan && motionPlan.contract === 'aura-motion-plan/v1' && motionPlan.plan.trigger.status === 'user_stated' && motionPlan.evidence.status === 'unavailable', JSON.stringify(motionPlan).slice(0, 220));
 const awBad = await tool('aura_award_search', { mode: 'nope' });
 check('award_search bad mode -> -32602', awBad.error && awBad.error.code === -32602, JSON.stringify(awBad).slice(0, 160));
 const awIdx = J(await tool('aura_award_index', { action: 'status' }));

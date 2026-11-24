@@ -1,6 +1,13 @@
 # DIRECTION — where Aura-Components-MCP goes next
 
+> Current worktree note (2026-11-23): Sessions 1–5 are complete on `feat/aura-v2-foundation`; source exposes 35 tools. Package metadata is prepared as 2.0.0, but npm `latest` remains 1.7.3; this is not a published v2 release. See [`docs/v2/PROGRESS.md`](docs/v2/PROGRESS.md) for the current release-preparation record. The dated notes below preserve earlier roadmap context.
+
 > v1.7.3 hardens the award layer: 35 tools (29 catalogue + 6 award-intelligence), 275 hermetic + 45 live checks green. One guarded fetch path, plan-based index lifecycle, drift-guarded winners, artifact-honest capture — zero new npm dependencies. This is what comes after.
+
+> Session 2 working-tree update (2026-11-23): 31 tools; retired five external
+> Inspo mappers, added `aura_diff`, metadata-first detail/bundle/scaffold,
+> offset continuation and skill frontmatter validation. See
+> `docs/v2/TOOL_CONTRACTS.md` and `docs/v2/CONTEXT_BASELINE_2026-11-23.md`.
 ## North star
 
 The fastest free door from an idea to a shippable page: any agent, one install line, honest search, paste-ready answers. Everything below serves that sentence.
@@ -21,14 +28,14 @@ The fastest free door from an idea to a shippable page: any agent, one install l
 
 - [x] Star-history + share section in README
 - [ ] Registry submissions: PulseMCP, mcp.so, Smithery (tools-list metadata each)
-- [ ] `aura_scaffold_page` templates: 3 canned page recipes (portfolio / SaaS / pricing) agents can call with one goal sentence
-- [ ] Skill frontmatter lint: flag SKILL.md rows missing name:/description: at ingest, surface `loadable:false` so agents skip them
+- [ ] `aura_scaffold_page` templates: 3 canned page recipes (portfolio / SaaS / pricing) agents can call with one goal sentence (reviewed in Session 2; deferred because the current scaffold has no recipe branches and generic recipes would force style)
+- [x] Skill frontmatter validation: flag available SKILL.md snippets missing `name`/`description`; expose `loadable:false`, or `null` where unavailable
 
 ## Later (v2 — depth)
 
-- [ ] Local embed index for typo-tolerant search (no more ilike-only misses)
-- [ ] Preview screenshot cache per component (agents see before fetching code)
-- [ ] `aura_diff` (component A vs B: deps, weight, theme, fonts) for the compare step agents do by hand today
+- [x] Bounded one-edit lexical matching over already-fetched candidates; no extra calls or vector database (complete typo recall remains unknown)
+- [ ] Preview screenshot cache per component (designed/deferred; see Session 2 contract notes)
+- [x] `aura_diff` (2–4 component known-fact comparison; unavailable metrics stay unknown)
 
 ## Anti-goals
 

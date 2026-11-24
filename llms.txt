@@ -1,38 +1,49 @@
-# aura-components-mcp (v1.7.2 — 35 tools)
+# aura-components-mcp
 
-> Free-only MCP server (stdio, zero deps, no login) for the Aura (aura.build) public catalogue: 2,495 components, 192 skills, 30,688 assets, 725 design systems. Built by swastiksingh-dev (MIT). Catalogue content belongs to Aura (Meng To / DesignCode).
+> Current source branch: 35 MCP tools, package metadata prepared as 2.0.0 but not yet published. npm latest was verified as 1.7.3 on 2026-11-23. Zero npm runtime dependencies; Node >=22. The Aura catalogue and credited content belong to Aura and its authors. This is an independent project.
 
 - Repo: https://github.com/swastiksingh-dev/Aura-Components-MCP
 - npm: https://www.npmjs.com/package/aura-components-mcp
-- Setup: https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md (Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness)
-- Live demo videos: https://github.com/swastiksingh-dev/Aura-Components-MCP/tree/main/assets
+- Setup: https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md
+- Tool contract catalogue: `docs/v2/TOOL_CONTRACTS.md`
+- Design Contract: `docs/v2/DESIGN_CONTRACT.md`
+- Research evidence limits: `docs/v2/RESEARCH_LIBRARY.md`
+- Motion/responsive evidence limits: `docs/v2/MOTION_RESPONSIVE.md`
 - Official Aura MCP (account projects/publishing, OAuth): https://www.aura.build/mcp
 
 ## Start here
 
-- Call `aura_status` first (reachability + live free counts).
-- Then `aura_search_all` with the task words (all four surfaces, parallel, each with its own fallback pipeline — read `isFallback`/`no_match` per surface; mixed outcomes are normal).
-- Then `aura_prompt` with the goal (draft + 6 questions: theme, sections, system, assets, macrostructure, vibe — ask user, then final with goal + answers). Pass 2 leads with `inspo.recommend` + `aura_inspo_recommend`.
-- Then `aura_get_*` on 2-3 finalists, `aura_install_*` / `aura_use_design_system` on the winner.
-- One-turn builds: `aura_bundle` (bulk details), `aura_scaffold_page` (tokens + system + markup ordered, refuses Pro ids, carries `docs_stamp`), `aura_related` (more-like-this).
-- Fresh docs (pure helpers, agent calls Context7): `aura_docs_plan` (trusted: tailwind, gsap, lenis, iconify) + `aura_docs_check` (verdict + look-preserving fixes, excerpts under 20000 chars). Every install/scaffold carries `docs_stamp`. Conflict rule: fresh API wins, look stays identical.
-- Free icons (live): `aura_icon {name}` returns ready-to-paste SVG from Font Awesome Free or the HackerNoon pixel library with auto-fallback, plus font/CSS alternative. CC BY 4.0 — credit line on every hit.
-- Inspo bridge (pure mappers, no fetch — paste slim evidence): `aura_inspo_recommend` (strict macro gate: `need_macro:true` without a macrostructure), `aura_inspo_components`, `aura_inspo_reference`, `aura_inspo_system` (A/B/blend + `system_choice` question + contrast warning), `aura_inspo_compare` (2–4 slim sites → house style). Palette priority: brand hex > Inspo evidence > Aura tokens.
-- Self-updating: `aura_version` compares running vs npm-published (hourly cache) and tells the agent to prefer latest; every `aura_status` already carries the verdict.
-- Award intelligence (new in v1.7.2, needs no browser for core use): `aura_award_search` (sites/categories/elements/motion, local index + one polite live refresh; hits carry `try_for` cues, `full:true` enriches max 5), `aura_award_inspect` (design DNA, rule-based `ideas` labeled suggested, 2–3-site compare), `aura_design_blueprint` (goal + 2–5 refs → Markdown + v1 JSON with paste-ready `:root` tokens and executable `next_calls` built from real matched IDs), `aura_visual_audit` (browser capture / band maps / ref-vs-build compare; Chrome optional), `aura_motion_study` (live scans, bounded frame records, stored-study search), `aura_award_index` (persistent corpus in `~/.aura-mcp/awards`, bounded crawl + winners + watches). Workflow: search → inspect → blueprint → follow its next_calls → audit → motion. Hardening pass (unreleased): guarded URLs incl. IPv6 fix, bounded fetch/index lifecycles, drift-guarded winners, artifact-honest capture. See README + CHANGELOG.md.
-- Lists are slim by default (excerpts + `code_info`/`content_info` + `full_fetch`); pass `slim:false` or call `aura_get_*` with `chunk` for full bodies. Truncated installs carry a `concat` plan + `css_scope_how`.
-- Honest search: zero-overlap fallbacks return `total:0` + `no_match:true` + `refused_fallback` + `suggested_queries` (never masked popular rows). `exact_match:true` disables all fallbacks. `aura_trending` is removed — use per-surface `sort:'trending'` on the search tools instead.
-- `aura_recommend` auto-retries once: empty components with `no_match:true` retry via `suggested_queries[0]` (same theme/negative_theme/min_views/slim filters, `retried_from` set), then fill from editorial picks (`editorial_fallback:true`) — `starter_kit.components` never dead-ends.
+- Call `aura_status`, then `aura_search_all` or a surface-specific search.
+- Use `aura_plan_design` for a bounded Design Contract. It separates supplied facts, heuristics/recommendations, and open questions; it is not a design model or user study.
+- Discovery is metadata-first. Search defaults to five results; continue with `offset` / `next_offset`. Detail tools omit large source unless passed `chunk` or `full:true`.
+- `aura_bundle` and `aura_scaffold_page` return metadata/source pointers by default. Source retrieval is bounded and chunkable.
+- `aura_diff` compares 2–4 free components using known record facts. Unavailable bundle size, runtime performance, visual quality, and compatibility remain unknown.
+- `aura_research_search` and `aura_research_read` use a small curated local seed, not a live research index. Claims link to stored provenance and limitations; no paper/PDF content is returned.
+- `aura_motion_plan` returns planning recommendations, not observations unless a caller supplies an explicitly unverified summary.
+- `aura_docs_plan` and `aura_docs_check` are pure helpers; the agent performs any Context7 lookup.
+- `aura_icon` returns an SVG and required credit. `aura_version` checks npm; `aura_status` includes its verdict.
+- Award intelligence: `aura_award_search`, `aura_award_inspect`, `aura_design_blueprint`, `aura_visual_audit`, `aura_motion_study`, `aura_award_index`.
 
-## Rules
+## Tool surface
 
-- Free-only by default; Pro rows are refused with explanation, never leaked (`aura_install_component` errors; direct ID get/bundle refuse `-32602` fail-closed; `aura_scaffold_page` filters + reports `pro_filtered_out` / `dropped_refs`).
-- `total` counts upstream matches for paging; local drops surface as `min_views_filtered_out` / `negative_theme_filtered_out` / `deduped` / `dropped_refs`.
-- Asset license: all-rights-reserved per Aura Terms §4 (https://www.aura.build/terms) — preview ok, commercial reuse needs Aura permission.
-- Icon license: every `aura_icon` hit is CC BY 4.0 (Font Awesome Free and HackerNoon pixel SVGs alike) — always keep its `credit` line; never strip it.
-- Inspo evidence stays slim (slugs + palette + fonts + macro + mode + vibe, max 4 sites, no autopsy/screenshots); without a macrostructure, `aura_inspo_recommend` returns `need_macro:true` — run `inspo.recommend` first, never scaffold generic.
-- Honest search: nonsense queries return honest empty (`total: 0`, `no_match: true`, `refused_fallback` name + `suggested_queries`) — never masked fallbacks. Pass `exact_match: true` to skip all fallbacks.
-- `full: true` on `aura_get_component` / `aura_scaffold_page` returns full bodies (ignores `chunk`); lists stay slim by default.
-- `aura_scaffold_page` components accepts `["732","1364"]` or `[{id:"732"}]` / `[{slug:"..."}]`.
-- Categories overlap: per-category free counts sum past the free total (one component, many tags) — see `overlap_note`; they triage depth, not a partition.
-- `status.freshness` is max `updated_at` per surface; counts mirror upstream live — flat counts + fresh timestamp means metadata moved, not new components.
+The current source registry has 35 tools. See `docs/v2/tool-definitions.json` for exact schemas. The five `aura_inspo_*` mapping tools from the older v1 surface are retired; use catalogue search, award tools, `aura_diff`, or `aura_scaffold_page`.
+
+## Browser and evidence limits
+
+- Chrome/Chromium is optional; it is needed for browser screenshots, live DOM geometry, responsive matrices, and runtime motion inspection. Without it, browser-required operations report unavailability; ordinary catalogue/design/research use remains available.
+- ffmpeg is optional and only needed to encode `.webm` motion recordings. `record` is a bounded scroll tour, not named click/hover/focus capture.
+- Responsive checks measure up to seven viewport widths and report candidate bounds. They are not a full accessibility audit; late content can shift after the short settle.
+- Static HTML structure is an estimate without measured offsets. Reference comparison is not pixel/perceptual parity.
+- REA is a separate optional tool and is neither installed nor required by Aura.
+
+## Safety, licensing, and retrieval
+
+- Component and asset access is fail-closed: only records with `premium:false` are returned by protected paths.
+- No-match and upstream failure are distinct. Do not treat unavailable metrics as negative facts.
+- Chunk responses expose length/truncation information. Fetch subsequent chunks with the same detail tool and requested `chunk`.
+- Asset licensing: Aura Terms §4 describe assets as all-rights-reserved; check source terms and obtain permission before commercial reuse. Free catalogue access is not a commercial license.
+- Icon attribution returned by `aura_icon` must be retained.
+- Research is local and curated; metadata date does not imply ongoing correction/retraction monitoring. Closed-access sources are metadata-only.
+- Search is upstream-first. One-edit typo matching only ranks fetched candidates; it does not guarantee typo recall and makes no additional request.
+- Preview screenshot caching is not implemented.
+- Award indexing is explicit, bounded, polite, and does not run at startup. URL guards block private/loopback/metadata destinations by default; use `allowLocal` only for trusted local development.

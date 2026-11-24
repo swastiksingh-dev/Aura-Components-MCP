@@ -14,7 +14,7 @@ const tmpDir = () => req("node:fs").mkdtempSync(req("node:path").join(req("node:
 // (test doubles / detached contexts) that the guard must skip.
 function pageSocket({ href = null, sent = [] } = {}) {
   return class {
-    constructor() { this.sent = sent; setTimeout(() => this.onopen && this.onopen(), 0); }
+    constructor() { this.sent = sent; this.width = 1440; setTimeout(() => this.onopen && this.onopen(), 0); }
     send(s) {
       const m = JSON.parse(s);
       sent.push(m.method);
@@ -22,8 +22,14 @@ function pageSocket({ href = null, sent = [] } = {}) {
       if (m.method === "Page.navigate") {
         reply({ loaderId: "L1" });
         setTimeout(() => this.onmessage && this.onmessage({ data: JSON.stringify({ method: "Page.loadEventFired", params: {} }) }), 5);
+      } else if (m.method === "Emulation.setDeviceMetricsOverride") {
+        this.width = m.params.width;
+        reply({});
       } else if (m.method === "Runtime.evaluate") {
         if (m.params && m.params.expression === "location.href" && href !== null) reply({ result: { type: "string", value: href } });
+        else if (m.params && m.params.expression.includes("horizontalOverflow")) {
+          reply({ result: { type: "object", value: { viewportWidth: this.width, scrollWidth: this.width + (this.width === 320 ? 24 : 0), documentHeight: 900, horizontalOverflow: this.width === 320, offenders: [], focusableCount: 2, reducedMotion: true } } });
+        }
         else reply({ result: { type: "object", value: { title: "T", totalHeight: 900, candidates: [] } } });
       } else if (m.method === "Page.captureScreenshot") reply({ data: "iVBORw0KGgo=" });
       else reply({});
@@ -55,6 +61,18 @@ async function inSandboxTmp(fn) {
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 }
+
+test("responsive matrix reuses one browser page and returns width-specific live metrics", async () => {
+  const sent = [];
+  const report = await mkAdapter("https://example.com", sent).responsiveAudit("https://example.com", { viewports: [320, 768] });
+  assert.equal(report.source, "live-dom");
+  assert.deepEqual(report.widths, [320, 768]);
+  assert.equal(report.results[0].responsive.horizontalOverflow, true);
+  assert.equal(report.results[1].responsive.horizontalOverflow, false);
+  assert.equal(sent.filter((method) => method === "Page.navigate").length, 1);
+  assert.equal(sent.filter((method) => method === "Emulation.setDeviceMetricsOverride").length, 3, "initial size plus two matrix widths");
+  await assert.rejects(() => mkAdapter(null).responsiveAudit("https://example.com", { viewports: [319] }), (e) => e.code === "BAD_ARGS");
+});
 
 test("nav guard: capture fails on a blocked final URL with blockedUrl attached", async () => {
   const err = await mkAdapter("http://192.168.1.1/router").capture("https://example.com", { settleMs: 5, saveDir: tmpDir() }).then(() => null, (e) => e);

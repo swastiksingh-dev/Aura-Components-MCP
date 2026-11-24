@@ -1,7 +1,7 @@
 // catalog.test.mjs — hermetic tests for query building, shaping, caching.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso, detectThemeHint, scoreRows, chunkText, matchOverlap } from "../src/catalog.mjs";
+import { buildSearchParams, buildUrl, shapeRow, createCatalog, pageUrl, queryTokens, trendingIso, detectThemeHint, scoreRows, chunkText, matchOverlap, tokenNear } from "../src/catalog.mjs";
 import { installGuide, tokenHints, detectNeeds, buildPrompt, combineScaffold, facets } from "../src/guide.mjs";
 
 const cfg = { supabaseUrl: "https://x.supabase.co", anonKey: "k", timeoutMs: 1000, retries: 0, cacheTtlMs: 60000, defaultLimit: 10, maxLimit: 25, codeChars: 100, contentChars: 100, freeOnlyDefault: false, userAgent: "t" };
@@ -20,6 +20,13 @@ test("pageUrl derivations per kind", () => {
   assert.equal(pageUrl("components", { slug: "ABC12" }), "https://www.aura.build/component/ABC12");
   assert.ok(pageUrl("skills", { id: "u" }).includes("/skills/u"));
   assert.ok(pageUrl("design_systems", { slug: "s" }).includes("/design-systems/s"));
+});
+
+test("pageUrl never publishes /component/undefined for slug-less rows", () => {
+  const u = pageUrl("components", { id: 7, title: "Glassy Hero" });
+  assert.equal(u, "https://www.aura.build/components?q=Glassy%20Hero");
+  assert.ok(!u.includes("undefined"));
+  assert.equal(pageUrl("components", { id: 7, title: "Glassy Hero", slug: "   " }), u);
 });
 
 test("shapeRow truncates code/content and adds page_url", () => {
@@ -117,6 +124,39 @@ test("total keeps upstream meaning; local drops are disclosed, not silent", asyn
   assert.equal(r.total, 2, "total still counts upstream matches for paging");
   assert.equal(r.items.length, 1);
   assert.equal(r.min_views_filtered_out, 1);
+  assert.equal(r.truncated, false);
+  assert.equal(r.next_offset, null);
+});
+
+test("full:true source retrieval remains capped and exposes chunk continuation", async () => {
+  const source = "x".repeat(50);
+  const stub = { getJson: async () => ({ rows: [{ id: 7, title: "Long", slug: "long", premium: false, code: source, created_by: null }], total: 1 }) };
+  const cat = createCatalog({ fetcher: stub, config: { ...cfg, codeChars: 10 } });
+  const first = await cat.getItem("components", 7, { full: true });
+  assert.equal(first.item.code, "x".repeat(10) + "…[truncated]");
+  assert.deepEqual(first.item.code_info, { full_length: 50, chunks: 5, chunk: 0, truncated: true });
+  const second = await cat.getItem("components", 7, { chunk: 1 });
+  assert.equal(second.item.code, "x".repeat(10) + "…[truncated]");
+  assert.equal(second.item.code_info.chunk, 1);
+});
+
+test("search response exposes a bounded offset continuation", async () => {
+  const stub = { getJson: async () => ({ rows: [{ id: 1, title: "Hero", slug: "hero", code: "x", created_by: null }], total: 20 }) };
+  const cat = createCatalog({ fetcher: stub, config: cfg });
+  const r = await cat.searchCatalog("components", { query: "hero", limit: 5, offset: 5 });
+  assert.equal(r.truncated, true);
+  assert.equal(r.next_offset, 10);
+  assert.equal(r.offset, 5);
+});
+
+test("slim:false search remains explicit but caps each inline source body with a fetch pointer", async () => {
+  const stub = { getJson: async () => ({ rows: [{ id: 1, title: "Hero", slug: "hero", code: "x".repeat(9000), created_by: null }], total: 1 }) };
+  const cat = createCatalog({ fetcher: stub, config: { ...cfg, codeChars: 10_000 } });
+  const r = await cat.searchCatalog("components", { query: "hero", limit: 1, slim: false });
+  assert.equal(r.item_body_limit, 1200);
+  assert.equal(r.items[0].code.length, 1200 + "…[truncated]".length);
+  assert.equal(r.items[0].code_info.truncated, true);
+  assert.equal(r.items[0].code_fetch.tool, "aura_get_component");
 });
 
 test("bundleItems honors 8 refs in order; duplicates collapse deliberately", async () => {  const stub = { getJson: async (url) => {
@@ -469,13 +509,13 @@ test("DS OR fallback includes content+preview_html", async () => {
   assert.ok(r.items.length > 0);
 });
 
-test("getItem full returns whole code chunks:1", async () => {
+test("getItem full returns first bounded code chunk with continuation metadata", async () => {
   const stub = { getJson: async () => ({ rows: [{ id: 9, title: "t", slug: "S", code: "x".repeat(300), background: "fff", premium: false, created_by: null }], total: 1 }) };
   const { facets: f } = await import("../src/guide.mjs");
   const cat = createCatalog({ fetcher: stub, config: cfg, facetsFn: f });
   const g = await cat.getItem("components", 9, { full: true });
-  assert.equal(g.item.code.length, 300);
-  assert.deepEqual([g.item.code_info.chunks, g.item.code_info.chunk, g.item.code_info.truncated], [1, 0, false]);
+  assert.equal(g.item.code, "x".repeat(100) + "…[truncated]");
+  assert.deepEqual([g.item.code_info.chunks, g.item.code_info.chunk, g.item.code_info.truncated], [3, 0, true]);
   assert.equal(g.item.code_info.full_length, 300);
 });
 
@@ -517,6 +557,12 @@ test("matchOverlap unit: title-only for components, wide net for skills", () => 
   assert.equal(matchOverlap("design_systems", ["tokens"], { title: "Generic", description: "x", tokens_snippet: "design tokens here" }), 1);
 });
 
+test("typo fallback ranks one-edit title matches without extra query tokens", () => {
+  assert.equal(tokenNear("pricng", "pricing"), true);
+  assert.equal(matchOverlap("components", ["pricng"], { title: "Pricing Table" }), 1);
+  assert.equal(matchOverlap("components", ["pricng"], { title: "Portfolio Hero" }), 0);
+});
+
 test("getStatus freshness keys present (MAX updated_at per table)", async () => {
   const stub = { getJson: async (url) => {
     if (url.includes("select=updated_at")) return { rows: [{ updated_at: "2026-07-27T00:00:00.000Z" }], total: 1 };
@@ -530,6 +576,9 @@ test("getStatus freshness keys present (MAX updated_at per table)", async () => 
   assert.equal(s.freshness.assets, "2026-07-27T00:00:00.000Z");
   assert.equal(s.freshness.design_systems, "2026-07-27T00:00:00.000Z");
   assert.ok("components_free" in s.counts);
+  assert.ok("components_pro" in s.counts);
+  assert.ok("assets" in s.counts && "assets_free" in s.counts && "assets_pro" in s.counts);
+  assert.match(s.counts_note, /assets_free/);
 });
 
 test("malformed rows are disclosed via malformed_dropped, never shaped into junk", async () => {

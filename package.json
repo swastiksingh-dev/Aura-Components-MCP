@@ -1,7 +1,7 @@
 {
   "name": "aura-components-mcp",
-  "version": "1.7.3",
-  "description": "Free-only MCP server for the Aura (aura.build) public catalogue: 2,495 components, 192 skills, 30,688 assets, 725 design systems. No login. Built by swastiksingh-dev.",
+  "version": "2.0.0",
+  "description": "Zero-dependency stdio MCP server for design planning, Aura's free component catalogue, motion plans, and browser-checked responsive evidence.",
   "type": "module",
   "license": "MIT",
   "author": "swastiksingh-dev",
@@ -12,6 +12,9 @@
     "dist",
     "README.md",
     "SETUP.md",
+    "docs/v2",
+    "docs/architecture",
+    "assets/banner.png",
     "LICENSE",
     "CHANGELOG.md",
     "THIRD_PARTY_NOTICES.md"
@@ -20,15 +23,19 @@
     "type": "git",
     "url": "git+https://github.com/swastiksingh-dev/Aura-Components-MCP.git"
   },
-  "homepage": "https://github.com/swastiksingh-dev/aura-components-mcp",
+  "homepage": "https://github.com/swastiksingh-dev/Aura-Components-MCP",
   "bugs": {
     "url": "https://github.com/swastiksingh-dev/Aura-Components-MCP/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "start": "node ./dist/server.js",
     "test": "node --test ./test/*.test.mjs",
-    "verify": "node ./scripts/verify.mjs"
+    "verify": "node ./scripts/verify.mjs",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=22"
@@ -49,6 +56,10 @@
     "cursor",
     "opencode",
     "design-system",
-    "landing-page"
+    "design",
+    "ui",
+    "ui-components",
+    "landing-page",
+    "cli"
   ]
 }

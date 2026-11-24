@@ -20,7 +20,7 @@ export const Errors = {
 };
 
 export function textResult(obj) {
-  return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify(obj) }] };
 }
 
 export function createSession(send, { tools, handlers }) {

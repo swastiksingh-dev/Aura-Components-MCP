@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agents": {
+    "reviewer": {
+      "description": "Independent read-only reviewer for Aura v2 diffs",
+      "mode": "subagent",
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "ask" }
+      ]
+    },
+    "architect": {
+      "description": "Read-only architecture investigator",
+      "mode": "subagent",
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "ask" }
+      ]
+    }
+  }
+}
+
+// Review this file against the OpenCode version installed on the machine before copying it.
+// Model IDs are intentionally omitted: choose from the models actually available to your account.
