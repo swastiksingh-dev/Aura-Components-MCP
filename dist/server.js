@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v2.0.0 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v2.0.1 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -914,7 +914,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "2.0.0" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "2.0.1" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
