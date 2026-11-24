@@ -1,7 +1,7 @@
 {
   "name": "aura-components-mcp",
-  "version": "1.7.3",
-  "description": "Free-only MCP server for the Aura (aura.build) public catalogue: 2,495 components, 192 skills, 30,688 assets, 725 design systems. No login. Built by swastiksingh-dev.",
+  "version": "2.0.0",
+  "description": "Zero-dependency stdio MCP server for Aura's public catalogue, design planning, research, motion, and responsive evidence.",
   "type": "module",
   "license": "MIT",
   "author": "swastiksingh-dev",
@@ -12,6 +12,9 @@
     "dist",
     "README.md",
     "SETUP.md",
+    "docs/v2",
+    "docs/architecture",
+    "assets/brand",
     "LICENSE",
     "CHANGELOG.md",
     "THIRD_PARTY_NOTICES.md"

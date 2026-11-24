@@ -1,4 +1,4 @@
-// Full verification: all 31 current tools live + error paths, against dist/server.js.
+// Full verification: current tools live + error paths, against dist/server.js.
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -1,6 +1,6 @@
 # Aura Components MCP v2.0 — Progress continuation
 
-The original `.aura-components version 2.0/03_ENGINEERING_PLAYBOOK/PROGRESS.md` is deleted in the supplied worktree. Its committed history is preserved at `HEAD` and has not been restored or edited. This continuation records Session 3 without changing that deletion.
+The original `.aura-components version 2.0/03_ENGINEERING_PLAYBOOK/PROGRESS.md` is deleted in the supplied worktree. Its committed history is preserved at `HEAD` and has not been restored or edited. This continuation records Sessions 3–5 without changing that deletion.
 
 ## Session history and checklist
 
@@ -8,7 +8,7 @@ The original `.aura-components version 2.0/03_ENGINEERING_PLAYBOOK/PROGRESS.md` 
 - [x] Session 2 — MCP intelligence & context efficiency (user-provided baseline: commit `8cdf3e8`; `npm test` 286/0, `npm run verify` 46/0, `npm pack --dry-run` succeeded; no rewrite).
 - [x] Session 3 — Design Intelligence & Research.
 - [x] Session 4 — Motion, responsive design & verification.
-- [ ] Session 5 — Documentation, brand & release readiness. **Not started.**
+- [x] Session 5 — Documentation, brand & release readiness. **Docs/brand work complete; publication remains no-go pending maintainer approval and a real video recording.**
 
 ## Session 3 — 2026-11-23
 
@@ -86,3 +86,103 @@ The original `.aura-components version 2.0/03_ENGINEERING_PLAYBOOK/PROGRESS.md` 
 ### Exact next step
 
 Await a separate user instruction to start Session 5. Do not begin it in this continuation.
+
+## Session 5 — Documentation, brand & release readiness — 2026-11-23
+
+### Starting state and scope
+
+- Branch: `feat/aura-v2-foundation`; starting HEAD: `51f501bc11b840ad4046ae1fd1e1fae297af9e14` (`feat(v2): add motion planning and responsive audits`).
+- Starting worktree included the pre-existing deletions under `.aura-components version 2.0/` and a pre-existing `.gitignore` modification. The expected plan folder was absent; Session 5 instructions and prior progress were read from `HEAD` and `docs/v2/PROGRESS.md`. No deleted plan files were restored.
+- The ignored `.aura-componentsversion2.0/` working copy supplied the session/product/brand specs. The referenced `RELEASE_CHECKLIST.md` was absent both from that working copy and `HEAD`.
+- Node `v24.22.3`, npm `11.19.1`; package metadata is `1.7.3`, Node engine `>=22`, no runtime dependencies. `npm view aura-components-mcp version dist-tags --json` returned latest `1.7.3`. The source registry and built MCP handshake expose 35 unique tools.
+- No catalogue totals are frozen into the README. Tool counts and package identity are stable source/package facts; the v2 working tree is not represented as a published v2 release.
+
+### Completed
+
+- Rebuilt `README.md` with current package/release status, verified install command, concise five-step workflow, all 35 actual tool names grouped by task, licensing and free-only boundaries, browser requirements, responsive/motion/research/REA limitations, and development commands.
+- Rebuilt `SETUP.md` with Node 22+, pinned current npm install, source install, stdio config templates, optional Chrome/ffmpeg boundaries, and troubleshooting. Client configuration paths are explicitly examples to re-check against current client releases.
+- Updated `package.json` description and included `docs/v2` and `assets/brand` in the npm package allowlist so documentation and the README banner are present in the package. Updated `llms.txt`, `DIRECTION.md`, and the unreleased changelog note to distinguish working-tree capabilities from the published 1.7.3 package.
+- Added an original editable 1600×900 SVG banner, a locally rendered PNG and reproducible PowerShell renderer under `assets/brand/`. The artwork uses system fonts and original vector/UI shapes, no external image assets.
+- Added `docs/v2/LAUNCH_HANDOFF.md`: draft storyboard, narration/caption timing, held announcement copy, and release-note outline. No MP4, synchronized captions, screenshot/browser demo, or release announcement was fabricated.
+- Added `test/docs-release.test.mjs` to compare README tool names and the checked-in schema snapshot against `TOOL_DEFS`, assert package/runtime setup facts, and check banner assets. Corrected the stale tool-count comment in `scripts/verify.mjs`.
+- Inspected `LICENSE`, `THIRD_PARTY_NOTICES.md`, and referenced source boundaries. No license terms were added or inferred; Aura assets remain subject to Aura's terms and require permission where applicable. No dependencies or Sessions 1–4 behavior were changed.
+
+### Verification evidence
+
+| Command/check | Observed result |
+| --- | --- |
+| `npm run build` | exit 0; `built dist/server.js (349298 chars) + dist/cli.cjs`; `dist/server.js` is **349,646 bytes**. |
+| `npm test` | **307 pass, 0 fail**, 0 cancelled, 0 skipped; includes three new documentation consistency tests. |
+| `npm run verify` | **47 pass, 0 fail** in 15,039 ms. Live network checks ran (catalogue, icon and npm-version paths); results depend on current upstream availability. |
+| `npm pack --dry-run --json` | exit 0; package `aura-components-mcp@1.7.3`, **26 files**, `bundled: []`, package size 220,764 bytes / unpacked 600,993 bytes. |
+| Clean tarball install + MCP handshake | First ad-hoc harness attempt timed out (harness issue). Corrected run installed the locally packed tarball in a clean temp prefix and `dist/cli.cjs` returned MCP `initialize` with server version `1.7.3`; pass. |
+| `git diff --check` | Passed after final progress update; exit 0. Git emitted only Windows LF/CRLF checkout warnings. |
+| Banner review | PNG opened and visually checked at 1600×900; title and capability text are legible at full resolution. No automated crop/50%-scale test. |
+| Live browser/video | Not run. No Chrome/Chromium executable was available; no real client/browser recording or video render was produced. |
+
+### Remaining risks / release gate
+
+- **Publication status: NO-GO.** Package version remains 1.7.3 and no v2 release exists. Do not publish, tag, or announce this as released without maintainer approval and a deliberate version/release decision.
+- No real browser run was available. Responsive/motion claims describe source contracts and their explicit evidence limits; a production launch film must show an actual client/browser run and be reviewed with captions/safe areas.
+- Setup examples for external MCP clients were checked against the project's stdio shape, not tested end-to-end in each current client version. Treat client-specific file locations/commands as examples and verify them for the chosen client.
+- Existing research, browser, URL-guard, and third-party limitations remain as stated in `docs/v2/RESEARCH_LIBRARY.md`, `docs/v2/MOTION_RESPONSIVE.md`, and `THIRD_PARTY_NOTICES.md`.
+- No independent fresh-reviewer report was obtained during this session.
+
+### Modified / added files
+
+Modified: `CHANGELOG.md`, `DIRECTION.md`, `README.md`, `SETUP.md`, `llms.txt`, `package.json`, `scripts/verify.mjs`, `docs/v2/PROGRESS.md`.
+
+Added: `assets/brand/aura-components-banner.svg`, `assets/brand/aura-components-banner.png`, `assets/brand/render-banner.ps1`, `docs/v2/LAUNCH_HANDOFF.md`, `test/docs-release.test.mjs`.
+
+Generated by `npm run build`: `dist/server.js` and `dist/cli.cjs` were regenerated; content remained deterministic. `dist/` was not hand-edited.
+
+### Exact next step
+
+Maintainer reviews the unstaged Session 5 diff and decides whether/when to assign a release version and perform a real client/browser demo recording. Until then, keep the branch unpublished; do not tag, publish, push, or commit as part of this session.
+
+## Session 5 follow-up — local release-candidate preparation
+
+### Scope and current state
+
+- Follow-up requested after the Session 5 record. The committed start/session instructions were read with `git show` because their worktree copies are pre-existing deletions; those deletions were not restored.
+- `package.json` is now locally set to `2.0.0`; npm `latest` remains the previously checked `1.7.3`. This is a local candidate, not a published release. No tag, commit, push, or publish was made.
+- Removed the five root `.opencode/agents/` paths from Git's index as requested while preserving those local files; made `.tmp/` and `tmp/` ignore rules explicit. The separate pre-existing deletions under `.aura-components version 2.0/` remain untouched.
+- Added, then removed at the maintainer's request, `.tmp/launch-video/index.html`: an editable 30-second typographic HTML preview with timed copy, pause/restart controls, and reduced-motion handling. It was ignored by Git and was never an MP4, product recording, audio mix, or synchronized subtitle export.
+- Updated [`LAUNCH_HANDOFF.md`](./LAUNCH_HANDOFF.md) to distinguish this HTML draft from a real-product demo and from an exported video.
+
+### Verification
+
+Observed on 2026-11-23 in this worktree; only commands actually run are listed.
+
+| Check | Command | Observed result |
+| --- | --- | --- |
+| Build | `npm run build` | exit 0; `dist/server.js` 349,298 chars; `dist/cli.cjs` written; output not hand-edited |
+| Tests | `npm test` | **307 pass, 0 fail, 0 cancelled, 0 skipped** (4.5 s) |
+| Live verify | `npm run verify` | **47 pass, 0 fail** with live network; reports `aura-components-mcp v2.0.0 ... 35 tools on stdio` |
+| Package contents | `npm pack --dry-run --json`, then `npm pack` | `aura-components-mcp@2.0.0`; 26 packed files with the banner present, then **24 files / 149,893 bytes packed / 502,091 bytes unpacked** after the banner was removed; `bundled: []` |
+| Clean install | `npm install ./aura-components-mcp-2.0.0.tgz` in an empty temp prefix | 1 package added, no peer/runtime dependencies |
+| MCP handshake | stdio `initialize` + `tools/list` against the installed `dist/cli.cjs` | `serverInfo` `aura-components-mcp` 2.0.0; protocol `2024-11-05`; **35 tools**; `aura_plan_design`, `aura_diff`, `aura_status` present; banner goes to stderr only |
+| HTML draft preview | static HTTP server on `127.0.0.1:4173` + Playwright | page loaded and played; scene 4 visible at 16 s; progress bar and Pause/Restart present; only console error was a missing favicon (verified before removal) |
+| Launch film render | `npx hyperframes check`, then `npx hyperframes render --skill=product-launch-video --quality high` | `renders/video.mp4`: 1920×1080, 30 fps, 33.6 s, H.264 + AAC 48 kHz stereo, 3.30 MB (3,297,133 bytes); rendered and verified, then deleted at the maintainer's request |
+| Film QA | `npx hyperframes check`, `snapshot --at ...`, ffprobe | 0 lint/runtime/layout/motion errors; 20/20 text checks pass WCAG AA; craft warnings cleared; 11 stills inspected before render |
+
+Local-only artefacts created during this follow-up were deleted on 2026-11-24 at
+the maintainer's request; none were ever tracked by Git or included in the npm
+package:
+
+- `.tmp/launch-film/` — HyperFrames project, `SPEC.md`, six-shot composition, local Kokoro narration (`am_michael`), `renders/video.mp4`, `renders/poster.png`, and check/snapshot artefacts.
+- `.tmp/launch-video/index.html` — earlier self-contained HTML draft.
+
+The deleted film and draft were typographic pieces built from verified
+capabilities, not recordings of the MCP client, live tool calls, or product UI.
+The maintainer will create the final launch film separately. The previous banner
+was archived to the ignored `.tmp/old-banner/` before `assets/brand/` was
+removed, pending a replacement banner.
+
+### Release gate
+
+- **Publication status: NO-GO for publishing, GO as a local release candidate.** Version 2.0.0 passes build, tests, live verification, packaging, clean install, and MCP handshake locally, but it is not on npm or tagged, and the repository has not been pushed.
+- No setup command for unpublished npm `2.0.0` may be presented as currently installable without its adjacent publication caveat.
+- A real client/browser demo recording, an independent fresh-reviewer report, and maintainer release approval remain outstanding.
+- The brand banner files were removed pending replacement. `assets/brand/` no longer exists, `package.json` still allowlists the path, and the README no longer references a banner. Restore the directory and the README image line with the new artwork; `render-banner.ps1` was already absent before this removal.
+- The deleted original progress/session documents remain deleted in the worktree; this continuation is the active record.

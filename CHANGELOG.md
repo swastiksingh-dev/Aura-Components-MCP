@@ -2,6 +2,25 @@
 
 All notable changes to `aura-components-mcp`.
 
+## [Unreleased] — v2.0.0 release candidate
+
+Version 2.0.0 is prepared in this worktree but has not been published or tagged.
+See `docs/v2/PROGRESS.md` for the local release-preparation verification record.
+
+### Added
+
+- Design Contract planning, curated provenance-linked research cards, motion
+  planning and evidence, and bounded responsive viewport audits.
+- Original v2 banner/logo artwork, package-facing v2 documentation, and a
+  self-contained HTML launch-film draft kept outside Git tracking.
+
+### Changed
+
+- Removed the five `aura_inspo_*` mapper tools; use catalogue/reference search,
+  `aura_diff`, and `aura_scaffold_page` instead.
+- The v2 npm package includes `docs/v2`, architecture documentation, and brand
+  artwork. It remains zero-runtime-dependency and requires Node >=22.
+
 ## [Unreleased] — v2 foundation (Session 1)
 
 No public tool added or removed; no dependency added. This pass establishes the
@@ -31,6 +50,16 @@ v2 engineering baseline and fixes confirmed defects.
 - Builds are now byte-identical from LF and CRLF checkouts, and
   `test/build.test.mjs` fails if `dist/server.js` is stale.
 - `SETUP.md` and `llms.txt` version strings aligned to v1.7.3.
+
+### Documentation and packaging (unreleased)
+
+- Reconciled the README and setup guide with the current 35-tool working tree,
+  Node >=22 package engine, optional-browser boundaries, licensing, and evidence
+  limitations. Current catalogue totals are queried at runtime rather than
+  copied into marketing text.
+- Added the v2 contract documentation and original brand source/preview to the
+  npm package file allowlist. Package version remains 1.7.3; this is not a
+  published v2 release.
 
 ## [1.7.3] — 2026-10-18
 

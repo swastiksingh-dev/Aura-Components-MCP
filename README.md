@@ -1,124 +1,52 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/banner.png" alt="Aura Components MCP — every free thing on aura.build, one stdio call away. 2,495 components · 192 skills · 30,688 assets · 725 design systems · 31 tools · zero dependencies.">
-</p>
+# Aura Components MCP
 
-<p align="center"><sub>FREE MCP SERVER · STDIO · ZERO DEPS · MIT</sub></p>
+**Design planning and free-catalogue discovery for MCP clients.** Turn a brief into a clearly attributed design plan, find relevant Aura components and systems, and inspect motion or responsive evidence when a browser is available.
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/v/aura-components-mcp" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/aura-components-mcp"><img src="https://img.shields.io/npm/dm/aura-components-mcp" alt="npm downloads"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license: MIT"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen" alt="node >= 22"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/dist/server.js"><img src="https://img.shields.io/badge/MCP-stdio-blue" alt="MCP stdio"></a>
-  <a href="#the-31-tools"><img src="https://img.shields.io/badge/tools-31-blueviolet" alt="31 tools"></a>
-  <a href="#develop"><img src="https://img.shields.io/badge/live_checks-45-brightgreen" alt="45 live checks"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/actions"><img src="https://github.com/swastiksingh-dev/Aura-Components-MCP/actions/workflows/verify.yml/badge.svg" alt="verify CI"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP"><img src="https://img.shields.io/github/stars/swastiksingh-dev/Aura-Components-MCP?style=social" alt="GitHub stars"></a>
-</p>
+> Release candidate prepared as **2.0.0** in this branch; this is **not a published v2 release**. npm `latest` was verified as 1.7.3 on 2026-11-23. The v2 package is available from this source checkout or a local tarball; npm install commands below work after 2.0.0 is published. Catalogue counts change upstream and are intentionally not repeated here; query `aura_status` for current counts.
 
-<p align="center"><i>Every free thing on Aura, one call away — no account, no key, no browser.</i></p>
+[![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
 
-<p align="center">
-  <a href="#install"><b>Install</b></a> ·
-  <a href="#the-31-tools"><b>Tools</b></a> ·
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md"><b>Client setup</b></a> ·
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/CHANGELOG.md"><b>Changelog</b></a> ·
-  <a href="#credits"><b>Credits</b></a>
-</p>
+## What it does
 
-<p align="center">
-  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ WATCH THE 12-SECOND TOUR (MP4) ▲</b></a>
-</p>  
+Aura Components MCP is a zero-runtime-dependency Node.js server using MCP over stdio. It exposes Aura's public catalogue (components, skills, assets, design systems) alongside local design and motion planning, curated research cards, Awwwards reference intelligence, and optional browser-based audits. It is an independent project and is not affiliated with Aura.
 
-> I got tired of opening twenty Aura tabs every time I started a landing page. So I built the MCP server I wanted: every free thing on aura.build, one stdio call away, no account, no key, no browser.
+The current working tree exposes **35 tools**. The exact names and schemas are generated from source in [`docs/v2/tool-definitions.json`](docs/v2/tool-definitions.json); tool behavior and limits are documented in [`docs/v2/TOOL_CONTRACTS.md`](docs/v2/TOOL_CONTRACTS.md).
 
-<p align="center">
-  <b>2,495</b> free components · <b>192</b> skills · <b>30,688</b> assets · <b>725</b> design systems<br>
-  <b>35</b> tools · <b>0</b> dependencies · <b>275</b> hermetic tests + <b>45</b> live checks green · version-checked hourly against npm
-</p>
+## Quick start
 
----
-## Contents
+Requirements: Node.js 22 or newer. For ordinary catalogue and design planning, no browser or account is needed. The client machine needs network access for live catalogue, icon, version, and Awwwards lookups.
 
+### Run from npm
 
+```sh
+npx -y aura-components-mcp@2.0.0
+```
 
+Or install the executable globally:
 
+```sh
+npm install --global aura-components-mcp@2.0.0
+aura-components-mcp
+```
 
+For MCP clients, configure the command and arguments for their stdio server setting. For example:
 
-- [Why not the official MCP](#why-i-built-this-instead-of-using-the-official-mcp)
-- [What is inside](#what-is-inside)
-- [Install](#install)
-- [Demo](#demo)
-- [The 31 tools](#the-31-tools)
-- [Fallback rules](#fallback-rules-read-this-once)
-- [Prompt for AI agents](#prompt-for-ai-agents-start-here)
-- [Free only, no login](#free-only-no-login)
-- [Develop](#develop)
-- [Credits](#credits)
+```json
+{
+  "mcpServers": {
+    "aura-components": {
+      "command": "npx",
+      "args": ["-y", "aura-components-mcp@2.0.0"]
+    }
+  }
+}
+```
 
-> **v1.7.3** — hardening release, no new tools, no new dependencies. The whole award layer now fetches through one guarded path (scheme/host/DNS policy, re-checked redirects, size-capped bodies) plus the IPv6 parser fix that had mis-blocked public AAAA/dual-stack hosts. Plan-based index lifecycle (`rebuild` continues, `resume` finishes, `refresh` forces), drift-guarded winner baselines that an empty listing can't wipe, normalized URL watches, and artifact-honest capture/motion. 49 new hermetic tests lock it in: **275 hermetic + 45 live checks, all green**.
+Use an absolute path to `node`/`dist/server.js` or your package manager's resolved executable if your client does not inherit the expected PATH. Client-specific examples are in [SETUP.md](SETUP.md).
 
-<details>
-<summary><b>v1.7.1 changelog</b> — click to expand</summary>
+### Run from source
 
-> **v1.7.1** — bug-fix release, no new tools. Central free-only enforcement: Pro components/assets by direct ID are now refused (`-32602`, fail-closed on ambiguous entitlement) instead of returned in full — search, install, bundle, scaffold, and related all inherit it. Search cache isolates explicit `theme` (dark/light no longer share entries). Bundles honor all 8 refs end-to-end with `dropped_refs` disclosure. New `min_views_filtered_out` count (`total` stays upstream). Full icon outages surface as upstream errors, not misses. Upstream hardening: malformed rows disclosed via `malformed_dropped` (single fetch fails loud), non-429 4xx never retried. Node floor raised to maintained releases (engines `>=22`, CI matrix 22.x/24.x). Dead code removed, scaffold merge extracted, verify extended.
-
-</details>
-
-<details>
-<summary><b>v1.7.0 changelog (29 tools)</b> — click to expand</summary>
-
-> **v1.7.0** — 29 tools: 5 pure `aura_inspo_*` mappers (recommend/components/reference/system/compare) bridge Inspo evidence to Aura calls with zero extra deps — strict macro gate (`need_macro`), palette priority brand > Inspo > Aura, enforced tokens-first, mandated image srcset plan, fast preview-URL look gate — plus 2 pure `aura_docs_*` helpers (plan/check) wiring Context7 fresh docs for tailwind/gsap/lenis/iconify, with `docs_stamp` on every install/scaffold and a look-preserving conflict rule (fresh API wins, look stays identical) — plus live `aura_icon` (Font Awesome Free + HackerNoon pixel SVGs, auto-fallback, CC BY 4.0 credit always) — plus `aura_version` (hourly npm check, prefer-latest notice, verdict inside every `aura_status`). `aura_prompt` now asks 6 questions (+macrostructure, +vibe) and leads Pass 2 with `inspo.recommend`. `aura_scaffold_page` refuses explicit Pro ids (`pro_filtered_out`). Build hardened for CRLF checkouts.
-
-</details>
-
-<details>
-<summary><b>v1.6.3 changelog (20 tools)</b> — click to expand</summary>
-
-> **v1.6.3** — 20 tools. New `aura_prompt`: need-based prompt in 2 passes (draft + 4 questions, ask user, then copy-paste final). Honest search: zero-overlap fallbacks return `total:0` + `no_match` + `refused_fallback` + suggestions instead of masked popular rows; `exact_match:true` skips fallbacks; recommend auto-retries once then fills from editorial picks; theme reorder-not-drop; design-systems index content/preview_html; kind-aware skill recall; slim lists by default (`slim:false` opts out); `full:true` one-shot bodies; scaffold takes `["732","1364"]` / `[{id}]`; `status.freshness` per surface; per-surface `sort:'trending'` (no dead trending tool). Search facets equal detail facets, skills deduped, token starter + preview-mode warnings, legal asset plans, scoped CSS + chunk `concat` plans, bulk-fetch, one-turn scaffold builds.
-
-</details>
-
-Point any MCP client at `dist/server.js` and your agent can search the Aura public catalogue, inspect metadata first, then selectively retrieve component, skill, or design-system source, assets, and systems. There is nothing to log into: one bundled JS file, zero dependencies.
-
-Built by [swastiksingh-dev](https://github.com/swastiksingh-dev). Catalogue content belongs to Aura (aura.build, by Meng To / DesignCode). This project is not affiliated with Aura.
-
----
-## Why I built this instead of using the official MCP
-
-
-Aura already ships an official MCP at `https://mcp.aura.build/mcp`. It is good at what it does: your Canvases, your projects, publishing, all behind OAuth. This server does the other half. It covers the public catalogue, and it skips the parts that slow an agent down: no OAuth dance, no account, no per-project scopes. A few things the official one does not do:
-
-- `aura_install_component` tells the agent exactly how to paste a component: which CDN scripts it needs, which fonts it references, which file to put it in.
-- `aura_use_design_system` hands back a `:root` token starter plus the copy order (tokens first, markup second).
-- `aura_categories` shows where the free catalogue is deepest, with live counts; per-surface `sort:'trending'` shows what is new.
-- `aura_recommend` builds a starter kit across all four surfaces in one parallel call.
-- Everything defaults to free. Pro rows never sneak into results.
-
----
-## What is inside
-
-
-- 2,495 free components with HTML/Tailwind source, preview images, tags, and author credit
-- 192 agent skills with full SKILL.md bodies (GSAP, Tailwind v4, Anime.js, copywriting, and more)
-- 30,688 images and clips with direct CDN URLs at multiple widths
-- 725 DESIGN.md systems with tokens, type rules, layout notes, and preview HTML
-- 31 tools over stdio (25 catalogue/docs/icon/version + 6 award-intelligence), one bundle, 60-second LRU cache (300 keys) with request coalescing, author memo, category-count cache, retries with jittered backoff. Session 2 removes five external Inspo mappers and adds `aura_diff`.
-- Award corpus: file-based JSON index (`~/.aura-mcp/awards`) with atomic writes, resume checkpoints, winner baselines, watches; polite ~1 req/s Awwwards fetching with distinct 404/403+429/5xx/timeout handling
-- Honest search: AND-phrase misses retry as OR-tokens (2 passes) plus a labeled safety net — but zero title-overlap fallbacks are refused as `total:0` + `no_match` + `suggested_queries` instead of masking with popular rows; `exact_match:true` skips fallbacks entirely
-- Agent accelerators: `aura_prompt` (2-pass prompt with user confirmation), `aura_bulk_fetch`/`aura_bundle` (8 details/turn, any of 3 kinds), `aura_scaffold_page` (tokens + system + markup in dependency order), `aura_related`, `aura_install_asset` (license-aware)
-- Faceted lists: every component carries `facets { theme, weight, code_chars, needsTailwind, needsIcons, fonts }`; filter `theme: dark|light` server-side
-
-Start with `aura_status`, then `aura_search_all`. That order matters: status confirms the catalogue is reachable, search_all shows which surface has the best match before you spend calls on details.
-
----
-## Install
-
-
-Needs Node 22 or newer. No other dependency. Pick one:
-
-```bash
-# Option A — from source (GitHub)
+```sh
 git clone https://github.com/swastiksingh-dev/Aura-Components-MCP.git
 cd Aura-Components-MCP
 npm install
@@ -126,323 +54,75 @@ npm run build
 node ./dist/server.js
 ```
 
-```bash
-# Option B — npm
-npm i -g aura-components-mcp
-aura-components-mcp
-```
+`npm install` installs no runtime dependencies; the package uses Node built-ins and platform-provided `fetch`/WebSocket APIs. The server speaks JSON-RPC/MCP on stdin/stdout; startup messages go to stderr.
 
-```bash
-# Option C — npx, no install
-npx -y aura-components-mcp@latest
-```
+## A first workflow
 
-Then register it in your client. Full per-client steps live in [SETUP.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md) — Claude Code, Cursor, Codex, Windsurf, OpenCode, Cline, Roo Code, DeepSeek Harness, generic stdio.
+In a connected MCP client, try:
 
-<p align="center">
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#claude-code"><img src="https://img.shields.io/badge/Claude_Code-setup-black" alt="Claude Code setup"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#cursor"><img src="https://img.shields.io/badge/Cursor-setup-black" alt="Cursor setup"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#codex"><img src="https://img.shields.io/badge/Codex-setup-black" alt="Codex setup"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#opencode"><img src="https://img.shields.io/badge/OpenCode-setup-black" alt="OpenCode setup"></a>
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#any-other-mcp-client"><img src="https://img.shields.io/badge/any_stdio_client-setup-black" alt="Any stdio client setup"></a>
-</p>
+1. `aura_status` — check upstream availability and live catalogue counts.
+2. `aura_plan_design` with a short brief — get supplied facts, labeled recommendations, and open questions (not generated catalogue results).
+3. `aura_search_components` or `aura_search_design_systems` using the returned retrieval hints.
+4. `aura_diff` to compare 2–4 free components on known metadata; unknown visual quality and performance stay unknown.
+5. Retrieve a selected result with `aura_get_component`, then use `aura_install_component` or `aura_scaffold_page` for an implementation plan.
 
-```bash
-# Claude Code
-claude mcp add aura-components -- node ./dist/server.js
-```
+For award-site references, use `aura_award_search`, `aura_award_inspect`, and `aura_design_blueprint`. For research cards, use `aura_research_search` then `aura_research_read`. For motion planning, `aura_motion_plan` separates stated input from recommendations; `aura_motion_study` can inspect a live page when Chrome is available.
 
-```json
-// Cursor, Windsurf, and most others (~/.cursor/mcp.json or equivalent)
-{ "mcpServers": { "aura-components": { "command": "node", "args": ["./dist/server.js"] } } }
-```
+## Tool index (35)
 
-```json
-// OpenCode (opencode.json) — see https://opencode.ai/docs/mcp-servers
-{ "$schema": "https://opencode.ai/config.json", "mcp": { "aura-components": { "type": "local", "command": ["node", "./dist/server.js"], "enabled": true } } }
-```
+The inventory below is grouped by task. See the generated [tool schema snapshot](docs/v2/tool-definitions.json) for authoritative inputs.
 
----
-
-## Demo
-
-
-<p align="center">
-  <a href="https://raw.githubusercontent.com/swastiksingh-dev/Aura-Components-MCP/main/assets/heart-demo.mp4"><b>▲ CLICK TO WATCH THE 12-SECOND FLOW TOUR (MP4) ▲</b></a>
-  <br><em>Same file as <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/assets/heart-demo.mp4">assets/heart-demo.mp4</a></em>
-</p>
-
-*`aura_prompt` turns one sentence into a confirmed prompt, `aura_recommend` turns it into a starter kit with links. Full clip in [`assets/`](assets/).*
-
----
-## The 31 tools
-
-
-Start with `aura_status`, then `aura_search_all`. That order matters: status confirms the catalogue is reachable, search_all shows which surface has the best match before you spend calls on details.
-
-> **v1.7.2 historical release surface** — 35 tools before the Session 2 v2 working-tree changes. Six award-intelligence tools remain (`aura_award_search`, `aura_award_inspect`, `aura_design_blueprint`, `aura_visual_audit`, `aura_motion_study`, `aura_award_index`). See [CHANGELOG.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/CHANGELOG.md).
-
-### Find
-
-| Tool | What it returns |
+| Workflow | Tools |
 | --- | --- |
-| `aura_status` | Reachability plus live free counts. Call it first. |
-| `aura_search_components` | Free components by text, category, `theme: dark\|light`, sort. Slim rows by default; `slim:false` is still bounded to 1,200 source chars/item with a fetch pointer. `exact_match:true` skips fallbacks (honest empty). |
-| `aura_search_skills` | Skill metadata (title, description, source repo, views). `exact_match:true` skips fallbacks. |
-| `aura_search_assets` | Images and clips by keyword, media type filter included. Slim rows (no 4K URLs until install). `exact_match:true` skips fallbacks. |
-| `aura_search_design_systems` | DESIGN.md metadata: title, description, views, author. `exact_match:true` skips fallbacks. |
-| `aura_search_all` | All four surfaces in parallel. Never empties (fallback + suggestions). `exact_match:true` for honest empty. |
-| `aura_recommend` | A starter kit for a goal sentence, with links and a short rationale. |
-| `aura_categories` | The 13 component categories with live free counts. Counts overlap (see `overlap_note`). |
-| `aura_related` | 3 more-like-this per item. Discovery never dead-ends. |
-| `aura_diff` | Compare 2–4 free components by known metadata. Unknown bundle size, runtime performance and visual quality are never guessed. |
+| Design & evidence | `aura_plan_design`, `aura_motion_plan`, `aura_research_search`, `aura_research_read` |
+| Catalogue status & search | `aura_status`, `aura_search_components`, `aura_search_skills`, `aura_search_assets`, `aura_search_design_systems`, `aura_search_all`, `aura_recommend`, `aura_categories`, `aura_related`, `aura_diff` |
+| Retrieve & apply | `aura_get_component`, `aura_get_skill`, `aura_get_design_system`, `aura_bundle`, `aura_bulk_fetch`, `aura_install_component`, `aura_install_skill`, `aura_install_asset`, `aura_use_design_system`, `aura_scaffold_page`, `aura_prompt` |
+| Documentation, icons & version | `aura_docs_plan`, `aura_docs_check`, `aura_icon`, `aura_version` |
+| Award references & browser evidence | `aura_award_search`, `aura_award_inspect`, `aura_design_blueprint`, `aura_visual_audit`, `aura_motion_study`, `aura_award_index` |
 
-### Inspect (metadata first; source on request)
+The five `aura_inspo_*` mapping tools from the older v1 surface have been retired. Use catalogue search, award-reference tools, `aura_diff`, or `aura_scaffold_page` instead. `aura_prompt` remains as a compatibility helper.
 
-| Tool | What it returns |
-| --- | --- |
-| `aura_get_component` | Metadata by default; `chunk` or `full:true` retrieves one bounded source chunk. Continue while `code_info.truncated` is true. |
-| `aura_get_skill` | Frontmatter validation and metadata by default; `chunk` or `full:true` retrieves one bounded SKILL.md chunk. |
-| `aura_get_design_system` | Metadata/token hints by default; `chunk` or `full:true` retrieves bounded content/preview chunks. |
-| `aura_bundle` / `aura_bulk_fetch` | 2–8 metadata records by default. `aura_bundle` accepts `full:true` for bounded source. Per-item errors never fail the batch. |
+## Browser and evidence limits
 
-### Install & build (tokens first, then markup)
+Chrome or Chromium is optional and only needed for live screenshot capture, measured DOM structure/responsive checks, and runtime motion inspection/recording. Set `AURA_CHROME_PATH` if the browser is not found automatically. ffmpeg (or `AURA_FFMPEG_PATH`) is additionally needed to encode motion recordings as WebM; without it, available frame artifacts remain separate.
 
-| Tool | What it returns |
-| --- | --- |
-| `aura_install_component` | The same component plus a paste plan: CDN scripts, fonts, steps, file map, chunk `concat` plan when truncated, `css_scope_how`. |
-| `aura_install_skill` | Where to save SKILL.md so the agent can load it, plus upstream link. |
-| `aura_install_asset` | Legal drop-in: download + preview URLs, license (all-rights-reserved per [Aura Terms §4](https://www.aura.build/terms)), file path. |
-| `aura_use_design_system` | Token starter CSS plus the order to apply things in. |
-| `aura_scaffold_page` | Metadata-first build plan: tokens.css + system/component pointers + dependencies/files. `components: ["732","1364"]` or `[{id:"732"}]`; `full:true` opts into bounded first chunks. Goals with `#hex`/punctuation are escaped safely; unmatched systems are disclosed. |
-| `aura_prompt` | Compatibility wrapper in 2 passes: draft + user choices, then a customisable final prompt and Aura-only suggested calls. It does not force a starter recipe or visual style. |
+Browser evidence is bounded and not a full QA certification:
 
-### Fresh docs & icons
+- Responsive mode measures overflow and candidate off-screen bounds at up to seven widths. Candidates are not necessarily defects; fixed controls and nested scrollers can extend outside the viewport. Late-loading assets may shift results after the short settle period.
+- Focusable-element counts and reduced-motion preference are observations, not a keyboard or WCAG audit.
+- Motion `inspect` samples a single runtime instant. `record` is a bounded scroll tour, not a controlled click/hover/focus interaction capture. Use a separately authorized tool such as optional REA for named actions; Aura does not require or invoke REA.
+- Static HTML structure estimates have no measured layout offsets. Reference comparison is not pixel/perceptual parity.
 
-| Tool | What it returns |
-| --- | --- |
-| `aura_docs_plan` | Fresh-docs lookup plan (pure): library + need → Context7 resolve/query plan (trusted: tailwind, gsap, lenis, iconify) + Aura apply steps. |
-| `aura_docs_check` | Pasted code vs fresh docs (pure): verdict current\|needs-update, look-preserving fixes, pin checks. |
-| `aura_icon` | One free icon as ready SVG (live): FA Free + HackerNoon pixel lib, auto-fallback, license + credit always, font alternative, 24h cache. |
-| `aura_version` | Running vs npm-published version (live, hourly cache). `update_available` + prefer-latest notice. `aura_status` carries the verdict on every call. |
+Full scope and evidence provenance: [`docs/v2/MOTION_RESPONSIVE.md`](docs/v2/MOTION_RESPONSIVE.md).
 
-The five `aura_inspo_*` mapping tools were retired from the v2 surface. Migrate
-to `aura_search_components` / `aura_search_design_systems`, award tools for
-reference evidence, `aura_diff` for component trade-offs, and `aura_scaffold_page`
-for a caller-selected build plan.
+## Safety, privacy & licensing
 
-### Award intelligence (new in v1.7.2 — 6 tools, zero npm deps)
+- Catalogue tools default to free access; Pro or ambiguous component/asset entitlements fail closed. The server does not authenticate to a user account.
+- Live queries make outbound requests to public catalogue/registry/CDN/Awwwards endpoints as appropriate. Award and browser URL guards restrict protocols and block private/loopback/link-local/metadata destinations by default; `allowLocal` relaxes loopback blocking only. Do not use it for untrusted URLs.
+- Award indexing is local and explicit; it does not crawl on startup. Crawl work is bounded and polite. Index data is stored under `~/.aura-mcp/awards` by default (`AURA_AWARDS_DIR` overrides it).
+- Aura catalogue content and assets are not relicensed by this server. Aura's Terms describe assets as all-rights-reserved; check the source page and obtain permission before commercial reuse. A free catalogue result does not mean the content is open source or commercially licensed.
+- The server's own code is MIT-licensed. Third-party code, icons, source content, images, and reference designs retain their respective licenses/terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the source terms.
+- Research results are a small curated local seed, not a live literature index. One closed-access source is metadata-only; no papers/PDFs are returned. Claims include provenance and limitations. See [`docs/v2/RESEARCH_LIBRARY.md`](docs/v2/RESEARCH_LIBRARY.md).
 
-Search → inspect → blueprint → audit → motion. Core search/index work with no
-browser; live capture needs Chrome (see setup below).
+## Configuration
 
-| Tool | Modes | What it returns |
-| --- | --- | --- |
-| `aura_award_search` | `sites` / `categories` / `elements` / `motion` | Ranked Awwwards refs (title, source URL, tags, awards, studio, preview link, relevance + reasons). Multiword queries get alias expansion (`glassy`→`glassmorphism`, `3d`→`webgl`) plus a `theme:dark/light` boost — reasons always name your word, never the alias. `categories` returns real taxonomy from the index/source, filters paged by `limit`/`offset` (`filtersTotal` tells the full size). `motion` searches stored studies (`emptyCorpus:true` when none recorded yet). Every response carries `source` + `corpusNote`: first run on an empty index seeds from one polite live fetch (`source:live`); after that everything ranks from the local index until you `rebuild`/`refresh`. Empty results carry `suggestions`; upstream failures carry `liveError` instead of fake hits. |
-| `aura_award_inspect` | `site_details` / `site_elements` / `element` / `compare_sites` | Design DNA (palette, tech, elements, awards, score). Empty Technologies sections are backfilled from listing tags and labeled `technologiesInferred:true` (never presented as parsed). Rule-based `ideas` (0–6 by evidence, always `status:suggested` + observed `basis`, contract in `ideas_contract`). Browserless motion evidence in `motion_static` (scripts, keyframes, scroll cues — labeled static-markup, never runtime). Element media URLs with attribution. 2–3-site comparisons with shared signals, fuzzy element-keyword overlap, tech-family canonicalization, luminance-band agreement, `directionHints`, and gaps (missing = unknown, never negative proof). |
-| `aura_design_blueprint` | goal + 2–5 refs | Markdown brief + versioned JSON (`spec.version: 1`): shared patterns, outliers, palette evidence, one catalogue query PER proposed section (tokens/hero/proof/…/footer, capped at 12 matches — slim rows, not full code dumps), real free Aura matches (IDs + page URLs, free-only enforced, fallback-sourced rows marked `(via fallback …)` with `matchEvidence`), requested hexes from your goal synthesized as `proposed` tokens against the refs' observed bands, executable `next_calls` (get/scaffold/motion with real gathered IDs), evidence-scored `confidence` + `confidenceWhy`, sections, motion/a11y/performance guidance, checklist, and an always-present Evidence gaps section. Catalogue failures surface as unavailable evidence. |
-| `aura_visual_audit` | `capture` / `structure` / `compare` | Real browser screenshots + live-DOM band maps when Chrome works (`source: live-browser`, attached via `/json/list` page targets). Any live-dom failure degrades to labeled `static-html` estimates (`fallbackFrom` + `fallbackWhy` disclosed) instead of erroring. Local builds: pass a `file://` path or local file with `allowLocal:true` for direct file estimates (`source: local-file`); screenshots still need a served `http://127.0.0.1` URL. `compare` reports section-count/order, height, palette mismatches + manual-judgment items, with an `estimateNote` when offsets aren't measured. Capture never claims an `artifactPath` it didn't write (see `artifactNote`) and prunes old temp captures (newest 20 kept) with a `retentionNote` when no `saveDir` is set; a navigation to a blocked/non-http(s) URL after settle aborts with `UNSUPPORTED_OPERATION` + `blockedUrl`. |
-| `aura_motion_study` | `inspect` / `record` / `search` | Live runtime scans (libs, easing vocab, scroll model, ScrollTrigger counts — only what was observed), bounded frame studies (2–16 frames, ≤30s), `.webm` only when system ffmpeg exists. Stored studies are searchable by library/easing/scroll. `record` validates frames before encoding and reports `framesUsed`; temp `aura-motion-*` dirs older than 24h are pruned with a `retentionNote` when no `saveDir` is set. |
-| `aura_award_index` | `status` / `rebuild` / `resume` / `refresh` / `new_winners` / `watch_add` / `watch_list` / `watch_remove` | Persistent corpus in `~/.aura-mcp/awards` (`AURA_AWARDS_DIR` overrides): counts/freshness/lock, polite ~1 req/s crawl bounded by `maxPages` per call (default 5, max 20). `rebuild` continues an unfinished cycle (starts a new one after completion), `resume` finishes pending work, `refresh` forces a new crawl. Winner baseline-then-delta is drift-guarded (an empty upstream listing reports `degraded:true` instead of overwriting the baseline). Watches accept studio/tag or canonical `/sites/<slug>` URLs/slugs (legacy raw URLs still match). Never auto-crawls on startup. |
+The server uses stdio and has no authentication configuration. Optional environment variables and their defaults are defined in [`src/config.mjs`](src/config.mjs); award index and browser variables are described in [SETUP.md](SETUP.md). Do not put secrets in client configuration unless you have a specific reason to override an upstream public key.
 
-**Browser setup (optional, capture/motion only):** install Chrome/Chromium, or set
-`AURA_CHROME_PATH` to its executable. For `.webm` motion video, also install
-ffmpeg or set `AURA_FFMPEG_PATH`. Without them the six tools still search,
-inspect (via polite HTML fetch), blueprint, index, and report
-`BROWSER_UNAVAILABLE` with setup guidance where a live browser is required.
-CDP setup failures (refused socket, hung attach) normalize to the same
-`BROWSER_UNAVAILABLE` code with a per-operation fallback hint — never a raw
-CDP timeout.
+## Development & verification
 
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'Inter, system-ui, -apple-system, sans-serif', 'fontSize': '15px', 'lineColor': '#ff2a2a', 'edgeLabelBackground': '#0a0a0b'}}}%%
-flowchart LR
-    S["🔍 aura_award_search<br/>ranked refs + try_for"] --> I["🧬 aura_award_inspect<br/>design DNA + ideas"]
-    I --> B["📐 aura_design_blueprint<br/>brief + tokens + next_calls"]
-    B --> A["📸 aura_visual_audit<br/>capture / bands / compare"]
-    A --> M["🎞️ aura_motion_study<br/>scans + studies"]
-    B -.-> X["🗂️ aura_award_index<br/>corpus · winners · watches"]
-    X -.-> S
-    classDef core fill:#111318,stroke:#8b949e,color:#f5f5f5,stroke-width:2px;
-    classDef hot fill:#1c0606,stroke:#ff2a2a,color:#ffffff,stroke-width:2px;
-    classDef idx fill:#161a08,stroke:#d4a017,color:#ffffff,stroke-width:2px;
-    class S,I,A,M core;
-    class B hot;
-    class X idx;
+```sh
+npm test             # hermetic Node test suite
+npm run build        # regenerate dist/server.js and dist/cli.cjs
+npm run verify       # live network checks against the built server
+npm pack --dry-run --json
 ```
 
-> The 6-call award loop (fast: details + section queries run concurrently):
-> `search → inspect → blueprint → follow its next_calls → audit → motion`
+`npm test` is intended to run without network. `npm run verify` performs live network checks, so its result depends on outbound connectivity and upstream availability. `dist/` is generated; edit source modules and run the build. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md).
 
-**Two award servers?** If you also run `awwwards-mcp`, keep both or pick one:
-`aura_award_*` is canonical here — it's the only path that maps references to
-Aura's free catalogue inside `aura_design_blueprint`. The standalone server
-can't do that mapping.
+## Project status
 
-Every row carries `page_url` (open it to see the design) and `author` where Aura credits one.
+This branch prepares package version 2.0.0, but it has not been published or tagged. Historical release notes stay in [CHANGELOG.md](CHANGELOG.md); active direction and deferred work are tracked in [DIRECTION.md](DIRECTION.md) and [`docs/v2/PROGRESS.md`](docs/v2/PROGRESS.md).
 
----
-## Fallback rules (read this once)
+## Credits & license
 
-
-- **Per surface, not global.** `aura_search_all` fans out to four independent pipelines (phrase → OR-tokens → safety net → kind-aware refusal). Mixed outcomes are normal and correct: skills may return `fallback:or-tokens:...` while components return `total:0, no_match:true`. Read `isFallback` / `no_match` on each surface — never assume one flag covers all four.
-- **Recommend fills the kit.** If components come back `no_match`, `aura_recommend` auto-retries once with `suggested_queries[0]` (`retried:true, retried_from:<query>`), then falls back to human-grade editorial picks (`editorial_fallback:true`). The starter kit is never left empty on a text goal.
-- **Big code in one call.** Search rows are slim excerpts by design. `full:true` opts into the first configured chunk per source field; inspect `*_info.truncated` and continue with `chunk` when needed. Default remains metadata-first to protect context.
-- **Counts are live upstream.** `aura_status` counts mirror the Aura catalogue right now; `freshness` shows max `updated_at` per surface. Counts only grow when Aura publishes — a freshness bump with flat counts means metadata moved, not new components.
-- **`total` means upstream matches** (for limit/offset paging), not post-filter rows. Local drops are disclosed, never silent: `min_views_filtered_out`, `negative_theme_filtered_out`, `deduped`, bundle `dropped_refs`.
-- **Award errors are labeled, never masked.** `NOT_FOUND` (−32004) = unknown slug; `UPSTREAM_ERROR` (−32000) = blocked/failing source (blocks are never retried); `BROWSER_UNAVAILABLE` = install Chrome; `INDEX_BUSY` = crawl already running (`resume` continues); `INDEX_CORRUPT` = file quarantined + rebuilt empty. Empty award results carry `suggestions` or `emptyCorpus:true`; failures carry `liveError`. Award fetches pass a URL policy (http(s) only; private/loopback/link-local/metadata ranges blocked; bounded best-effort DNS check; redirect targets re-checked; bodies size-capped) — `allowLocal` relaxes loopback only. Refusal means zero rows matched (best-row gate, theme-first ordering kept). Site `ideas` run 0–6 by evidence (1 on thin evidence is valid) and are always `status:suggested` with an observed `basis`. Blueprint `confidence` is evidence-scored (refs + matched sections + recorded motion + measured structure + fully-parsed tech → low…high, with `confidenceWhy`). Known limits: taxonomy/element depth follows the polite crawl (`maxPages` is a per-call budget, `resume` continues); palettes come only from observable page evidence; tech labels are inferences with triggers shown; `static-html` bands have no measured offsets.
-
----
-## Prompt for AI agents (start here)
-
-
-> ✨ The fastest way to a shippable page. Two passes, one confirmation.
-
-```text
-Pass 1 — agent calls:
-aura_prompt { "goal": "dark SaaS pricing" }
-
-Server returns: draft_prompt + 6 questions + next_call.
-Agent MUST ask you (theme / sections / system / assets / macrostructure / vibe) via native question UI.
-```
-
-```text
-Pass 2 — agent calls with your answers:
-aura_prompt { "goal": "dark SaaS pricing",
-  "answers": { "theme": "dark", "sections": ["hero","pricing"],
-    "system": "auto-pick", "assets": "no" } }
-
-Server returns: final_prompt (copy-paste) + plan order + suggested calls.
-```
-
-Copy-paste starter you can say to any agent:
-
-```text
-Check aura_status. Then call aura_prompt with my goal, ask me its 6 questions,
-then call it again with my answers and follow its suggested_calls.
-My goal: dark cinematic portfolio.
-```
-
-Rules baked in: Tailwind `container mx-auto px-4`, hex 50-900, 768px hamburger,
-hover scale 1.05 + shadow, Inter 40-60/28-36/14-16, motion <500ms +
-`prefers-reduced-motion`, tokens first then markup.
-Sources: [tips-for-prompting](https://www.aura.build/learn/tips-for-prompting),
-[introduction](https://www.aura.build/learn/introduction),
-[design-systems](https://www.aura.build/design-systems).
-
----
-## How I use it
-
-
-New landing page, dark cinematic portfolio, SaaS pricing section. The shape is the same each time:
-
-1. `aura_prompt` with the goal sentence. Answer its 6 questions. Copy the final prompt.
-2. `aura_recommend` with the goal sentence. Skim the starter kit links.
-3. `aura_get_component` on two or three finalists. Read the markup, not just the description.
-4. `aura_install_component` on the winner. Follow the file map.
-5. `aura_use_design_system` once, before any markup, so tokens land first.
-
-Prompts that work well are in [SETUP.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md#prompts-that-work).
-
----
-## Free only, no login
-
-
-There is no auth in this server. No OAuth, no API key to paste, no account to create. Reads go to the same public catalogue endpoints the Aura website uses. The `premium` flag stays on every component row, free-only is the default, and Pro rows are refused everywhere — search filters them, and direct ID lookup, install, bundle, and scaffold refuse them (`-32602`, fail-closed) instead of guessing. If Aura rotates its public key, set `AURA_SUPABASE_ANON_KEY` and rebuild; nothing else changes.
-
-Optional tuning (all with defaults):
-
-<details>
-<summary><b>Environment variables</b> — click to expand</summary>
-
-| Var | Default | Meaning |
-| --- | --- | --- |
-| `AURA_TIMEOUT_MS` | 12000 | Upstream timeout |
-| `AURA_RETRIES` | 2 | Retry budget for 429/5xx with jittered backoff |
-| `AURA_CACHE_TTL_MS` | 60000 | LRU cache TTL (`0` disables) |
-| `AURA_DEFAULT_LIMIT` / `AURA_MAX_LIMIT` | 10 / 25 | Pagination defaults and ceiling |
-| `AURA_CODE_CHARS` / `AURA_CONTENT_CHARS` | 12000 | Chunk sizes for code/content paging |
-| `AURA_FREE_ONLY_DEFAULT` | true | Keep free-only default |
-
-</details>
-
----
-## Develop
-
-
-```bash
-npm test      # hermetic tests, no network (275 tests)
-npm run verify  # 45 live checks against the real catalogue + award validation
-npm run build   # rebundle src/*.mjs into dist/server.js
-```
-
-Layout: `src/config.mjs` holds env parsing. `src/http.mjs` hides timeouts and retries behind an injectable fetch. `src/catalog.mjs` is the deep module (queries, cache, shaping, counts). `src/icons.mjs` fetches free icons (FA + pixel lib) with its own 24h cache. `src/guide.mjs` turns rows into install plans plus pure mappers (`buildPrompt`, `combineScaffold`, `buildInspo*`, `buildDocs*` — same seam for tools + tests + docs). `src/awards.mjs` parses/ranks Awwwards references (pure) plus a polite fetch client. `src/awards-index.mjs` persists the award corpus (atomic JSON, locks, checkpoints, winners, watches). `src/browser-cdp.mjs` drives optional Chrome over native CDP (screenshots, band scans, motion) with honest unavailability. `src/tools.mjs` validates args. `src/protocol.mjs` speaks JSON-RPC. `src/server.mjs` only wires stdio.
-
----
-## Share
-
-
-Star it if it saved you a tab or twenty: [github.com/swastiksingh-dev/Aura-Components-MCP](https://github.com/swastiksingh-dev/Aura-Components-MCP). Reposits welcome — see [DIRECTION.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/DIRECTION.md) for where this is headed.
-
-[![Star History Chart](https://api.star-history.com/svg?repos=swastiksingh-dev/Aura-Components-MCP&type=Date&theme=dark)](https://star-history.com/#swastiksingh-dev/Aura-Components-MCP&Date)
-
-```text
-built a free design MCP on aura.build: 2495 components, 192 skills, 30k assets, 35 tools. no login. resources are @MengTo's
-
-npx -y aura-components-mcp@latest
-https://github.com/swastiksingh-dev/Aura-Components-MCP
-```
-
----
-## Credits
-
-
-<p align="center"><sub>Standing on the shoulders of open work — every source below is linked, licensed, and honored in the code.</sub></p>
-
-<table align="center">
-  <tr>
-    <td align="center" width="200">
-      <a href="https://github.com/swastiksingh-dev"><img src="https://github.com/swastiksingh-dev.png?size=100" width="80" alt="swastiksingh-dev"><br><b>swastiksingh-dev</b></a><br><sub>Built this server · MIT</sub>
-    </td>
-    <td align="center" width="200">
-      <a href="https://www.aura.build"><img src="https://github.com/MengTo.png?size=100" width="80" alt="Meng To"><br><b>Meng To / Aura</b></a><br><sub>The entire catalogue</sub>
-    </td>
-    <td align="center" width="200">
-      <a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="https://github.com/INSANE0777.png?size=100" width="80" alt="INSANE0777"><br><b>INSANE0777</b></a><br><sub><a href="https://github.com/INSANE0777/Awwwards-mcp">awwwards-mcp</a> · award-layer inspiration · MIT</sub>
-    </td>
-  </tr>
-</table>
-
-Server code by [swastiksingh-dev](https://github.com/swastiksingh-dev), MIT. Free to fork, use, and sell with. If you fork this, keep the credit line and point people at the original repo.
-
-### Contributors
-
-<p align="center">
-  <a href="https://github.com/swastiksingh-dev"><img src="https://github.com/swastiksingh-dev.png?size=80" width="60" alt="swastiksingh-dev"></a>&nbsp;&nbsp;
-  <a href="https://github.com/INSANE0777"><img src="https://github.com/INSANE0777.png?size=80" width="60" alt="INSANE0777"></a>&nbsp;&nbsp;
-  <a href="https://github.com/MengTo"><img src="https://github.com/MengTo.png?size=80" width="60" alt="Meng To"></a>
-  <br><sub><b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors?from=7%2F11%2F2026">swastiksingh-dev</a></b> — builder & maintainer · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors?from=7%2F11%2F2026">INSANE0777</a></b> — awwwards-mcp inspiration · <b><a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors?from=7%2F11%2F2026">MengTo</a></b> — the Aura catalogue</sub>
-</p>
-
-<p align="center">
-  <a href="https://github.com/swastiksingh-dev/Aura-Components-MCP/graphs/contributors"><img src="https://contrib.rocks/image?repo=swastiksingh-dev/Aura-Components-MCP" alt="All contributors"></a>
-</p>
-
-| Source | Used for | License / terms |
-| --- | --- | --- |
-| [Aura](https://www.aura.build) (Meng To / DesignCode) | The entire catalogue: components, skills, assets, design systems | Belongs to Aura and credited authors; assets all-rights-reserved per [Aura Terms §4](https://www.aura.build/terms) |
-| [Official Aura MCP](https://www.aura.build/mcp) | Comparison only (account projects/publishing over OAuth — the half this server skips) | Aura's terms |
-| Inspo design-reference MCP (retired integration) | Historical workflow mapping only; no current Aura tool depends on it | Reference JSX belongs to its authors — adapt evidence, don't ship source verbatim |
-| [Context7](https://context7.com) | Fresh library docs behind `aura_docs_*` (trusted: Tailwind CSS, GSAP, Lenis, Iconify) | Docs belong to their projects |
-| [Font Awesome Free](https://fontawesome.com) | Icons via `aura_icon` (served from jsDelivr + cdnjs) | [CC BY 4.0](https://fontawesome.com/license/free) — credit on every hit, enforced by the tool |
-| [HackerNoon Pixel Icon Library](https://github.com/hackernoon/pixel-icon-library) ([site](https://pixeliconlibrary.com)) | Pixel icons via `aura_icon` (served from jsDelivr) | Icons CC BY 4.0, other files MIT — credit on every hit, enforced by the tool |
-| [Awwwards](https://www.awwwards.com) | Award-website references behind `aura_award_*` (metadata + Awwwards-CDN media URLs, never mirrored) | Screenshots/designs belong to Awwwards + credited creators — personal-inspiration use at ~1 req/s, honor robots.txt; see [THIRD_PARTY_NOTICES.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/THIRD_PARTY_NOTICES.md) |
-| [awwwards-mcp](https://github.com/INSANE0777/Awwwards-mcp) by [INSANE0777](https://github.com/INSANE0777) | Behavioral inspiration for the six award tools (site discovery, design DNA, elements, briefs, indexing, capture, motion, winners, watches) — reimplemented natively, zero code copied | [MIT](https://github.com/INSANE0777/Awwwards-mcp/blob/main/LICENSE) © 2026 Afjal — permission notice preserved in [THIRD_PARTY_NOTICES.md](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/THIRD_PARTY_NOTICES.md) |
-| Upstream libraries (Tailwind CSS, GSAP, Lenis, Iconify) | The code this server's guides point at | Each project's own license — check before shipping |
-
----
-## License
-
-
-
-MIT — see [LICENSE](https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/LICENSE).
+Built by [swastiksingh-dev](https://github.com/swastiksingh-dev). The Aura catalogue belongs to Aura and its credited authors; this project is independent. Third-party sources and notices are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The server code is licensed under [MIT](LICENSE).

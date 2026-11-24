@@ -1,43 +1,49 @@
-# aura-components-mcp (package v1.7.3; Session 2 working tree: 31 tools)
+# aura-components-mcp
 
-> Free-only MCP server (stdio, zero runtime dependencies, no login) for the Aura (aura.build) public catalogue. Node >=22. The checked-in package version remains 1.7.3; Session 2 changes are unreleased. Catalogue content belongs to Aura (Meng To / DesignCode).
+> Current source branch: 35 MCP tools, package metadata prepared as 2.0.0 but not yet published. npm latest was verified as 1.7.3 on 2026-11-23. Zero npm runtime dependencies; Node >=22. The Aura catalogue and credited content belong to Aura and its authors. This is an independent project.
 
 - Repo: https://github.com/swastiksingh-dev/Aura-Components-MCP
 - npm: https://www.npmjs.com/package/aura-components-mcp
 - Setup: https://github.com/swastiksingh-dev/Aura-Components-MCP/blob/main/SETUP.md
 - Tool contract catalogue: `docs/v2/TOOL_CONTRACTS.md`
-- Session 2 context measurements: `docs/v2/CONTEXT_BASELINE_2026-11-23.md`
+- Design Contract: `docs/v2/DESIGN_CONTRACT.md`
+- Research evidence limits: `docs/v2/RESEARCH_LIBRARY.md`
+- Motion/responsive evidence limits: `docs/v2/MOTION_RESPONSIVE.md`
 - Official Aura MCP (account projects/publishing, OAuth): https://www.aura.build/mcp
 
 ## Start here
 
-- Call `aura_status`, then `aura_search_all` or the surface-specific search.
-- Use `aura_prompt` for a user-customisable brief-to-prompt compatibility flow. It suggests Aura tools only and does not require a recipe or style.
+- Call `aura_status`, then `aura_search_all` or a surface-specific search.
+- Use `aura_plan_design` for a bounded Design Contract. It separates supplied facts, heuristics/recommendations, and open questions; it is not a design model or user study.
 - Discovery is metadata-first. Search defaults to five results; continue with `offset` / `next_offset`. Detail tools omit large source unless passed `chunk` or `full:true`.
-- `aura_bundle` and `aura_scaffold_page` return metadata/source pointers by default. `aura_bundle` supports `full:true`; scaffold source is opt-in with `full:true`.
-- `aura_diff` compares 2–4 free components using known record facts. Unavailable bundle size, runtime performance and visual quality are `unknown`.
-- `aura_search_skills` reports `loadable` from available `name`/`description` frontmatter; `null` means the snippet was unavailable.
-- Fresh docs (pure helpers; the agent calls Context7): `aura_docs_plan` and `aura_docs_check`.
-- `aura_icon` returns an SVG and its required credit. `aura_version` checks npm; `aura_status` includes its verdict.
-- Award intelligence: `aura_award_search`, `aura_award_inspect`, `aura_design_blueprint`, `aura_visual_audit`, `aura_motion_study`, `aura_award_index`. Browser capture is optional; unavailable evidence is reported honestly.
+- `aura_bundle` and `aura_scaffold_page` return metadata/source pointers by default. Source retrieval is bounded and chunkable.
+- `aura_diff` compares 2–4 free components using known record facts. Unavailable bundle size, runtime performance, visual quality, and compatibility remain unknown.
+- `aura_research_search` and `aura_research_read` use a small curated local seed, not a live research index. Claims link to stored provenance and limitations; no paper/PDF content is returned.
+- `aura_motion_plan` returns planning recommendations, not observations unless a caller supplies an explicitly unverified summary.
+- `aura_docs_plan` and `aura_docs_check` are pure helpers; the agent performs any Context7 lookup.
+- `aura_icon` returns an SVG and required credit. `aura_version` checks npm; `aura_status` includes its verdict.
+- Award intelligence: `aura_award_search`, `aura_award_inspect`, `aura_design_blueprint`, `aura_visual_audit`, `aura_motion_study`, `aura_award_index`.
 
-## Inspo bridge migration
+## Tool surface
 
-The five external workflow-mapper tools `aura_inspo_recommend`,
-`aura_inspo_components`, `aura_inspo_reference`, `aura_inspo_system`, and
-`aura_inspo_compare` are removed from the Session 2 tool surface. Use Aura
-catalogue searches for first-party options, award tools for reference evidence,
-`aura_diff` for known-fact comparison, and `aura_scaffold_page` for an optional
-caller-selected build plan. No current tool requires the external Inspo MCP.
+The current source registry has 35 tools. See `docs/v2/tool-definitions.json` for exact schemas. The five `aura_inspo_*` mapping tools from the older v1 surface are retired; use catalogue search, award tools, `aura_diff`, or `aura_scaffold_page`.
 
-## Rules and retrieval
+## Browser and evidence limits
+
+- Chrome/Chromium is optional; it is needed for browser screenshots, live DOM geometry, responsive matrices, and runtime motion inspection. Without it, browser-required operations report unavailability; ordinary catalogue/design/research use remains available.
+- ffmpeg is optional and only needed to encode `.webm` motion recordings. `record` is a bounded scroll tour, not named click/hover/focus capture.
+- Responsive checks measure up to seven viewport widths and report candidate bounds. They are not a full accessibility audit; late content can shift after the short settle.
+- Static HTML structure is an estimate without measured offsets. Reference comparison is not pixel/perceptual parity.
+- REA is a separate optional tool and is neither installed nor required by Aura.
+
+## Safety, licensing, and retrieval
 
 - Component and asset access is fail-closed: only records with `premium:false` are returned by protected paths.
 - No-match and upstream failure are distinct. Do not treat unavailable metrics as negative facts.
-- Chunk responses expose length/truncation information. Fetch subsequent chunks with the same detail tool and the requested `chunk`.
-- `slim:false` on component search is still bounded to 1,200 source characters per item and returns fetch pointers.
-- Asset licensing: all-rights-reserved under Aura Terms §4; commercial reuse requires permission.
-- Icon credit returned by `aura_icon` must be retained.
+- Chunk responses expose length/truncation information. Fetch subsequent chunks with the same detail tool and requested `chunk`.
+- Asset licensing: Aura Terms §4 describe assets as all-rights-reserved; check source terms and obtain permission before commercial reuse. Free catalogue access is not a commercial license.
+- Icon attribution returned by `aura_icon` must be retained.
+- Research is local and curated; metadata date does not imply ongoing correction/retraction monitoring. Closed-access sources are metadata-only.
 - Search is upstream-first. One-edit typo matching only ranks fetched candidates; it does not guarantee typo recall and makes no additional request.
-- Preview screenshot caching is not implemented. Browser-backed features stay optional.
-- Package release notes and the historical 35-tool v1.7.3 inventory are in README/CHANGELOG; they do not describe the unreleased Session 2 registry.
+- Preview screenshot caching is not implemented.
+- Award indexing is explicit, bounded, polite, and does not run at startup. URL guards block private/loopback/metadata destinations by default; use `allowLocal` only for trusted local development.

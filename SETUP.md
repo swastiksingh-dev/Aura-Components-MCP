@@ -1,138 +1,97 @@
 # Setup
 
-One server, every client below. No account, no key, nothing to log into. If Node 22+ runs `node ./dist/server.js`, the client can use this.
+Aura Components MCP is an MCP server over stdio. It requires Node.js 22 or newer. The server has zero npm runtime dependencies. Ordinary catalogue, design-planning, and research-card use does not require Chrome, ffmpeg, or REA. Live upstream-backed tools need outbound network access.
 
-Build once:
+## Install and smoke-test
 
-```bash
+This repository prepares package version 2.0.0. It is **not yet published**; npm currently serves 1.7.3. The npm commands below become usable after 2.0.0 is published. To run this branch now, use the source-clone instructions instead.
+
+```sh
+npx -y aura-components-mcp@2.0.0
+```
+
+For global installation:
+
+```sh
+npm install --global aura-components-mcp@2.0.0
+aura-components-mcp
+```
+
+Or build from a clone:
+
+```sh
 git clone https://github.com/swastiksingh-dev/Aura-Components-MCP.git
 cd Aura-Components-MCP
 npm install
 npm run build
-node ./dist/server.js  # prints: aura-components-mcp v1.7.3 listening on stdio (Ctrl+C to stop)
-```
-
-```bash
-# Or without cloning:
-npm i -g aura-components-mcp
-npx -y aura-components-mcp@latest
-```
-
-If that last line prints, the server works. Everything below just points a client at the same file.
-
-## Claude Code
-
-```bash
-claude mcp add aura-components -- node ./dist/server.js
-claude mcp list   # confirm aura-components shows up
-```
-
-Then in a session: `Check aura_status, then find free hero components for a SaaS landing page.`
-
-## Cursor
-
-Add to `~/.cursor/mcp.json` (create it if missing):
-
-```json
-{
-  "mcpServers": {
-    "aura-components": { "command": "node", "args": ["/absolute/path/to/aura-components-mcp/dist/server.js"] }
-  }
-}
-```
-
-Restart Cursor. Open Composer, pick the aura tools, same first prompt as above.
-
-## Codex
-
-```bash
-codex mcp add aura-components -- node ./dist/server.js
-```
-
-Then: `Use aura_search_all for "pricing section" (free only) and compare the top hits.`
-
-## Windsurf
-
-Add the same block Cursor uses to Windsurf's MCP config (`~/.codeium/windsurf/mcp_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "aura-components": { "command": "node", "args": ["/absolute/path/to/aura-components-mcp/dist/server.js"] }
-  }
-}
-```
-
-Restart Windsurf, open Cascade, allow the server when asked.
-
-## Cline (VS Code)
-
-1. Open Cline settings, MCP Servers section.
-2. Add server: command `node`, arg `/absolute/path/to/aura-components-mcp/dist/server.js`, name `aura-components`.
-3. It lists 31 tools starting with `aura_`. Approve them once.
-
-## Roo Code (VS Code)
-
-Same as Cline: Add MCP server, command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. Roo shows the 31 `aura_` tools in its tool list after reload.
-
-## DeepSeek Harness
-
-This repo was built inside it. Register the server the same stdio way:
-
-```bash
 node ./dist/server.js
 ```
 
-as a stdio MCP entry (command `node`, args `dist/server.js`), or run `npm run verify` first to watch all 25 live checks pass before wiring it in.
+The standalone command is a stdio MCP server; it waits for JSON-RPC input. To smoke-test through an MCP client, register it there, then call `aura_status` or `aura_plan_design`. Startup text is written to stderr, not the protocol stream.
 
-## OpenCode
+## Client configuration
 
-Add to `opencode.json` (or `opencode.jsonc`) in your project root or `~/.config/opencode/` (see [opencode.ai/docs/mcp-servers](https://opencode.ai/docs/mcp-servers)):
+Client config formats and install UX differ by product/version. Use the examples below as templates and check the current client documentation if its schema changes. Keep the command available to the client process; use an absolute executable or server path if PATH resolution differs.
+
+### Claude Code
+
+From a source clone:
+
+```sh
+claude mcp add aura-components -- node /absolute/path/to/Aura-Components-MCP/dist/server.js
+claude mcp list
+```
+
+After publication, for npm execution configure command `npx` with arguments `-y`, `aura-components-mcp@2.0.0` using the current Claude Code MCP configuration syntax.
+
+### Cursor and Windsurf
+
+Example stdio configuration (replace with a valid absolute path):
 
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
+  "mcpServers": {
     "aura-components": {
-      "type": "local",
-      "command": ["node", "/absolute/path/to/aura-components-mcp/dist/server.js"],
-      "enabled": true
+      "command": "node",
+      "args": ["/absolute/path/to/Aura-Components-MCP/dist/server.js"]
     }
   }
 }
 ```
 
-Restart OpenCode (or run `/mcp` to reload). The 35 `aura_*` tools show up in the TUI. Same first prompt as Claude Code above. A copy-paste file lives at `examples/opencode.json`.
+Cursor commonly reads `~/.cursor/mcp.json`; Windsurf commonly reads `~/.codeium/windsurf/mcp_config.json`. Consult current client docs for the configuration location and reload behavior.
 
-## Award tools (optional system programs)
+### Codex
 
-Core award search/index/blueprint needs nothing extra. Live capture, structure,
-and motion need Chrome/Chromium (or `AURA_CHROME_PATH` to its executable);
-`.webm` motion video additionally needs ffmpeg (or `AURA_FFMPEG_PATH`).
-Corpus lives in `~/.aura-mcp/awards` (`AURA_AWARDS_DIR` overrides). Build it with
-`aura_award_index {action:rebuild}` (bounded `maxPages`, 1–20 per call). `resume`
-finishes pending work; re-running `rebuild` continues an unfinished cycle and
-starts a fresh one only after completion; `refresh` forces a new crawl. The
-server never crawls on startup.
+From a source clone:
 
-## Any other MCP client
+```sh
+codex mcp add aura-components -- node /absolute/path/to/Aura-Components-MCP/dist/server.js
+```
 
-Transport is stdio, no auth. Command `node`, args `["/absolute/path/to/aura-components-mcp/dist/server.js"]`. The handshake is standard MCP (`initialize`, `tools/list`, `tools/call`). If the client asks for env, leave it empty; tuning vars are optional (see README).
+### OpenCode
 
-## Prompts that work
+Use the `mcp` configuration shape shown in [`examples/opencode.json`](examples/opencode.json), changing the server path to the absolute local path. OpenCode's configuration may live in a project config or user config; consult its current MCP server documentation for locations and reload behavior.
 
-- `Check aura_status. Then call aura_prompt with "dark SaaS pricing", ask me its 6 questions, then call it again with my answers.`
-- `Check aura_status. Then recommend a starter kit for a dark cinematic portfolio (free only).`
-- `Search free pricing components, get the top two in full, and tell me which pastes cleaner into Tailwind.`
-- `Which skill covers GSAP ScrollTrigger pin and scrub? Fetch it in full and apply the pinned-section recipe.`
-- `Recommend a starter kit for a dark SaaS pricing page (free only) — it auto-retries once via suggested queries, then fills from editorial picks if the goal matches nothing.`
-- `List categories with counts, then search the deepest free one for a landing page hero.`
-- `Scaffold a dark SaaS pricing page: aura_scaffold_page { "goal": "dark SaaS pricing", "components": ["732","1364"] } (object refs like [{ "id": "732" }] work too).`
+### Other stdio MCP clients
+
+Configure command `node` and args `["/absolute/path/to/Aura-Components-MCP/dist/server.js"]` for a source clone, or (after publication) command `npx` and args `["-y", "aura-components-mcp@2.0.0"]` for npm. No environment variables are required for ordinary use.
+
+## Optional browser tools
+
+Most tools need no browser. Chrome/Chromium enables live screenshots, measured DOM structure/responsive mode, and runtime motion inspection/recording. Set `AURA_CHROME_PATH` to a browser executable if automatic discovery fails. ffmpeg (or `AURA_FFMPEG_PATH`) is only needed for WebM encoding; otherwise motion frames may still be produced individually.
+
+The browser tools have explicit evidence limits: responsive checks measure a capped set of widths and candidate overflow elements but do not certify accessibility; the short layout settle may miss late content shifts. Motion inspection is a single-time sample; `record` scrolls and does not invoke named interactions. Optional REA can provide separately captured interaction summaries, but Aura neither installs nor requires REA. Full detail is in [`docs/v2/MOTION_RESPONSIVE.md`](docs/v2/MOTION_RESPONSIVE.md).
+
+Award reference crawling/indexing is explicit, bounded, and never runs on startup. The local index defaults to `~/.aura-mcp/awards`; `AURA_AWARDS_DIR` can select another location.
 
 ## Troubleshooting
 
-- Server exits instantly: check `node --version` (needs 22+), then `npm run build` again.
-- Client shows 0 tools: absolute path wrong, or the client needs a restart after config edit.
-- `upstream` errors on every call: outbound network blocked. `npm run verify` from the same machine tells you in seconds.
-- Counts look stale: 60-second cache. Wait a minute or set `AURA_CACHE_TTL_MS=0`.
-- A component says Pro: `aura_install_component` refuses it on purpose. Search returns free rows by default.
+- **No tools appear:** check the absolute path or `npx` command/arguments and reload the client.
+- **Server will not start:** verify `node --version` is 22 or newer. From a clone, run `npm run build` and then `node ./dist/server.js`.
+- **Live tools fail:** check outbound network access and upstream availability. `npm run verify` tests the built server against live services and can fail if they are unavailable.
+- **Browser operation says `BROWSER_UNAVAILABLE`:** install Chrome/Chromium or set `AURA_CHROME_PATH`; catalogue tools remain available.
+- **WebM recording is unavailable:** install ffmpeg or set `AURA_FFMPEG_PATH`; this does not enable named interaction capture.
+- **Catalogue content is not free for reuse:** free-only means free catalogue access, not an open-source or commercial reuse license. Check Aura's source terms and obtain required permission.
+
+See [README.md](README.md) for the tool overview, [SECURITY.md](SECURITY.md) for security reporting, and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and notices.

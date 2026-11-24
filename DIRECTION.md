@@ -1,5 +1,7 @@
 # DIRECTION — where Aura-Components-MCP goes next
 
+> Current worktree note (2026-11-23): Sessions 1–5 are complete on `feat/aura-v2-foundation`; source exposes 35 tools. Package metadata is prepared as 2.0.0, but npm `latest` remains 1.7.3; this is not a published v2 release. See [`docs/v2/PROGRESS.md`](docs/v2/PROGRESS.md) for the current release-preparation record. The dated notes below preserve earlier roadmap context.
+
 > v1.7.3 hardens the award layer: 35 tools (29 catalogue + 6 award-intelligence), 275 hermetic + 45 live checks green. One guarded fetch path, plan-based index lifecycle, drift-guarded winners, artifact-honest capture — zero new npm dependencies. This is what comes after.
 
 > Session 2 working-tree update (2026-11-23): 31 tools; retired five external

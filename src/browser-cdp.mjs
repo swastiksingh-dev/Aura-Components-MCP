@@ -604,6 +604,6 @@ export function reduceCdpScan(url, scan, t, viewport, evidence = null) {
       gsapPresence: evidence.gsapPresent ? { status: "inferred", basis: "A GSAP global was present; its complete timeline and target semantics were not reconstructed." } : { status: "unavailable", basis: "No GSAP global was detected in this page context." },
       interactionCapture: evidence.interactionCapture || "unavailable",
     } : { status: "unavailable", basis: "No motion evidence object was returned by the browser evaluation." },
-    capturedAt: t, toolVersion: "aura/1.7.3", source: "live-browser",
+    capturedAt: t, toolVersion: "aura/2.0.0", source: "live-browser",
   };
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aura-components-mcp v1.7.3 — bundled (zero deps). Built by swastiksingh-dev.
+// aura-components-mcp v2.0.0 — bundled (zero deps). Built by swastiksingh-dev.
 
 // ---- config.mjs ----
 // Module: config — one small interface (loadConfig) over all env parsing.
@@ -30,7 +30,7 @@ function loadConfig(env = process.env) {
     codeChars: num(env.AURA_CODE_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     contentChars: num(env.AURA_CONTENT_CHARS, 12_000, { min: 1_000, max: 60_000 }),
     freeOnlyDefault: bool(env.AURA_FREE_ONLY_DEFAULT, true),
-    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/1.7.3",
+    userAgent: env.AURA_USER_AGENT ?? "aura-components-mcp/2.0.0",
   };
 }
 
@@ -914,7 +914,7 @@ function createCatalog({ fetcher, config, now = () => Date.now(), facetsFn = nul
 }
 
 // ---- protocol.mjs ----
-const SERVER_INFO = { name: "aura-components-mcp", version: "1.7.3" };
+const SERVER_INFO = { name: "aura-components-mcp", version: "2.0.0" };
 // Module: protocol — stdio JSON-RPC framing + MCP handshake + error codes.
 // One interface: createSession(send) -> { dispatch(msg) }. No business logic.
 
@@ -1557,7 +1557,7 @@ function createVersion({ fetcher, running, now = () => Date.now() }) {
 const AWARD_SCHEMA_VERSION = 1;
 const AWARD_BASE_URL = "https://www.awwwards.com";
 const AWARD_ASSETS_URL = "https://assets.awwwards.com";
-const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/1.7.3";
+const AWARD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 aura-components-mcp/2.0.0";
 const AWARD_ALLOWED_HOSTS = ["www.awwwards.com", "awwwards.com", "assets.awwwards.com"];
 const AWARD_TIMEOUT_MS = 10000;
 const AWARD_MAX_BYTES = 2 * 1024 * 1024;
@@ -3695,7 +3695,7 @@ function reduceCdpScan(url, scan, t, viewport, evidence = null) {
       gsapPresence: evidence.gsapPresent ? { status: "inferred", basis: "A GSAP global was present; its complete timeline and target semantics were not reconstructed." } : { status: "unavailable", basis: "No GSAP global was detected in this page context." },
       interactionCapture: evidence.interactionCapture || "unavailable",
     } : { status: "unavailable", basis: "No motion evidence object was returned by the browser evaluation." },
-    capturedAt: t, toolVersion: "aura/1.7.3", source: "live-browser",
+    capturedAt: t, toolVersion: "aura/2.0.0", source: "live-browser",
   };
 }
 
