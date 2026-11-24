@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" role="img">
+<title>Star history of Aura-Components-MCP</title>
+<rect width="100%" height="100%" fill="transparent"/>
+<polyline points="48,163.71428571428572 59.04850011449508,139.42857142857144 75.2870162583009,115.14285714285715 87.37952828028395,90.85714285714286 158.5300664071445,66.57142857142857 547.9014426379666,42.285714285714306 704,18" fill="none" stroke="#54E2CB" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="704" cy="18" r="3.5" fill="#54E2CB"/>
+<text x="48" y="12" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" fill="#666" letter-spacing="0.4">Stars (repo view)</text>
+<text x="704" y="210" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" text-anchor="end" fill="#666">Nov 22, 2026 · 7 stars</text>
+<line x1="48" y1="192" x2="48" y2="187" stroke="#333" stroke-width="1"/>
+<text x="48" y="206" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="9" fill="#999" text-anchor="middle">10</text>
+<line x1="48" y1="188" x2="704" y2="188" stroke="#333" stroke-width="1"/>
+<line x1="48" y1="18" x2="48" y2="188" stroke="#333" stroke-width="1"/>
+</svg>
