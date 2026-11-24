@@ -147,7 +147,7 @@ npm pack --dry-run --json
 
 ## Project status
 
-This branch prepares package version 2.0.0, but it has not been published or tagged. Historical release notes stay in [CHANGELOG.md](CHANGELOG.md); active direction and deferred work are tracked in [DIRECTION.md](DIRECTION.md) and [`docs/v2/PROGRESS.md`](docs/v2/PROGRESS.md).
+This branch prepares package version 2.0.0, but it has not been published or tagged. Direction for the v2.0 release is in [RELEASE_NOTES.md](docs/v2/RELEASE_NOTES.md). Historical release notes stay in [CHANGELOG.md](CHANGELOG.md); active direction and deferred work are tracked in [DIRECTION.md](DIRECTION.md) and [`docs/v2/PROGRESS.md`](docs/v2/PROGRESS.md).
 
 ## Credits & license
 
