@@ -9,7 +9,7 @@ Turn a design brief into an attributed plan: Aura finds free components and desi
 | 35 tools | 0 runtime deps | Node ≥ 22 | MIT |
 | --- | --- | --- | --- |
 | **Star history** | ![Star history of Aura-Components-MCP](assets/star-history.svg) — 13 stars (all visible watch events) |
-| | <a href="assets/star-history.svg">Star history chart</a> — cumulative stars over visible GitHub watch events |
+| | <a href="https://star-history.com/swastiksingh-dev/Aura-Components-MCP?type=date&legend=top-left"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=swastiksingh-dev/aura-components-mcp&type=date&theme=dark&legend=top-left"/><source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=swastiksingh-dev/aura-components-mcp&type=date&legend=top-left"/><img alt="Star History Chart" src="https://api.star-history.com/chart?repos=swastiksingh-dev/aura-components-mcp&type=date&legend=top-left"/></picture></a> |
 
 **▶ [Watch the launch video](assets/launch.mp4)** — ~49 s of typographic motion, not a screen recording.
 
@@ -17,7 +17,8 @@ Turn a design brief into an attributed plan: Aura finds free components and desi
 
 ## What changed on GitHub
 
-- New v2.0.0 launch: README overhaul with **Why Aura** and a stats table with the ⭐ star-history chart (`assets/star-history.svg`).
+- New v2.0.0 launch: README overhaul with **Why Aura** and a stats table.
+- Star history: [star-history.com](https://star-history.com/swastiksingh-dev/Aura-Components-MCP?type=date&legend=top-left) dark/light chart (`assets/star-history.svg`) and a ⭐ row with 13 stars.
 - Added the **Star history** section with the live stars data (13 stars, all visible watch events).
 - Added the "What changed on GitHub" changelog itself.
 - Updated the launch-video line to the real new clip.
