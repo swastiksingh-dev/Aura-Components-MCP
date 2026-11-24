@@ -17,7 +17,7 @@ Turn a brief into a clearly attributed design plan, find relevant Aura component
 Aura Components MCP is a zero-runtime-dependency Node.js server using MCP over stdio. It exposes Aura's public catalogue (components, skills, assets, design systems) alongside local design and motion planning, curated research cards, Awwwards reference intelligence, and optional browser-based audits. It is an independent project and is not affiliated with Aura.
 
 - **Plan** — `aura_plan_design` separates your stated facts from labeled recommendations and open questions.
-- **Find** — search the free catalogue, then compare 2–4 candidates with `aura_diff`; unknowns stay unknown.
+- **Discover** — search the free catalogue, then compare 2–4 candidates with `aura_diff`; unknowns stay unknown.
 - **Build** — retrieve a component, install a skill, or scaffold a page with attribution and licence notes in view.
 - **Verify** — optional Chrome-based responsive and motion evidence, bounded and explicitly not a certification.
 
