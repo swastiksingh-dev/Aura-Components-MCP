@@ -4,13 +4,26 @@
 
 **Design planning and free-catalogue discovery for MCP clients.**
 
-Turn a brief into a clearly attributed design plan, find relevant Aura components and systems, and inspect motion or responsive evidence when a browser is available.
+Turn a brief into a clearly attributed design plan, find the free components and design systems that fit it, and check motion or responsive evidence when a browser is available.
+
+[![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json) [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json) [![MCP](https://img.shields.io/badge/MCP-stdio-blue)](https://modelcontextprotocol.io)
+
+**▶ [Watch the 12-second teaser](assets/launch.mp4)** — a typographic motion piece, not a screen recording.
 
 > Release candidate prepared as **2.0.0** in this branch; this is **not a published v2 release**. npm `latest` was verified as 1.7.3 on 2026-11-23. The v2 package is available from this source checkout or a local tarball; npm install commands below work after 2.0.0 is published. Catalogue counts change upstream and are intentionally not repeated here; query `aura_status` for current counts.
 
-[![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
+**Contents:** [Why Aura](#why-aura) · [What it does](#what-it-does) · [Quick start](#quick-start) · [A first workflow](#a-first-workflow) · [Tool index](#tool-index-35) · [Browser and evidence limits](#browser-and-evidence-limits) · [Safety, privacy & licensing](#safety-privacy--licensing) · [Development & verification](#development--verification)
 
-**Contents:** [What it does](#what-it-does) · [Quick start](#quick-start) · [A first workflow](#a-first-workflow) · [Tool index](#tool-index-35) · [Browser and evidence limits](#browser-and-evidence-limits) · [Safety, privacy & licensing](#safety-privacy--licensing) · [Development & verification](#development--verification)
+## Why Aura
+
+Most component tooling starts at the catalogue and hands back a wall of results. Aura starts at your brief, states what it knows, and leaves the rest open.
+
+| Principle | What that means in practice |
+| --- | --- |
+| **Attribution over confidence** | Every plan field is labeled *stated*, *recommended*, or *open question* — never blended into one confident answer. |
+| **Free by default** | Pro or ambiguous entitlements fail closed instead of guessing on your behalf. |
+| **Unknowns stay unknown** | `aura_diff` compares known metadata only; it does not invent visual quality or performance. |
+| **Evidence, not certification** | Browser checks report what was measured, at the widths they actually ran. |
 
 ## What it does
 

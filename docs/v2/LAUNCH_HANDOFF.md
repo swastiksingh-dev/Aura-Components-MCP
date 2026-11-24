@@ -12,15 +12,25 @@ separately. A six-shot treatment and narration draft are kept below as a
 starting point only. Nothing in this handoff is a capture of the MCP client or a
 demo of a live tool call.
 
-## Brand asset
+## Brand assets
 
 The launch banner is [`../../assets/banner.png`](../../assets/banner.png)
 (1672 x 941, ~2.96 MB) and is referenced directly under the README H1.
 
-- Only this banner is used; no separate social-preview image is tracked.
-- `package.json` allowlists `assets/banner.png`, so the rendered README can
-  resolve it from the npm package.
-- The banner must not contain fabricated UI, invented catalogue counts, or a
+The teaser clip is [`../../assets/launch.mp4`](../../assets/launch.mp4)
+(1,554 x 870, 12.6 s, H.264 + AAC, ~8.07 MB). It is a typographic motion piece:
+floating tool chips around “every design system.”, a “35 TOOLS. ONE STUDIO
+CALL.” card, and an award-intelligence flow. It is **not** a screen recording of
+a client or a live tool call.
+
+- The banner is the only image; the old `assets/social-preview.png` was deleted.
+- `package.json` allowlists `assets/banner.png` but deliberately not the clip, so
+  the published package stays near 3 MB. The README link resolves against the
+  repository, not the tarball.
+- Before using the clip as launch proof, re-render two chips in its opening
+  scene: they read `aura_search` and `aura_award_motion`, but the current tool
+  names are `aura_search_components` and `aura_motion_study`.
+- Neither asset may contain fabricated UI, invented catalogue counts, or a
   “now on npm” claim while 2.0.0 is unpublished.
 
 ## Launch-film treatment (not produced)

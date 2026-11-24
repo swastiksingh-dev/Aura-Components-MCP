@@ -1,7 +1,7 @@
 {
   "name": "aura-components-mcp",
   "version": "2.0.0",
-  "description": "Zero-dependency stdio MCP server for Aura's public catalogue, design planning, research, motion, and responsive evidence.",
+  "description": "Zero-dependency stdio MCP server for design planning, Aura's free component catalogue, motion plans, and browser-checked responsive evidence.",
   "type": "module",
   "license": "MIT",
   "author": "swastiksingh-dev",
@@ -23,15 +23,19 @@
     "type": "git",
     "url": "git+https://github.com/swastiksingh-dev/Aura-Components-MCP.git"
   },
-  "homepage": "https://github.com/swastiksingh-dev/aura-components-mcp",
+  "homepage": "https://github.com/swastiksingh-dev/Aura-Components-MCP",
   "bugs": {
     "url": "https://github.com/swastiksingh-dev/Aura-Components-MCP/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "start": "node ./dist/server.js",
     "test": "node --test ./test/*.test.mjs",
-    "verify": "node ./scripts/verify.mjs"
+    "verify": "node ./scripts/verify.mjs",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=22"
@@ -52,6 +56,10 @@
     "cursor",
     "opencode",
     "design-system",
-    "landing-page"
+    "design",
+    "ui",
+    "ui-components",
+    "landing-page",
+    "cli"
   ]
 }

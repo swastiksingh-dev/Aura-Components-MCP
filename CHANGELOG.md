@@ -11,15 +11,16 @@ See `docs/v2/PROGRESS.md` for the local release-preparation verification record.
 
 - Design Contract planning, curated provenance-linked research cards, motion
   planning and evidence, and bounded responsive viewport audits.
-- Original v2 banner/logo artwork, package-facing v2 documentation, and a
-  self-contained HTML launch-film draft kept outside Git tracking.
+- A README launch banner (`assets/banner.png`) and a 12-second typographic
+  teaser clip (`assets/launch.mp4`), plus package-facing v2 documentation.
 
 ### Changed
 
 - Removed the five `aura_inspo_*` mapper tools; use catalogue/reference search,
   `aura_diff`, and `aura_scaffold_page` instead.
-- The v2 npm package includes `docs/v2`, architecture documentation, and brand
-  artwork. It remains zero-runtime-dependency and requires Node >=22.
+- The v2 npm package includes `docs/v2`, architecture documentation, and the
+  README banner. It remains zero-runtime-dependency and requires Node >=22. The
+  teaser clip is linked from the README but is not shipped in the tarball.
 
 ## [Unreleased] — v2 foundation (Session 1)
 
