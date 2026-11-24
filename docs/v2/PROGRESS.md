@@ -148,6 +148,7 @@ Maintainer reviews the unstaged Session 5 diff and decides whether/when to assig
 - `package.json` is now locally set to `2.0.0`; npm `latest` remains the previously checked `1.7.3`. This is a local candidate, not a published release. No tag, commit, push, or publish was made.
 - Removed the five root `.opencode/agents/` paths from Git's index as requested while preserving those local files; made `.tmp/` and `tmp/` ignore rules explicit. The separate pre-existing deletions under `.aura-components version 2.0/` remain untouched.
 - Added, then removed at the maintainer's request, `.tmp/launch-video/index.html`: an editable 30-second typographic HTML preview with timed copy, pause/restart controls, and reduced-motion handling. It was ignored by Git and was never an MP4, product recording, audio mix, or synchronized subtitle export.
+- Added `assets/banner.png` as the single launch banner, wired it into the README H1, and allowlisted it in `package.json`. `assets/social-preview.png` was requested for deletion but was already absent. The README received a final structure and contents pass.
 - Updated [`LAUNCH_HANDOFF.md`](./LAUNCH_HANDOFF.md) to distinguish this HTML draft from a real-product demo and from an exported video.
 
 ### Verification
@@ -184,5 +185,5 @@ removed, pending a replacement banner.
 - **Publication status: NO-GO for publishing, GO as a local release candidate.** Version 2.0.0 passes build, tests, live verification, packaging, clean install, and MCP handshake locally, but it is not on npm or tagged, and the repository has not been pushed.
 - No setup command for unpublished npm `2.0.0` may be presented as currently installable without its adjacent publication caveat.
 - A real client/browser demo recording, an independent fresh-reviewer report, and maintainer release approval remain outstanding.
-- The brand banner files were removed pending replacement. `assets/brand/` no longer exists, `package.json` still allowlists the path, and the README no longer references a banner. Restore the directory and the README image line with the new artwork; `render-banner.ps1` was already absent before this removal.
+- The replacement banner is `assets/banner.png` (1672 x 941), referenced by the README H1 and allowlisted in `package.json`; the earlier `assets/brand/` artwork and its notes are historical.
 - The deleted original progress/session documents remain deleted in the worktree; this continuation is the active record.

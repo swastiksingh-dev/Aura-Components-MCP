@@ -24,7 +24,7 @@ test("release-facing setup claims align with package metadata and browser limits
   assert.equal(pkg.version, "2.0.0");
   assert.equal(pkg.engines.node, ">=22");
   assert.deepEqual(pkg.dependencies || {}, {});
-  assert.ok(pkg.files.includes("docs/v2") && pkg.files.includes("assets/brand"));
+  assert.ok(pkg.files.includes("docs/v2"));
   assert.match(readme, /not a published v2 release/);
   assert.match(setup, /does not require Chrome, ffmpeg, or REA/);
   assert.match(setup, /aura-components-mcp@2\.0\.0/);
@@ -35,10 +35,15 @@ test("release-facing setup claims align with package metadata and browser limits
 test("README links only launch assets that exist and describes live checks honestly", () => {
   const readme = read("../README.md");
   const handoff = read("../docs/v2/LAUNCH_HANDOFF.md");
+  const pkg = JSON.parse(read("../package.json"));
   const images = [...readme.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((match) => match[1]);
   for (const ref of images) {
     if (/^https?:/i.test(ref)) continue;
     assert.ok(existsSync(new URL(`../${ref}`, import.meta.url)), `missing README asset: ${ref}`);
+    assert.ok(
+      pkg.files.some((entry) => ref === entry || ref.startsWith(`${entry}/`)),
+      `package files must include README asset: ${ref}`,
+    );
   }
   assert.match(readme, /npm run verify.*live network checks/s);
   assert.match(handoff, /not a release announcement/);

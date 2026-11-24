@@ -14,21 +14,14 @@ demo of a live tool call.
 
 ## Brand asset
 
-The previous banner files were removed at the maintainer's request and will be
-replaced. When the new banner exists, place it at:
+The launch banner is [`../../assets/banner.png`](../../assets/banner.png)
+(1672 x 941, ~2.96 MB) and is referenced directly under the README H1.
 
-- `assets/brand/aura-components-banner.svg` (editable source)
-- `assets/brand/aura-components-banner.png` (exported raster)
-
-Then restore this line under the README H1:
-
-```markdown
-![Aura Components MCP — design planning, catalogue discovery, motion and responsive evidence](assets/brand/aura-components-banner.png)
-```
-
-`package.json` already allowlists `assets/brand`, so no packaging change is
-needed. Do not add a banner that contains fabricated UI, invented catalogue
-counts, or a “now on npm” claim while 2.0.0 is unpublished.
+- Only this banner is used; no separate social-preview image is tracked.
+- `package.json` allowlists `assets/banner.png`, so the rendered README can
+  resolve it from the npm package.
+- The banner must not contain fabricated UI, invented catalogue counts, or a
+  “now on npm” claim while 2.0.0 is unpublished.
 
 ## Launch-film treatment (not produced)
 

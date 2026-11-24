@@ -1,14 +1,25 @@
 # Aura Components MCP
 
-**Design planning and free-catalogue discovery for MCP clients.** Turn a brief into a clearly attributed design plan, find relevant Aura components and systems, and inspect motion or responsive evidence when a browser is available.
+![Aura Components MCP banner: a black serif Aura wordmark on a cream collage with blue doves, a classical hand, and the labels Plan, Discover, Verify](assets/banner.png)
+
+**Design planning and free-catalogue discovery for MCP clients.**
+
+Turn a brief into a clearly attributed design plan, find relevant Aura components and systems, and inspect motion or responsive evidence when a browser is available.
 
 > Release candidate prepared as **2.0.0** in this branch; this is **not a published v2 release**. npm `latest` was verified as 1.7.3 on 2026-11-23. The v2 package is available from this source checkout or a local tarball; npm install commands below work after 2.0.0 is published. Catalogue counts change upstream and are intentionally not repeated here; query `aura_status` for current counts.
 
 [![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
 
+**Contents:** [What it does](#what-it-does) · [Quick start](#quick-start) · [A first workflow](#a-first-workflow) · [Tool index](#tool-index-35) · [Browser and evidence limits](#browser-and-evidence-limits) · [Safety, privacy & licensing](#safety-privacy--licensing) · [Development & verification](#development--verification)
+
 ## What it does
 
 Aura Components MCP is a zero-runtime-dependency Node.js server using MCP over stdio. It exposes Aura's public catalogue (components, skills, assets, design systems) alongside local design and motion planning, curated research cards, Awwwards reference intelligence, and optional browser-based audits. It is an independent project and is not affiliated with Aura.
+
+- **Plan** — `aura_plan_design` separates your stated facts from labeled recommendations and open questions.
+- **Find** — search the free catalogue, then compare 2–4 candidates with `aura_diff`; unknowns stay unknown.
+- **Build** — retrieve a component, install a skill, or scaffold a page with attribution and licence notes in view.
+- **Verify** — optional Chrome-based responsive and motion evidence, bounded and explicitly not a certification.
 
 The current working tree exposes **35 tools**. The exact names and schemas are generated from source in [`docs/v2/tool-definitions.json`](docs/v2/tool-definitions.json); tool behavior and limits are documented in [`docs/v2/TOOL_CONTRACTS.md`](docs/v2/TOOL_CONTRACTS.md).
 
@@ -21,6 +32,8 @@ Requirements: Node.js 22 or newer. For ordinary catalogue and design planning, n
 ```sh
 npx -y aura-components-mcp@2.0.0
 ```
+
+> **Not on npm yet:** until 2.0.0 is published, `latest` resolves to 1.7.3. Use the source checkout below or install a local tarball.
 
 Or install the executable globally:
 
