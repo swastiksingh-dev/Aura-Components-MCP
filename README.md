@@ -2,15 +2,26 @@
 
 ![Aura Components MCP banner: a black serif Aura wordmark on a cream collage with blue doves, a classical hand, and the labels Plan, Discover, Verify](assets/banner.png)
 
-**Design planning and free-catalogue discovery for MCP clients.**
-
-Turn a brief into a clearly attributed design plan, find the free components and design systems that fit it, and check motion or responsive evidence when a browser is available.
+Turn a design brief into an attributed plan: Aura finds free components and design systems, and checks motion and responsive evidence when a browser is available.
 
 [![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json) [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json) [![MCP](https://img.shields.io/badge/MCP-stdio-blue)](https://modelcontextprotocol.io)
+
+| 35 tools | 0 runtime deps | Node ≥ 22 | MIT |
+| --- | --- | --- | --- |
+| **Star history** | ![Star history of Aura-Components-MCP](assets/star-history.svg) — 13 stars (all visible watch events) |
+| | <a href="assets/star-history.svg">Star history chart</a> — cumulative stars over visible GitHub watch events |
 
 **▶ [Watch the launch video](assets/launch.mp4)** — ~49 s of typographic motion, not a screen recording.
 
 > Release candidate prepared as **2.0.0** in this branch; this is **not a published v2 release**. npm `latest` was verified as 1.7.3 on 2026-11-23. The v2 package is available from this source checkout or a local tarball; npm install commands below work after 2.0.0 is published. Catalogue counts change upstream and are intentionally not repeated here; query `aura_status` for current counts.
+
+## What changed on GitHub
+
+- New v2.0.0 launch: README overhaul with **Why Aura** and a stats table with the ⭐ star-history chart (`assets/star-history.svg`).
+- Added the **Star history** section with the live stars data (13 stars, all visible watch events).
+- Added the "What changed on GitHub" changelog itself.
+- Updated the launch-video line to the real new clip.
+- (Pre-existing: v2.0.0 groundwork — Design Contract planning, research cards, motion evidence, award intelligence, and the five `aura_inspo_*` tools retired.)
 
 **Contents:** [Why Aura](#why-aura) · [What it does](#what-it-does) · [Quick start](#quick-start) · [A first workflow](#a-first-workflow) · [Tool index](#tool-index-35) · [Browser and evidence limits](#browser-and-evidence-limits) · [Safety, privacy & licensing](#safety-privacy--licensing) · [Development & verification](#development--verification)
 
