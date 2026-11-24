@@ -11,7 +11,7 @@ See `docs/v2/PROGRESS.md` for the local release-preparation verification record.
 
 - Design Contract planning, curated provenance-linked research cards, motion
   planning and evidence, and bounded responsive viewport audits.
-- A README launch banner (`assets/banner.png`) and a 12-second typographic
+- A README launch banner (`assets/banner.png`) and a typographic launch video
   teaser clip (`assets/launch.mp4`), plus package-facing v2 documentation.
 
 ### Changed
