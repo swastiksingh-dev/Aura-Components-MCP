@@ -21,7 +21,7 @@ test("release-facing setup claims align with package metadata and browser limits
   const pkg = JSON.parse(read("../package.json"));
   const readme = read("../README.md");
   const setup = read("../SETUP.md");
-  assert.equal(pkg.version, "2.0.0");
+  assert.equal(pkg.version, "2.0.1");
   assert.equal(pkg.engines.node, ">=22");
   assert.deepEqual(pkg.dependencies || {}, {});
   assert.ok(pkg.files.includes("docs/v2"));
