@@ -1,6 +1,6 @@
 {
   "name": "aura-components-mcp",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Zero-dependency stdio MCP server for design planning, Aura's free component catalogue, motion plans, and browser-checked responsive evidence.",
   "type": "module",
   "license": "MIT",
