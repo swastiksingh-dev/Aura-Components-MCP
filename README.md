@@ -8,7 +8,7 @@ Turn a brief into a clearly attributed design plan, find the free components and
 
 [![npm version](https://img.shields.io/npm/v/aura-components-mcp)](https://www.npmjs.com/package/aura-components-mcp) [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json) [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json) [![MCP](https://img.shields.io/badge/MCP-stdio-blue)](https://modelcontextprotocol.io)
 
-**▶ [Watch the 12-second teaser](assets/launch.mp4)** — a typographic motion piece, not a screen recording.
+**▶ [Watch the launch video](assets/launch.mp4)** — ~49 s of typographic motion, not a screen recording.
 
 > Release candidate prepared as **2.0.0** in this branch; this is **not a published v2 release**. npm `latest` was verified as 1.7.3 on 2026-11-23. The v2 package is available from this source checkout or a local tarball; npm install commands below work after 2.0.0 is published. Catalogue counts change upstream and are intentionally not repeated here; query `aura_status` for current counts.
 

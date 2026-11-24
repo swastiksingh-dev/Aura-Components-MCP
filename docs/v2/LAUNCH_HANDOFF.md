@@ -17,11 +17,10 @@ demo of a live tool call.
 The launch banner is [`../../assets/banner.png`](../../assets/banner.png)
 (1672 x 941, ~2.96 MB) and is referenced directly under the README H1.
 
-The teaser clip is [`../../assets/launch.mp4`](../../assets/launch.mp4)
-(1,554 x 870, 12.6 s, H.264 + AAC, ~8.07 MB). It is a typographic motion piece:
-floating tool chips around “every design system.”, a “35 TOOLS. ONE STUDIO
-CALL.” card, and an award-intelligence flow. It is **not** a screen recording of
-a client or a live tool call.
+The launch clip is [`../../assets/launch.mp4`](../../assets/launch.mp4)
+(1,724 x 970, 48.9 s, H.264 + AAC, ~42.1 MB). It is a typographic motion piece:
+floating tool chips, “35 TOOLS. ONE STUDIO CALL.” cards, and award-intelligence
+flow. It is **not** a screen recording of a client or a live tool call.
 
 - The banner is the only image; the old `assets/social-preview.png` was deleted.
 - `package.json` allowlists `assets/banner.png` but deliberately not the clip, so
